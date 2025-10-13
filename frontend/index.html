@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Aspire Executive Solutions</title>
+  </head>
+  <body class="min-h-screen bg-white">
+    <div id="root"></div>
+
+    <!-- GHL Aspire Chat Widget -->
+    <script 
+      src="https://widgets.leadconnectorhq.com/loader.js"  
+      data-resources-url="https://widgets.leadconnectorhq.com/chat-widget/loader.js" 
+      data-widget-id="68de330a0160d118b515f4b6"> 
+    </script>
+
+    <!-- Aspire custom behaviour -->
+    <script>
+      window.addEventListener("load", function () {
+        if (window.localStorage) {
+          const lastVisit = localStorage.getItem("aspire_last_visit");
+          const now = Date.now();
+          const resetTime = 60 * 60 * 1000; // 1 hour in ms (adjust as needed)
+
+          if (!lastVisit || now - lastVisit > resetTime) {
+            // clear chat if more than resetTime has passed
+            localStorage.removeItem("lcw_conversation");
+          }
+
+          // update timestamp
+          localStorage.setItem("aspire_last_visit", now);
+        }
+
+        // auto-open widget after 5s
+        setTimeout(function () {
+          if (window.LC_API && window.LC_API.open_chat_window) {
+            window.LC_API.open_chat_window();
+          }
+        }, 5000);
+      });
+    </script>
+
+    <!-- Your React App -->
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
