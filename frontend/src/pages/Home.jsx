@@ -32,8 +32,7 @@ const ASPIRE_LOGO =
 // Editable bits
 const DEMO_NUMBER = "+61 7 4357 2749"; // replace with live demo AI number
 const BOOKING_URL = "https://calendly.com/scott-owen-aspire/ai-receptionist-demo";
-// If you want to surface a HotDoc link anywhere, you can set it here:
-const HOTDOC_LINK = ""; // e.g. "https://www.hotdoc.com.au/medical-centres/clinic-name/book"
+const HOTDOC_LINK = ""; // optional: e.g. "https://www.hotdoc.com.au/medical-centres/clinic-name/book"
 
 const Home = () => {
   const [formData, setFormData] = useState({
@@ -45,7 +44,7 @@ const Home = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  // LeadConnector chat widget (swap widget-id when you have the dental one)
+  // LeadConnector widget (swap widget-id when you have the dental one)
   useEffect(() => {
     const SCRIPT_ID = "leadconnector-chatbot";
     if (document.getElementById(SCRIPT_ID)) return;
@@ -96,6 +95,9 @@ const Home = () => {
           <nav className="hidden md:flex gap-8 items-center">
             <a href="#how" className="text-slate-700 hover:text-blue-600 font-medium">How it works</a>
             <a href="#services" className="text-slate-700 hover:text-blue-600 font-medium">Capabilities</a>
+            <a href="#advanced" className="text-slate-700 hover:text-blue-600 font-medium">Advanced</a>
+            <a href="#why-us" className="text-slate-700 hover:text-blue-600 font-medium">Why Aspire</a>
+            <a href="#about" className="text-slate-700 hover:text-blue-600 font-medium">Leadership</a>
             <a href="#roi" className="text-slate-700 hover:text-blue-600 font-medium">ROI</a>
             <a href="#faq" className="text-slate-700 hover:text-blue-600 font-medium">FAQ</a>
             <a href="#pricing" className="text-slate-700 hover:text-blue-600 font-medium">Pricing</a>
@@ -131,6 +133,9 @@ const Home = () => {
               {[
                 ["#how", "How it works"],
                 ["#services", "Capabilities"],
+                ["#advanced", "Advanced"],
+                ["#why-us", "Why Aspire"],
+                ["#about", "Leadership"],
                 ["#roi", "ROI"],
                 ["#faq", "FAQ"],
                 ["#pricing", "Pricing"],
@@ -166,7 +171,9 @@ const Home = () => {
             <span className="block text-slate-900">Every call answered.</span>
             <span className="block text-blue-600 mt-1">Every patient booked. 24/7.</span>
           </h1>
-          <p className="text-xl text-slate-700 mb-6 leading-relaxed max-w-3xl mx-auto">
+        </div>
+        <div className="container mx-auto px-6 text-center max-w-3xl">
+          <p className="text-xl text-slate-700 mb-6 leading-relaxed">
             A warm, human-sounding AI receptionist that handles calls, questions, and bookings
             through your existing HotDoc or HealthEngine—no new software, no missed patients.
           </p>
@@ -220,13 +227,15 @@ const Home = () => {
         </div>
       </section>
 
-      {/* Capabilities */}
+      {/* Capabilities (service-focused) */}
       <section id="services" className="py-20 bg-gradient-to-br from-blue-50 to-slate-50">
         <div className="container mx-auto px-6 max-w-6xl">
           <div className="text-center mb-12">
             <h2 className="text-3xl font-bold text-slate-900 mb-2">Capabilities</h2>
             <p className="text-slate-600">What Aspire handles end-to-end.</p>
           </div>
+        </div>
+        <div className="container mx-auto px-6 max-w-6xl">
           <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
             <Feature icon={<Clock />} title="24/7 Coverage" text="Never miss a patient—after-hours and peak times covered." />
             <Feature icon={<DollarSign />} title="Revenue Protection" text="Recover missed calls & reduce FTAs with reminders." />
@@ -240,28 +249,42 @@ const Home = () => {
         </div>
       </section>
 
-      {/* ROI band */}
-      <section id="roi" className="py-12 bg-white">
-        <div className="container mx-auto px-6 max-w-6xl">
-          <div className="rounded-2xl border border-slate-200 bg-gradient-to-r from-blue-600 to-indigo-600 text-white p-6 md:p-8">
-            <div className="grid md:grid-cols-3 gap-6 items-center">
-              <ROIStat value="+20%" label="more new-patient bookings captured" />
-              <ROIStat value="100%" label="of after-hours calls answered" />
-              <ROIStat value="50%" label="less time on repetitive calls" />
-            </div>
-            <p className="mt-4 text-blue-100 text-sm">
-              Results depend on call volume and configuration. We review performance monthly and tune your workflows.
-            </p>
+      {/* Advanced Capabilities (technical assurances) */}
+      <section id="advanced" className="py-16 bg-white">
+        <div className="container mx-auto px-6 text-center max-w-6xl">
+          <h2 className="text-3xl font-bold text-slate-900 mb-2">Advanced Capabilities</h2>
+          <p className="text-slate-600 mb-8">Under the hood: performance, security, and integration patterns.</p>
+          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <Feature
+              icon={<ShieldCheck />}
+              title="Data Compliance"
+              text="Privacy Act 1988 & APP aligned. AU data residency. Encryption in transit & at rest."
+            />
+            <Feature
+              icon={<PlugZap />}
+              title="Seamless Handoff"
+              text="Works with HotDoc/HealthEngine or dedicated clinic calendars. No migration required."
+            />
+            <Feature
+              icon={<MessageSquare />}
+              title="Voice & Chat"
+              text="Natural voice for phone; web chat for FAQs and booking handoffs."
+            />
+            <Feature
+              icon={<FileText />}
+              title="Full Auditing"
+              text="Optional call/chat transcripts and summaries for QA and training."
+            />
           </div>
         </div>
       </section>
 
-      {/* Demo blurb */}
+      {/* Talk to our Virtual Receptionist (demo) */}
       <section id="demo" className="py-16 bg-white">
         <div className="container mx-auto px-6 max-w-6xl grid md:grid-cols-2 gap-10 items-center">
           <div>
             <h2 className="text-3xl font-bold text-slate-900 mb-3">
-              Try the Virtual Dental Receptionist
+              Talk to our Virtual Receptionist
             </h2>
             <p className="text-slate-700">
               Open the chat (bottom-right) or call our demo number to hear the AI in action.
@@ -278,6 +301,74 @@ const Home = () => {
               <MessageSquare className="h-5 w-5" />
               <span>Prefer voice? Call the AI: {DEMO_NUMBER}</span>
             </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Why Aspire */}
+      <section id="why-us" className="py-20 bg-white">
+        <div className="container mx-auto px-6 max-w-5xl">
+          <div className="text-center mb-12">
+            <h2 className="text-3xl font-bold text-slate-900 mb-2">Why Aspire?</h2>
+            <p className="text-slate-600">Operational experience meets intelligent automation.</p>
+          </div>
+          <div className="grid md:grid-cols-2 gap-8">
+            {[
+              ["Clinic-first design", "Built around the way dental teams actually work. No software migration."],
+              ["Local & accountable", "Australian-based, privacy-aligned, with human support."],
+              ["Seamless handoff", "Works with HotDoc/HealthEngine via link handoff or staff confirmation."],
+              ["Scales with you", "Single chair or multi-site group—brand, scripts, and routing per clinic."],
+              ["Executive onboarding", "Clear scripts, emergency protocols, and ROI reporting from day one."],
+              ["Human + AI", "AI handles the volume; your team handles complex or sensitive cases."],
+            ].map(([title, desc], idx) => (
+              <div key={idx} className="flex gap-4 items-start group">
+                <div className="bg-blue-100 w-12 h-12 rounded-lg flex items-center justify-center flex-shrink-0 group-hover:bg-blue-600 transition-colors">
+                  <CheckCircle className="h-6 w-6 text-blue-600 group-hover:text-white transition-colors" />
+                </div>
+                <div>
+                  <h3 className="text-xl font-bold text-slate-900 mb-2">{title}</h3>
+                  <p className="text-slate-600">{desc}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Executive Leadership, Clinic-grade Simplicity */}
+      <section id="about" className="py-16 bg-white">
+        <div className="container mx-auto px-6 max-w-4xl">
+          <div className="text-center mb-10">
+            <h2 className="text-3xl font-bold text-slate-900 mb-4">
+              Executive Leadership, Clinic-grade Simplicity
+            </h2>
+            <div className="w-20 h-1 bg-blue-600 mx-auto" />
+          </div>
+          <p className="text-lg text-slate-700 mb-6">
+            Aspire isn’t another chatbot vendor. We’re operators who’ve delivered complex services
+            and know how to design workflows that fit the way dental teams actually work—calls, FAQs,
+            bookings, changes, emergencies and reminders—without touching your PMS.
+          </p>
+          <p className="text-lg text-slate-700">
+            Our approach is simple: secure, Australian-hosted infrastructure, clear scripts you approve,
+            and a patient journey that feels human from hello to confirmation. You get value fast with
+            zero disruption—and full control over tone, policy and escalation paths.
+          </p>
+        </div>
+      </section>
+
+      {/* ROI band */}
+      <section id="roi" className="py-12 bg-white">
+        <div className="container mx-auto px-6 max-w-6xl">
+          <div className="rounded-2xl border border-slate-200 bg-gradient-to-r from-blue-600 to-indigo-600 text-white p-6 md:p-8">
+            <div className="grid md:grid-cols-3 gap-6 items-center">
+              <ROIStat value="+20%" label="more new-patient bookings captured" />
+              <ROIStat value="100%" label="of after-hours calls answered" />
+              <ROIStat value="50%" label="less time on repetitive calls" />
+            </div>
+            <p className="mt-4 text-blue-100 text-sm">
+              Results depend on call volume and configuration. We review performance monthly and tune your workflows.
+            </p>
           </div>
         </div>
       </section>
@@ -304,6 +395,8 @@ const Home = () => {
       <section id="pricing" className="py-16 bg-gradient-to-br from-blue-50 to-slate-50">
         <div className="container mx-auto px-6 max-w-6xl">
           <h2 className="text-3xl font-bold text-slate-900 mb-2">Simple monthly plans — no lock-ins</h2>
+        </div>
+        <div className="container mx-auto px-6 max-w-6xl">
           <div className="grid md:grid-cols-2 gap-6 mt-8">
             <Package
               name="Standard"
@@ -451,6 +544,9 @@ const Home = () => {
           <div className="flex gap-6">
             <a href="#how" className="hover:text-white">How it works</a>
             <a href="#services" className="hover:text-white">Capabilities</a>
+            <a href="#advanced" className="hover:text-white">Advanced</a>
+            <a href="#why-us" className="hover:text-white">Why Aspire</a>
+            <a href="#about" className="hover:text-white">Leadership</a>
             <a href="#roi" className="hover:text-white">ROI</a>
             <a href="#pricing" className="hover:text-white">Pricing</a>
             <a href="#faq" className="hover:text-white">FAQ</a>
