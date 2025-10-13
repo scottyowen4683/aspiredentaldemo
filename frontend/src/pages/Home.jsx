@@ -167,7 +167,7 @@ const Home = () => {
 </section>
 
 
-    /* 1) Launch Offer (compact banner like council) */
+   
 <section id="offer" className="pt-28 pb-4 bg-white">
   <div className="container mx-auto px-6">
     <div className="rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md px-4 md:px-6 py-3 flex flex-col md:flex-row items-center justify-between">
