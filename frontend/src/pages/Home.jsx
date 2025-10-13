@@ -20,7 +20,7 @@ import {
   Users,
   HelpCircle,
   AlertTriangle,
-  Tooth,
+  Heart,
   Smile,
 } from "lucide-react";
 
