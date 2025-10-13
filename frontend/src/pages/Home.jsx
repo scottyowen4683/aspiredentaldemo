@@ -222,7 +222,7 @@ const Home = () => {
             <p className="text-slate-600">Configured to your fee schedule, services, and protocols.</p>
           </div>
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-            <Workflow title="New Patient Exam & Clean" icon={<Tooth />} text="Collects details, sends HotDoc link or books into dedicated slots. SMS confirmation + reminders." />
+            <Workflow title="New Patient Exam & Clean" icon={<Heart />} text="Collects details, sends HotDoc link or books into dedicated slots. SMS confirmation + reminders." />
             <Workflow title="Emergency Toothache" icon={<AlertTriangle />} text="Triage questions, books emergency buffer, notifies staff instantly (SMS/email)." />
             <Workflow title="Whitening & Cosmetic" icon={<Smile />} text="Explains options, pricing ranges, books consults, follow-ups and pre-visit info." />
             <Workflow title="Orthodontic/Invisalign Consult" icon={<Smile />} text="Qualifying questions, books consult, sends intake form link." />
