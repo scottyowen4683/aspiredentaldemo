@@ -131,6 +131,37 @@ const Home = () => {
           </div>
         )}
       </header>
+{/* 1.5) Hero — Dental */}
+<section id="hero" className="pb-16 bg-gradient-to-br from-slate-50 to-blue-50">
+  <div className="container mx-auto px-6 text-center max-w-5xl">
+    <h1 className="text-5xl md:text-6xl font-bold mb-6 leading-tight">
+      <span className="block text-slate-900">Every call answered.</span>
+      <span className="block text-blue-600 mt-1">Every patient booked. 24/7.</span>
+    </h1>
+    <p className="text-xl text-slate-700 mb-6 leading-relaxed max-w-3xl mx-auto">
+      A warm, human-sounding AI receptionist that handles calls, questions, and bookings
+      through your existing HotDoc or HealthEngine—no new software, no missed patients.
+    </p>
+    <div className="flex gap-4 justify-center flex-wrap">
+      <a
+        href={BOOKING_URL}
+        className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 text-lg rounded-md"
+      >
+        Book a 15-minute demo
+      </a>
+      <a
+        href={`tel:${DEMO_NUMBER.replace(/\s/g, "")}`}
+        className="border-2 border-slate-300 text-slate-800 hover:bg-white px-8 py-3 text-lg rounded-md flex items-center gap-2"
+      >
+        <Phone className="h-5 w-5" />
+        Hear the AI: {DEMO_NUMBER}
+      </a>
+    </div>
+    <p className="mt-4 text-slate-500">
+      Works with HotDoc / HealthEngine. Australian-hosted. Privacy aligned.
+    </p>
+  </div>
+</section>
 
       {/* 1) Launch Offer (top) */}
       <section id="offer" className="pt-28 pb-6 bg-gradient-to-r from-blue-600 to-indigo-600">
