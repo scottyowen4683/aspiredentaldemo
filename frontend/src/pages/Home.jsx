@@ -131,8 +131,8 @@ const Home = () => {
           </div>
         )}
       </header>
-{/* 1.5) Hero — Dental */}
-<section id="hero" className="pb-16 bg-gradient-to-br from-slate-50 to-blue-50">
+/* 1.5) Hero — Dental (single CTA area) */
+<section id="hero" className="pt-10 pb-16 bg-gradient-to-br from-slate-50 to-blue-50">
   <div className="container mx-auto px-6 text-center max-w-5xl">
     <h1 className="text-5xl md:text-6xl font-bold mb-6 leading-tight">
       <span className="block text-slate-900">Every call answered.</span>
@@ -142,6 +142,8 @@ const Home = () => {
       A warm, human-sounding AI receptionist that handles calls, questions, and bookings
       through your existing HotDoc or HealthEngine—no new software, no missed patients.
     </p>
+
+    {/* Single CTA area (kept: demo + hear the AI) */}
     <div className="flex gap-4 justify-center flex-wrap">
       <a
         href={BOOKING_URL}
@@ -157,37 +159,35 @@ const Home = () => {
         Hear the AI: {DEMO_NUMBER}
       </a>
     </div>
+
     <p className="mt-4 text-slate-500">
       Works with HotDoc / HealthEngine. Australian-hosted. Privacy aligned.
     </p>
   </div>
 </section>
 
-      {/* 1) Launch Offer (top) */}
-      <section id="offer" className="pt-28 pb-6 bg-gradient-to-r from-blue-600 to-indigo-600">
-        <div className="container mx-auto px-6">
-          <div className="relative overflow-hidden rounded-2xl text-white shadow-lg px-6 md:px-10 py-6 flex flex-col md:flex-row items-center justify-between">
-            <div>
-              <p className="text-sm uppercase tracking-wider">Launch Offer</p>
-              <p className="text-xl md:text-2xl font-bold mt-1">
-                Setup Fee <span className="line-through opacity-80">$5,000</span> →{" "}
-                <span className="bg-white/20 px-2 py-1 rounded-md">FREE for the first 3 dental clinics</span>
-              </p>
-            </div>
-            <div className="flex gap-3 mt-4 md:mt-0">
-              <a href={BOOKING_URL} className="rounded-xl bg-white text-blue-700 font-semibold px-5 py-3 hover:bg-blue-50">
-                Book a 15-minute demo
-              </a>
-              <a
-                href={`tel:${DEMO_NUMBER.replace(/\s/g, "")}`}
-                className="rounded-xl border-2 border-white/70 text-white font-semibold px-5 py-3 hover:bg-white/10 flex items-center gap-2"
-              >
-                <Phone className="h-5 w-5" /> Hear the AI
-              </a>
-            </div>
-          </div>
-        </div>
-      </section>
+
+    /* 1) Launch Offer (compact banner like council) */
+<section id="offer" className="pt-28 pb-4 bg-white">
+  <div className="container mx-auto px-6">
+    <div className="rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md px-4 md:px-6 py-3 flex flex-col md:flex-row items-center justify-between">
+      <div className="text-center md:text-left">
+        <p className="text-xs uppercase tracking-wider opacity-90">Launch Offer</p>
+        <p className="text-base md:text-lg font-semibold">
+          Setup Fee <span className="line-through opacity-90">$5,000</span> →{" "}
+          <span className="bg-white/20 px-2 py-0.5 rounded-md">FREE for the first 3 dental clinics</span>
+        </p>
+      </div>
+      <a
+        href={BOOKING_URL}
+        className="mt-3 md:mt-0 inline-flex items-center justify-center rounded-lg bg-white text-blue-700 font-semibold px-4 py-2 hover:bg-blue-50"
+      >
+        Claim Offer
+      </a>
+    </div>
+  </div>
+</section>
+
 
       {/* 2) Executive Leadership, Clinic-grade Simplicity */}
       <section id="about" className="py-14 bg-white">
