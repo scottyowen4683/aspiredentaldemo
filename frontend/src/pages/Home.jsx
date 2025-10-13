@@ -49,7 +49,7 @@ const Home = () => {
     s.id = SCRIPT_ID;
     s.src = "https://widgets.leadconnectorhq.com/loader.js";
     s.setAttribute("data-resources-url", "https://widgets.leadconnectorhq.com/chat-widget/loader.js");
-    s.setAttribute("data-widget-id", "68de330a0160d118b515f4b6");
+    s.setAttribute("data-widget-id", "68eca49ec056983a7d3dbdbb");
     document.body.appendChild(s);
   }, []);
 
