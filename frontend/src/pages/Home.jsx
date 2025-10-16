@@ -366,7 +366,7 @@ const Home = () => {
         </div>
       </section>
 
-     /* --- PRIVACY (replace the whole section with this) --- */
+     
 <section id="privacy" className="py-16 bg-gradient-to-br from-blue-50 to-slate-50">
   <div className="container mx-auto px-6 max-w-6xl">
     <h2 className="text-3xl font-bold text-slate-900 mb-2">Privacy — By Design</h2>
