@@ -1,31 +1,19 @@
-import React from "react";
-import { BrowserRouter, Routes, Route, Link } from "react-router-dom";
-import Home from "./pages/Home.jsx";
-import AiReceptionist from "./pages/AiReceptionist.jsx";
-import { Toaster } from "sonner";
+import { useEffect } from "react";
+import { useNavigate } from "react-router-dom";
+import AudienceModal from "./components/AudienceModal.jsx";
 
 export default function App() {
+  const navigate = useNavigate();
+  useEffect(() => {
+    const saved = localStorage.getItem("audience");
+    if (saved === "government") navigate("/government");
+    if (saved === "business") navigate("/business");
+  }, [navigate]);
+
   return (
-    <BrowserRouter>
-      {/* Simple top nav */}
-      <nav style={{ padding: "12px 16px", borderBottom: "1px solid #eee" }}>
-        <Link to="/" style={{ marginRight: 16 }}>Home</Link>
-        <Link to="/ai-receptionist" style={{ marginRight: 16 }}>AI Receptionist</Link>
-        <a
-          href="https://calendly.com/scott-owen-aspire/ai-receptionist-demo"
-          style={{ fontWeight: 700 }}
-        >
-          Book Demo
-        </a>
-      </nav>
-
-      {/* Route handling */}
-      <Routes>
-        <Route path="/" element={<Home />} />
-        <Route path="/ai-receptionist" element={<AiReceptionist />} />
-      </Routes>
-
-      <Toaster position="top-right" richColors />
-    </BrowserRouter>
+    <div className="min-h-screen">
+      <h1 className="text-2xl font-bold p-6">Aspire Executive Solutions</h1>
+      <AudienceModal />
+    </div>
   );
 }
