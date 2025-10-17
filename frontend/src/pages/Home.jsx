@@ -41,13 +41,18 @@ const Home = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  <vapi-widget assistant-id="68aaa63e-4293-4207-8172-16ffaa6c72ec" public-key="6477fd4a-dabd-41f7-a800-ddfa8d1511d2"></vapi-widget>
+ useEffect(() => {
+  const SCRIPT_ID = "vapi-widget-script";
+  if (!document.getElementById(SCRIPT_ID)) {
+    const s = document.createElement("script");
+    s.id = SCRIPT_ID;
+    s.src = "https://unpkg.com/@vapi-ai/client-sdk-react/dist/embed/widget.umd.js";
+    s.async = true;
+    s.type = "text/javascript";
+    document.body.appendChild(s);
+  }
+}, []);
 
-<script
-  src="https://unpkg.com/@vapi-ai/client-sdk-react/dist/embed/widget.umd.js"
-  async
-  type="text/javascript"
-></script>
 
   const handleChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
 
