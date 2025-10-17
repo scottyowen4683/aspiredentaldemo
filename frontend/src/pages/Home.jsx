@@ -41,17 +41,30 @@ const Home = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
- useEffect(() => {
+ // Vapi widget loader (put this near the top of Home component, alongside other effects)
+useEffect(() => {
   const SCRIPT_ID = "vapi-widget-script";
-  if (!document.getElementById(SCRIPT_ID)) {
-    const s = document.createElement("script");
-    s.id = SCRIPT_ID;
-    s.src = "https://unpkg.com/@vapi-ai/client-sdk-react/dist/embed/widget.umd.js";
-    s.async = true;
-    s.type = "text/javascript";
-    document.body.appendChild(s);
-  }
+  // if already loaded, do nothing
+  if (document.getElementById(SCRIPT_ID)) return;
+
+  const s = document.createElement("script");
+  s.id = SCRIPT_ID;
+  s.src = "https://unpkg.com/@vapi-ai/client-sdk-react/dist/embed/widget.umd.js";
+  s.async = true;
+  s.type = "text/javascript";
+  s.onload = () => {
+    // after script registers the custom element, inject the widget once
+    if (!document.querySelector("vapi-widget")) {
+      const el = document.createElement("vapi-widget");
+      el.setAttribute("assistant-id", "68aaa63e-4293-4207-8172-16ffaa6c72ec");
+      el.setAttribute("public-key", "6477fd4a-dabd-41f7-a800-ddfa8d1511d2");
+      // mount to a specific container if present, else to body
+      (document.getElementById("vapi-mount") ?? document.body).appendChild(el);
+    }
+  };
+  document.body.appendChild(s);
 }, []);
+
 
 
   const handleChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -489,6 +502,8 @@ const Home = () => {
           </div>
         </div>
       </section>
+{/* Vapi widget mount point */}
+<div id="vapi-mount" />
 
       {/* FOOTER */}
       <footer className="bg-slate-900 text-slate-400 py-8 border-t border-slate-800">
