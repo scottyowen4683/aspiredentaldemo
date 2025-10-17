@@ -41,17 +41,13 @@ const Home = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  // LeadConnector chat widget (keep as-is)
-  useEffect(() => {
-    const SCRIPT_ID = "leadconnector-chatbot";
-    if (document.getElementById(SCRIPT_ID)) return;
-    const s = document.createElement("script");
-    s.id = SCRIPT_ID;
-    s.src = "https://widgets.leadconnectorhq.com/loader.js";
-    s.setAttribute("data-resources-url", "https://widgets.leadconnectorhq.com/chat-widget/loader.js");
-    s.setAttribute("data-widget-id", "68eca49ec056983a7d3dbdbb");
-    document.body.appendChild(s);
-  }, []);
+  <vapi-widget assistant-id="68aaa63e-4293-4207-8172-16ffaa6c72ec" public-key="6477fd4a-dabd-41f7-a800-ddfa8d1511d2"></vapi-widget>
+
+<script
+  src="https://unpkg.com/@vapi-ai/client-sdk-react/dist/embed/widget.umd.js"
+  async
+  type="text/javascript"
+></script>
 
   const handleChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
 
