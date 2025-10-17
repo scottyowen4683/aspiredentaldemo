@@ -1,12 +1,11 @@
 [build]
 base = "frontend"
-command = "npm ci && npm run build"
+command = "npm install --no-audit --no-fund && npm run build"
 publish = "dist"
 
 [build.environment]
-NODE_VERSION = "18"
+NODE_VERSION = "20"
 
-# SPA routing so /government and /business work on reload
 [[redirects]]
 from = "/*"
 to = "/index.html"
