@@ -1,0 +1,13 @@
+import VapiWidget from "../components/VapiWidget.jsx";
+
+export default function Government() {
+  return (
+    <div className="min-h-screen p-6">
+      <h1 className="text-2xl font-bold mb-2">Government Solutions</h1>
+      <p className="text-gray-700 mb-4">
+        AI for councils: customer service, knowledge bases, and workflow automation.
+      </p>
+      <VapiWidget assistantId={import.meta.env.VITE_VAPI_ASSISTANT_ID_GOV} />
+    </div>
+  );
+}
