@@ -81,10 +81,11 @@ export default function Business() {
 
   return (
     <div className="min-h-screen">
-      {/* Header */}
-      {/* Header */}
+     
+     {/* Header */}
 <header className="fixed top-0 w-full bg-white/95 backdrop-blur-sm border-b border-slate-200 z-50">
   <div className="container mx-auto px-6 py-4 flex justify-between items-center">
+    {/* Left: logo + switch */}
     <div className="flex items-center gap-4">
       <img
         src={ASPIRE_LOGO}
@@ -102,6 +103,7 @@ export default function Business() {
       </button>
     </div>
 
+    {/* Desktop nav */}
     <nav className="hidden md:flex gap-8 items-center">
       <a href="#offer" className="text-slate-700 hover:text-blue-600 font-medium">Offer</a>
       <a href="#about" className="text-slate-700 hover:text-blue-600 font-medium">Leadership</a>
@@ -118,57 +120,52 @@ export default function Business() {
       <a href="#contact" className="text-slate-700 hover:text-blue-600 font-medium">Contact</a>
     </nav>
 
-    {/* Mobile */}
+    {/* Mobile toggle */}
     <div className="md:hidden">
       <button
         onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
         className="p-2 text-slate-700 hover:text-blue-600 focus:outline-none"
       >
-        <svg
-          className="h-6 w-6"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          viewBox="0 0 24 24"
-        >
+        <svg className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
         </svg>
       </button>
     </div>
   </div>
+
+  {/* Mobile dropdown */}
+  {mobileMenuOpen && (
+    <div className="md:hidden bg-white border-t border-slate-200 shadow-sm">
+      <div className="flex flex-col px-6 py-4 space-y-4">
+        {[
+          ["#offer", "Offer"],
+          ["#about", "Leadership"],
+          ["#how", "How it works"],
+          ["#smart", "Smart Automations"],
+          ["#why-us", "Why Aspire"],
+          ["#services", "Capabilities"],
+          ["#advanced", "Advanced"],
+          ["#demo", "Demo"],
+          ["#roi", "ROI"],
+          ["#pricing", "Pricing"],
+          ["#privacy", "Privacy"],
+          ["#faq", "FAQ"],
+          ["#contact", "Contact"],
+        ].map(([href, label]) => (
+          <a
+            key={href}
+            href={href}
+            onClick={() => setMobileMenuOpen(false)}
+            className="text-slate-700 hover:text-blue-600 font-medium"
+          >
+            {label}
+          </a>
+        ))}
+      </div>
+    </div>
+  )}
 </header>
 
-        {mobileMenuOpen && (
-          <div className="md:hidden bg-white border-t border-slate-200 shadow-sm">
-            <div className="flex flex-col px-6 py-4 space-y-4">
-              {[
-                ["#offer", "Offer"],
-                ["#about", "Leadership"],
-                ["#how", "How it works"],
-                ["#smart", "Smart Automations"],
-                ["#why-us", "Why Aspire"],
-                ["#services", "Capabilities"],
-                ["#advanced", "Advanced"],
-                ["#demo", "Demo"],
-                ["#roi", "ROI"],
-                ["#pricing", "Pricing"],
-                ["#privacy", "Privacy"],
-                ["#faq", "FAQ"],
-                ["#contact", "Contact"],
-              ].map(([href, label]) => (
-                <a
-                  key={href}
-                  href={href}
-                  onClick={() => setMobileMenuOpen(false)}
-                  className="text-slate-700 hover:text-blue-600 font-medium"
-                >
-                  {label}
-                </a>
-              ))}
-            </div>
-          </div>
-        )}
-      </header>
 
       {/* HERO */}
       <section id="hero" className="pt-28 pb-16 bg-gradient-to-br from-slate-50 to-blue-50">
