@@ -761,4 +761,4 @@ const Package = ({ name, price, features, highlighted }) => (
   </div>
 );
 
-export default Home;
+
