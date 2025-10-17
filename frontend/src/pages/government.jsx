@@ -44,21 +44,7 @@ export default function Government() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  // Chatbot loader (LeadConnector) — as you supplied
-  useEffect(() => {
-    const SCRIPT_ID = "leadconnector-chatbot";
-    if (document.getElementById(SCRIPT_ID)) return; // avoid double-load
 
-    const s = document.createElement("script");
-    s.id = SCRIPT_ID;
-    s.src = "https://widgets.leadconnectorhq.com/loader.js";
-    s.setAttribute(
-      "data-resources-url",
-      "https://widgets.leadconnectorhq.com/chat-widget/loader.js"
-    );
-    s.setAttribute("data-widget-id", "68de330a0160d118b515f4b6");
-    document.body.appendChild(s);
-  }, []);
 
   const handleChange = (e) =>
     setFormData({ ...formData, [e.target.name]: e.target.value });
