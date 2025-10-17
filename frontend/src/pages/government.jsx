@@ -1,16 +1,5 @@
-import VapiWidget from "../components/VapiWidget.jsx";
+// frontend/src/pages/government.jsx
 
-export default function Government() {
-  return (
-    <div className="min-h-screen p-6">
-      <h1 className="text-2xl font-bold mb-2">Government Solutions</h1>
-      <p className="text-gray-700 mb-4">
-        AI for councils: customer service, knowledge bases, and workflow automation.
-      </p>
-      <VapiWidget assistantId={import.meta.env.VITE_VAPI_ASSISTANT_ID_GOV} />
-    </div>
-  );
-}
 import React, { useEffect, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
@@ -29,6 +18,7 @@ import {
   MessageSquare,
   FileText,
 } from "lucide-react";
+import VapiWidget from "../components/VapiWidget.jsx";
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -44,7 +34,7 @@ const DEMO_NUMBER = "+61 7 4357 2749"; // replace with live demo AI number
 const BOOKING_URL =
   "https://calendly.com/scott-owen-aspire/ai-receptionist-demo";
 
-const Home = () => {
+export default function Government() {
   const [formData, setFormData] = useState({
     name: "",
     email: "",
@@ -319,7 +309,7 @@ const Home = () => {
         </div>
       </section>
 
-      {/* Services (the 4-card grid you had) */}
+      {/* Services */}
       <section id="services" className="py-20 bg-gradient-to-br from-blue-50 to-slate-50">
         <div className="container mx-auto px-6 max-w-6xl">
           <div className="text-center mb-16">
@@ -353,7 +343,7 @@ const Home = () => {
         </div>
       </section>
 
-      {/* Why Us (restored) */}
+      {/* Why Us */}
       <section id="why-us" className="py-20 bg-white">
         <div className="container mx-auto px-6 max-w-5xl">
           <div className="text-center mb-16">
@@ -403,7 +393,7 @@ const Home = () => {
         </div>
       </section>
 
-      {/* Advanced Capabilities (kept, with your edits) */}
+      {/* Advanced Capabilities */}
       <section id="features" className="py-16 bg-gradient-to-br from-blue-50 to-slate-50">
         <div className="container mx-auto px-6 text-center max-w-6xl">
           <h2 className="text-4xl font-bold text-slate-900 mb-4">Advanced Capabilities</h2>
@@ -432,7 +422,7 @@ const Home = () => {
         </div>
       </section>
 
-      {/* Chatbot section (copy only – widget already loaded) */}
+      {/* Chatbot section */}
       <section id="demo" className="py-16 bg-white">
         <div className="container mx-auto px-6 max-w-6xl grid md:grid-cols-2 gap-10 items-center">
           <div>
@@ -462,17 +452,17 @@ const Home = () => {
           <h2 className="text-3xl font-bold text-slate-900 mb-2">
             Privacy, Security & Compliance
           </h2>
-          <div className="mt-8 grid md:grid-cols-3 gap-6">
-            <Card title="Privacy Act 1988 (Cth)">
-              Aligned with APPs. Minimal collection, auditable handling.
-            </Card>
-            <Card title="Australian Data Residency">
-              All call data stored securely in Australia.
-            </Card>
-            <Card title="Security & SLAs">
-              TLS 1.2+ encryption, RBAC, SLA-backed uptime & support.
-            </Card>
-          </div>
+        </div>
+        <div className="container mx-auto px-6 max-w-6xl mt-8 grid md:grid-cols-3 gap-6">
+          <Card title="Privacy Act 1988 (Cth)">
+            Aligned with APPs. Minimal collection, auditable handling.
+          </Card>
+          <Card title="Australian Data Residency">
+            All call data stored securely in Australia.
+          </Card>
+          <Card title="Security & SLAs">
+            TLS 1.2+ encryption, RBAC, SLA-backed uptime & support.
+          </Card>
         </div>
       </section>
 
@@ -542,119 +532,119 @@ const Home = () => {
         </div>
       </section>
 
-    {/* Contact */}
-<section
-  id="contact"
-  className="py-20 bg-gradient-to-br from-slate-900 to-blue-900 text-white"
->
-  <div className="container mx-auto px-6 max-w-6xl">
-    <div className="text-center mb-12">
-      <h2 className="text-4xl font-bold mb-4">
-        Ready to Transform Customer Service?
-      </h2>
-      <p className="text-xl text-blue-100">
-        Simpler. Faster. Better. Let AI do the routine while your staff
-        focus on what matters.
-      </p>
-    </div>
-    <div className="grid md:grid-cols-2 gap-12">
-      {/* Contact Info */}
-      <div>
-        <h3 className="text-2xl font-bold mb-6">Contact Information</h3>
-        <div className="space-y-6">
-          <div className="flex items-start gap-4">
-            <div className="bg-blue-600 w-12 h-12 rounded-lg flex items-center justify-center flex-shrink-0">
-              <Mail className="h-6 w-6" />
-            </div>
-            <div>
-              <p className="font-semibold mb-1">Email Us</p>
-              <a
-                href="mailto:scott@aspireexecutive.com.au"
-                className="text-blue-200 hover:text-white transition-colors"
-              >
-                scott@aspireexecutive.com.au
-              </a>
-            </div>
+      {/* Contact */}
+      <section
+        id="contact"
+        className="py-20 bg-gradient-to-br from-slate-900 to-blue-900 text-white"
+      >
+        <div className="container mx-auto px-6 max-w-6xl">
+          <div className="text-center mb-12">
+            <h2 className="text-4xl font-bold mb-4">
+              Ready to Transform Customer Service?
+            </h2>
+            <p className="text-xl text-blue-100">
+              Simpler. Faster. Better. Let AI do the routine while your staff
+              focus on what matters.
+            </p>
           </div>
-          <div className="flex items-start gap-4">
-            <div className="bg-blue-600 w-12 h-12 rounded-lg flex items-center justify-center flex-shrink-0">
-              <MapPin className="h-6 w-6" />
-            </div>
+          <div className="grid md:grid-cols-2 gap-12">
+            {/* Contact Info */}
             <div>
-              <p className="font-semibold mb-1">Location</p>
-              <p className="text-blue-200">Australia</p>
+              <h3 className="text-2xl font-bold mb-6">Contact Information</h3>
+              <div className="space-y-6">
+                <div className="flex items-start gap-4">
+                  <div className="bg-blue-600 w-12 h-12 rounded-lg flex items-center justify-center flex-shrink-0">
+                    <Mail className="h-6 w-6" />
+                  </div>
+                  <div>
+                    <p className="font-semibold mb-1">Email Us</p>
+                    <a
+                      href="mailto:scott@aspireexecutive.com.au"
+                      className="text-blue-200 hover:text-white transition-colors"
+                    >
+                      scott@aspireexecutive.com.au
+                    </a>
+                  </div>
+                </div>
+                <div className="flex items-start gap-4">
+                  <div className="bg-blue-600 w-12 h-12 rounded-lg flex items-center justify-center flex-shrink-0">
+                    <MapPin className="h-6 w-6" />
+                  </div>
+                  <div>
+                    <p className="font-semibold mb-1">Location</p>
+                    <p className="text-blue-200">Australia</p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-4">
+                  <div className="bg-blue-600 w-12 h-12 rounded-lg flex items-center justify-center flex-shrink-0">
+                    <ExternalLink className="h-6 w-6" />
+                  </div>
+                  <div>
+                    <p className="font-semibold mb-1">Executive Search Services</p>
+                    <a
+                      href="https://aspireexecutive.com.au"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-200 hover:text-white transition-colors"
+                    >
+                      aspireexecutive.com.au
+                    </a>
+                  </div>
+                </div>
+              </div>
             </div>
-          </div>
-          <div className="flex items-start gap-4">
-            <div className="bg-blue-600 w-12 h-12 rounded-lg flex items-center justify-center flex-shrink-0">
-              <ExternalLink className="h-6 w-6" />
-            </div>
+
+            {/* Contact Form */}
             <div>
-              <p className="font-semibold mb-1">Executive Search Services</p>
-              <a
-                href="https://aspireexecutive.com.au"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-blue-200 hover:text-white transition-colors"
-              >
-                aspireexecutive.com.au
-              </a>
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <input
+                  name="name"
+                  placeholder="Your Name"
+                  value={formData.name}
+                  onChange={handleChange}
+                  required
+                  className="w-full bg-white/10 border border-white/20 rounded-md px-3 py-2 text-white placeholder:text-blue-200"
+                />
+                <input
+                  name="email"
+                  type="email"
+                  placeholder="Your Email"
+                  value={formData.email}
+                  onChange={handleChange}
+                  required
+                  className="w-full bg-white/10 border border-white/20 rounded-md px-3 py-2 text-white placeholder:text-blue-200"
+                />
+                <input
+                  name="phone"
+                  type="tel"
+                  placeholder="Phone Number"
+                  value={formData.phone}
+                  onChange={handleChange}
+                  className="w-full bg-white/10 border border-white/20 rounded-md px-3 py-2 text-white placeholder:text-blue-200"
+                />
+                <textarea
+                  name="message"
+                  placeholder="Tell us about your needs..."
+                  value={formData.message}
+                  onChange={handleChange}
+                  required
+                  rows={4}
+                  className="w-full bg-white/10 border border-white/20 rounded-md px-3 py-2 text-white placeholder:text-blue-200"
+                />
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="w-full bg-blue-600 hover:bg-blue-700 text-white rounded-md px-4 py-3 font-medium"
+                >
+                  {isSubmitting ? "Sending..." : "Send Message"}
+                </button>
+              </form>
             </div>
           </div>
         </div>
-      </div>
+      </section>
 
-      {/* Contact Form */}
-      <div>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <input
-            name="name"
-            placeholder="Your Name"
-            value={formData.name}
-            onChange={handleChange}
-            required
-            className="w-full bg-white/10 border border-white/20 rounded-md px-3 py-2 text-white placeholder:text-blue-200"
-          />
-          <input
-            name="email"
-            type="email"
-            placeholder="Your Email"
-            value={formData.email}
-            onChange={handleChange}
-            required
-            className="w-full bg-white/10 border border-white/20 rounded-md px-3 py-2 text-white placeholder:text-blue-200"
-          />
-          <input
-            name="phone"
-            type="tel"
-            placeholder="Phone Number"
-            value={formData.phone}
-            onChange={handleChange}
-            className="w-full bg-white/10 border border-white/20 rounded-md px-3 py-2 text-white placeholder:text-blue-200"
-          />
-          <textarea
-            name="message"
-            placeholder="Tell us about your needs..."
-            value={formData.message}
-            onChange={handleChange}
-            required
-            rows={4}
-            className="w-full bg-white/10 border border-white/20 rounded-md px-3 py-2 text-white placeholder:text-blue-200"
-          />
-          <button
-            type="submit"
-            disabled={isSubmitting}
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white rounded-md px-4 py-3 font-medium"
-          >
-            {isSubmitting ? "Sending..." : "Send Message"}
-          </button>
-        </form>
-      </div>
-    </div>
-  </div>
-</section>
-
-      {/* Footer (logo kept transparent — no invert) */}
+      {/* Footer */}
       <footer className="bg-slate-900 text-slate-400 py-8 border-t border-slate-800">
         <div className="container mx-auto px-6 flex flex-col md:flex-row justify-between items-center gap-4">
           <div className="flex items-center gap-3">
@@ -707,9 +697,12 @@ const Home = () => {
           </div>
         </div>
       </footer>
+
+      {/* Mount the Government Vapi bot once per page */}
+      <VapiWidget assistantId={import.meta.env.VITE_VAPI_ASSISTANT_ID_GOV} />
     </div>
   );
-};
+}
 
 /* Helper components */
 const Feature = ({ icon, title, text }) => (
@@ -749,16 +742,9 @@ const Package = ({ name, price, features, highlighted }) => (
     </ul>
     <a
       href="#contact"
-      className={
-        "mt-6 inline-block rounded-xl px-4 py-2 text-white font-semibold " +
-        (highlighted ? "bg-blue-600 hover:bg-blue-700" : "bg-blue-600 hover:bg-blue-700")
-      }
+      className="mt-6 inline-block rounded-xl px-4 py-2 text-white font-semibold bg-blue-600 hover:bg-blue-700"
     >
       Contact Us Now
     </a>
-<VapiWidget assistantId={import.meta.env.VITE_VAPI_ASSISTANT_ID_GOV} />
-
   </div>
 );
-
-
