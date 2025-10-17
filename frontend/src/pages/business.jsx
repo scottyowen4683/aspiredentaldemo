@@ -82,40 +82,62 @@ export default function Business() {
   return (
     <div className="min-h-screen">
       {/* Header */}
-      <header className="fixed top-0 w-full bg-white/95 backdrop-blur-sm border-b border-slate-200 z-50">
-        <div className="container mx-auto px-6 py-4 flex justify-between items-center">
-          <img
-            src={ASPIRE_LOGO}
-            alt="Aspire Executive Solutions"
-            className="h-12 w-auto"
-          />
-          <nav className="hidden md:flex gap-8 items-center">
-            <a href="#offer" className="text-slate-700 hover:text-blue-600 font-medium">Offer</a>
-            <a href="#about" className="text-slate-700 hover:text-blue-600 font-medium">Leadership</a>
-            <a href="#how" className="text-slate-700 hover:text-blue-600 font-medium">How it works</a>
-            <a href="#smart" className="text-slate-700 hover:text-blue-600 font-medium">Smart Automations</a>
-            <a href="#why-us" className="text-slate-700 hover:text-blue-600 font-medium">Why Aspire</a>
-            <a href="#services" className="text-slate-700 hover:text-blue-600 font-medium">Capabilities</a>
-            <a href="#advanced" className="text-slate-700 hover:text-blue-600 font-medium">Advanced</a>
-            <a href="#demo" className="text-slate-700 hover:text-blue-600 font-medium">Demo</a>
-            <a href="#roi" className="text-slate-700 hover:text-blue-600 font-medium">ROI</a>
-            <a href="#pricing" className="text-slate-700 hover:text-blue-600 font-medium">Pricing</a>
-            <a href="#privacy" className="text-slate-700 hover:text-blue-600 font-medium">Privacy</a>
-            <a href="#faq" className="text-slate-700 hover:text-blue-600 font-medium">FAQ</a>
-            <a href="#contact" className="text-slate-700 hover:text-blue-600 font-medium">Contact</a>
-          </nav>
-          {/* Mobile */}
-          <div className="md:hidden">
-            <button
-              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              className="p-2 text-slate-700 hover:text-blue-600 focus:outline-none"
-            >
-              <svg className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
-              </svg>
-            </button>
-          </div>
-        </div>
+      {/* Header */}
+<header className="fixed top-0 w-full bg-white/95 backdrop-blur-sm border-b border-slate-200 z-50">
+  <div className="container mx-auto px-6 py-4 flex justify-between items-center">
+    <div className="flex items-center gap-4">
+      <img
+        src={ASPIRE_LOGO}
+        alt="Aspire Executive Solutions"
+        className="h-12 w-auto"
+      />
+      <button
+        onClick={() => {
+          localStorage.removeItem("audience");
+          window.location.href = "/";
+        }}
+        className="text-sm text-slate-600 hover:text-blue-600"
+      >
+        Switch audience
+      </button>
+    </div>
+
+    <nav className="hidden md:flex gap-8 items-center">
+      <a href="#offer" className="text-slate-700 hover:text-blue-600 font-medium">Offer</a>
+      <a href="#about" className="text-slate-700 hover:text-blue-600 font-medium">Leadership</a>
+      <a href="#how" className="text-slate-700 hover:text-blue-600 font-medium">How it works</a>
+      <a href="#smart" className="text-slate-700 hover:text-blue-600 font-medium">Smart Automations</a>
+      <a href="#why-us" className="text-slate-700 hover:text-blue-600 font-medium">Why Aspire</a>
+      <a href="#services" className="text-slate-700 hover:text-blue-600 font-medium">Capabilities</a>
+      <a href="#advanced" className="text-slate-700 hover:text-blue-600 font-medium">Advanced</a>
+      <a href="#demo" className="text-slate-700 hover:text-blue-600 font-medium">Demo</a>
+      <a href="#roi" className="text-slate-700 hover:text-blue-600 font-medium">ROI</a>
+      <a href="#pricing" className="text-slate-700 hover:text-blue-600 font-medium">Pricing</a>
+      <a href="#privacy" className="text-slate-700 hover:text-blue-600 font-medium">Privacy</a>
+      <a href="#faq" className="text-slate-700 hover:text-blue-600 font-medium">FAQ</a>
+      <a href="#contact" className="text-slate-700 hover:text-blue-600 font-medium">Contact</a>
+    </nav>
+
+    {/* Mobile */}
+    <div className="md:hidden">
+      <button
+        onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+        className="p-2 text-slate-700 hover:text-blue-600 focus:outline-none"
+      >
+        <svg
+          className="h-6 w-6"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          viewBox="0 0 24 24"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+        </svg>
+      </button>
+    </div>
+  </div>
+</header>
+
         {mobileMenuOpen && (
           <div className="md:hidden bg-white border-t border-slate-200 shadow-sm">
             <div className="flex flex-col px-6 py-4 space-y-4">
