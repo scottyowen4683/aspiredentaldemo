@@ -2,8 +2,8 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import App from "./App.jsx";
-import Government from "./pages/Government.jsx";
-import Business from "./pages/Business.jsx";
+import Government from "./pages/government.jsx";
+import Business from "./pages/business.jsx";
 import "./index.css";
 
 const router = createBrowserRouter([
