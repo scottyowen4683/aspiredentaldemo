@@ -75,129 +75,90 @@ export default function Government() {
 
   return (
     <div className="min-h-screen">
-      {/* Header */}
-      <header className="fixed top-0 w-full bg-white/95 backdrop-blur-sm border-b border-slate-200 z-50">
-        <div className="container mx-auto px-6 py-4 flex justify-between items-center">
-          {/* Logo */}
-          <img
-            src={ASPIRE_LOGO}
-            alt="Aspire Executive Solutions"
-            className="h-12 w-auto"
-          />
+     {/* Header */}
+<header className="fixed top-0 w-full bg-white/95 backdrop-blur-sm border-b border-slate-200 z-50">
+  <div className="container mx-auto px-6 py-4 flex justify-between items-center">
+    {/* Left: logo + switch */}
+    <div className="flex items-center gap-4">
+      <img
+        src={ASPIRE_LOGO}
+        alt="Aspire Executive Solutions"
+        className="h-12 w-auto"
+      />
+      <button
+        onClick={() => {
+          localStorage.removeItem("audience");
+          window.location.href = "/";
+        }}
+        className="text-sm text-slate-600 hover:text-blue-600"
+      >
+        Switch audience
+      </button>
+    </div>
 
-          {/* Desktop nav */}
-          <nav className="hidden md:flex gap-8 items-center">
-            <a
-              href="#about"
-              className="text-slate-700 hover:text-blue-600 transition-colors font-medium"
-            >
-              About
-            </a>
-            <a
-              href="#services"
-              className="text-slate-700 hover:text-blue-600 transition-colors font-medium"
-            >
-              Services
-            </a>
-            <a
-              href="#features"
-              className="text-slate-700 hover:text-blue-600 transition-colors font-medium"
-            >
-              Solutions
-            </a>
-            <a
-              href="#compliance"
-              className="text-slate-700 hover:text-blue-600 transition-colors font-medium"
-            >
-              Compliance
-            </a>
-            <a
-              href="#use-cases"
-              className="text-slate-700 hover:text-blue-600 transition-colors font-medium"
-            >
-              Use Cases
-            </a>
-            <a
-              href="#pricing"
-              className="text-slate-700 hover:text-blue-600 transition-colors font-medium"
-            >
-              Pricing
-            </a>
-            <a
-              href="https://aspireexecutive.com.au"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-slate-700 hover:text-blue-600 transition-colors font-medium flex items-center gap-1"
-            >
-              Executive Search <ExternalLink className="h-3 w-3" />
-            </a>
-            <a href="#contact">
-              <button className="bg-blue-600 hover:bg-blue-700 text-white rounded-md px-4 py-2">
-                Contact Us
-              </button>
-            </a>
-          </nav>
+    {/* Desktop nav */}
+    <nav className="hidden md:flex gap-8 items-center">
+      <a href="#offer" className="text-slate-700 hover:text-blue-600 font-medium">Offer</a>
+      <a href="#about" className="text-slate-700 hover:text-blue-600 font-medium">Leadership</a>
+      <a href="#how" className="text-slate-700 hover:text-blue-600 font-medium">How it works</a>
+      <a href="#smart" className="text-slate-700 hover:text-blue-600 font-medium">Smart Automations</a>
+      <a href="#why-us" className="text-slate-700 hover:text-blue-600 font-medium">Why Aspire</a>
+      <a href="#services" className="text-slate-700 hover:text-blue-600 font-medium">Capabilities</a>
+      <a href="#advanced" className="text-slate-700 hover:text-blue-600 font-medium">Advanced</a>
+      <a href="#demo" className="text-slate-700 hover:text-blue-600 font-medium">Demo</a>
+      <a href="#roi" className="text-slate-700 hover:text-blue-600 font-medium">ROI</a>
+      <a href="#pricing" className="text-slate-700 hover:text-blue-600 font-medium">Pricing</a>
+      <a href="#privacy" className="text-slate-700 hover:text-blue-600 font-medium">Privacy</a>
+      <a href="#faq" className="text-slate-700 hover:text-blue-600 font-medium">FAQ</a>
+      <a href="#contact" className="text-slate-700 hover:text-blue-600 font-medium">Contact</a>
+    </nav>
 
-          {/* Mobile hamburger */}
-          <div className="md:hidden">
-            <button
-              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              className="p-2 text-slate-700 hover:text-blue-600 focus:outline-none"
-            >
-              <svg
-                className="h-6 w-6"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                viewBox="0 0 24 24"
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
-              </svg>
-            </button>
-          </div>
-        </div>
+    {/* Mobile toggle */}
+    <div className="md:hidden">
+      <button
+        onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+        className="p-2 text-slate-700 hover:text-blue-600 focus:outline-none"
+      >
+        <svg className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+        </svg>
+      </button>
+    </div>
+  </div>
 
-        {/* Mobile dropdown menu */}
-        {mobileMenuOpen && (
-          <div className="md:hidden bg-white border-t border-slate-200 shadow-sm">
-            <div className="flex flex-col px-6 py-4 space-y-4">
-              {[
-                ["#about", "About"],
-                ["#services", "Services"],
-                ["#features", "Solutions"],
-                ["#compliance", "Compliance"],
-                ["#use-cases", "Use Cases"],
-                ["#pricing", "Pricing"],
-              ].map(([href, label]) => (
-                <a
-                  key={href}
-                  href={href}
-                  onClick={() => setMobileMenuOpen(false)}
-                  className="text-slate-700 hover:text-blue-600 font-medium"
-                >
-                  {label}
-                </a>
-              ))}
-              <a
-                href="https://aspireexecutive.com.au"
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={() => setMobileMenuOpen(false)}
-                className="text-slate-700 hover:text-blue-600 font-medium"
-              >
-                Executive Search
-              </a>
-              <a
-                href="#contact"
-                onClick={() => setMobileMenuOpen(false)}
-                className="bg-blue-600 hover:bg-blue-700 text-white rounded-md px-4 py-2 text-center"
-              >
-                Contact Us
-              </a>
-            </div>
-          </div>
-        )}
-      </header>
+  {/* Mobile dropdown */}
+  {mobileMenuOpen && (
+    <div className="md:hidden bg-white border-t border-slate-200 shadow-sm">
+      <div className="flex flex-col px-6 py-4 space-y-4">
+        {[
+          ["#offer", "Offer"],
+          ["#about", "Leadership"],
+          ["#how", "How it works"],
+          ["#smart", "Smart Automations"],
+          ["#why-us", "Why Aspire"],
+          ["#services", "Capabilities"],
+          ["#advanced", "Advanced"],
+          ["#demo", "Demo"],
+          ["#roi", "ROI"],
+          ["#pricing", "Pricing"],
+          ["#privacy", "Privacy"],
+          ["#faq", "FAQ"],
+          ["#contact", "Contact"],
+        ].map(([href, label]) => (
+          <a
+            key={href}
+            href={href}
+            onClick={() => setMobileMenuOpen(false)}
+            className="text-slate-700 hover:text-blue-600 font-medium"
+          >
+            {label}
+          </a>
+        ))}
+      </div>
+    </div>
+  )}
+</header>
+
 
       {/* Hero */}
       <section className="pt-32 pb-16 bg-gradient-to-br from-slate-50 to-blue-50">
