@@ -1,78 +1,55 @@
-import { useEffect } from "react";
-
-export default function VapiWidget({ assistantId }) {
-  useEffect(() => {
-    const existing = document.getElementById("vapi-widget-script");
-    if (existing) existing.remove();
-
-    const script = document.createElement("script");
-    script.id = "vapi-widget-script";
-    script.src = "https://cdn.vapi.ai/widget/vapi-widget.min.js";
-    script.async = true;
-    script.onload = () => {
-      // @ts-ignore
-      window.vapiWidget?.init({
-        apiKey: import.meta.env.VITE_VAPI_PUBLIC_KEY,
-        assistant: assistantId,
-        position: "bottom-right",
-      });
-    };
-    document.body.appendChild(script);
-    return () => {
-      try { window.vapiWidget?.destroy(); } catch {}
-    };
-  }, [assistantId]);
-
-  return null;
-}// frontend/src/components/VapiWidget.jsx
+// frontend/src/components/VapiWidget.jsx
 import React, { useEffect, useRef } from "react";
 
 /**
- * Usage:
- * <VapiWidget
- *   assistantId={import.meta.env.VITE_VAPI_ASSISTANT_ID_BUSINESS}
- *   publicKey={import.meta.env.VITE_VAPI_PUBLIC_KEY}
- * />
- *
- * Make sure Netlify has the VITE_ env vars set, then deploy without cache.
+ * VapiWidget
+ * - Loads the Vapi widget script once
+ * - Renders a <vapi-widget> custom element into a container
+ * - Uses props if provided, otherwise falls back to VITE_ env vars
  */
-export default function VapiWidget({ assistantId, publicKey }) {
+export default function VapiWidget({
+  assistantId = import.meta.env.VITE_VAPI_ASSISTANT_ID_BUSINESS,
+  publicKey = import.meta.env.VITE_VAPI_PUBLIC_KEY,
+}) {
   const containerRef = useRef(null);
 
   useEffect(() => {
-    const SCRIPT_ID = "vapi-widget-umd";
+    if (!containerRef.current) return;
 
-    const mountWidget = () => {
+    const SCRIPT_SRC =
+      "https://unpkg.com/@vapi-ai/client-sdk-react/dist/embed/widget.umd.js";
+    const SCRIPT_ATTR = "data-vapi-widget-script";
+
+    const ensureScript = () =>
+      new Promise((resolve) => {
+        // Avoid adding the script multiple times
+        let script = document.querySelector(`script[${SCRIPT_ATTR}]`);
+        if (script) return resolve();
+
+        script = document.createElement("script");
+        script.src = SCRIPT_SRC;
+        script.async = true;
+        script.type = "text/javascript";
+        script.setAttribute(SCRIPT_ATTR, "true");
+        script.addEventListener("load", () => resolve());
+        document.body.appendChild(script);
+      });
+
+    const renderWidget = () => {
       if (!containerRef.current) return;
+      // Clear any previous widget
+      containerRef.current.innerHTML = "";
 
-      // Reuse if already mounted
-      let el = containerRef.current.querySelector("vapi-widget");
-      if (!el) {
-        el = document.createElement("vapi-widget");
-        containerRef.current.appendChild(el);
-      }
-
-      if (assistantId) el.setAttribute("assistant-id", String(assistantId));
-      if (publicKey) el.setAttribute("public-key", String(publicKey));
+      const el = document.createElement("vapi-widget");
+      if (assistantId) el.setAttribute("assistant-id", assistantId);
+      if (publicKey) el.setAttribute("public-key", publicKey);
+      containerRef.current.appendChild(el);
     };
 
-    // load the script once per app
-    let script = document.getElementById(SCRIPT_ID);
-    if (!script) {
-      script = document.createElement("script");
-      script.id = SCRIPT_ID;
-      script.src =
-        "https://unpkg.com/@vapi-ai/client-sdk-react/dist/embed/widget.umd.js";
-      script.async = true;
-      script.type = "text/javascript";
-      script.onload = mountWidget;
-      document.body.appendChild(script);
-    } else {
-      // already loaded (SPA navigation), just mount/update widget
-      mountWidget();
-    }
+    ensureScript().then(renderWidget);
+
+    // No teardown required; the custom element is lightweight.
   }, [assistantId, publicKey]);
 
-  return <div id="vapi-mount" ref={containerRef} />;
+  return <div ref={containerRef} />;
 }
-
