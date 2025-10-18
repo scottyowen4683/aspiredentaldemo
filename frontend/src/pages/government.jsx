@@ -662,11 +662,6 @@ export default function Government() {
     </div>
   );
 }
-<VapiWidget
-  assistantId={import.meta.env.VITE_VAPI_ASSISTANT_ID_GOV}
-  publicKey={import.meta.env.VITE_VAPI_PUBLIC_KEY}
-/>
-
 
 /* Helper components */
 const Feature = ({ icon, title, text }) => (
