@@ -18,10 +18,22 @@ import {
   MessageSquare,
   FileText,
 } from "lucide-react";
+
 import VapiWidget from "../components/VapiWidget.jsx";
 
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL;
-const API = `${BACKEND_URL}/api`;
+export default function Gov() {
+  const GOV_ID = import.meta.env.VITE_VAPI_ASSISTANT_ID_GOV;
+  const PK = import.meta.env.VITE_VAPI_PUBLIC_KEY;
+  console.log("GOV assistantId=", GOV_ID?.slice(0,8) + "…", "publicKey=", PK?.slice(0,8) + "…");
+
+  return (
+    <main>
+      {/* your content */}
+      <VapiWidget assistantId={GOV_ID} publicKey={PK} />
+    </main>
+  );
+}
+
 
 // Assets you provided
 const ASPIRE_LOGO =
