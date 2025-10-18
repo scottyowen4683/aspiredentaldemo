@@ -21,10 +21,16 @@ import {
 
 import VapiWidget from "../components/VapiWidget.jsx";
 
-export default function Gov() {
+// CHANGED: was "export default function Gov() { ... }"
+export function Gov() {
   const GOV_ID = import.meta.env.VITE_VAPI_ASSISTANT_ID_GOV;
   const PK = import.meta.env.VITE_VAPI_PUBLIC_KEY;
-  console.log("GOV assistantId=", GOV_ID?.slice(0,8) + "…", "publicKey=", PK?.slice(0,8) + "…");
+  console.log(
+    "GOV assistantId=",
+    GOV_ID?.slice(0, 8) + "…",
+    "publicKey=",
+    PK?.slice(0, 8) + "…"
+  );
 
   return (
     <main>
