@@ -39,6 +39,31 @@ export function Gov() {
     </main>
   );
 }
+import React from "react";
+import OutboundCTA from "../components/OutboundCTA.jsx";
+import VapiWidget from "../components/VapiWidget.jsx";
+
+export default function Gov() {
+  const WIDGET_ID = import.meta.env.VITE_VAPI_ASSISTANT_ID_GOV; // your existing chatbot (unchanged)
+  const OUTBOUND_ID = import.meta.env.VITE_VAPI_ASSISTANT_ID_OUTBOUND_GOV; // NEW: outbound
+  const PK = import.meta.env.VITE_VAPI_PUBLIC_KEY;
+  const FROM = import.meta.env.VITE_VAPI_FROM_NUMBER;
+
+  return (
+    <main className="container mx-auto max-w-4xl p-4">
+      {/* …existing content… */}
+
+      <OutboundCTA
+        variant="government"
+        assistantId={OUTBOUND_ID}
+        fromNumber={FROM}
+      />
+
+      {/* Keep widget as-is */}
+      <VapiWidget assistantId={WIDGET_ID} publicKey={PK} />
+    </main>
+  );
+}
 
 
 // Assets you provided
