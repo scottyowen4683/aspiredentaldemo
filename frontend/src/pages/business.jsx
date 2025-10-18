@@ -29,26 +29,6 @@ import VapiWidget from "../components/VapiWidget.jsx";
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
-import React from "react";
-import OutboundCTA from "../components/OutboundCTA.jsx";
-
-export default function Business() {
-  const OUTBOUND_ID = import.meta.env.VITE_VAPI_ASSISTANT_ID_OUTBOUND_BIZ; // NEW: outbound
-  const FROM = import.meta.env.VITE_VAPI_FROM_NUMBER;
-
-  return (
-    <main className="container mx-auto max-w-4xl p-4">
-      {/* …existing content… */}
-
-      <OutboundCTA
-        variant="business"
-        assistantId={OUTBOUND_ID}
-        fromNumber={FROM}
-      />
-    </main>
-  );
-}
-
 // Assets
 const ASPIRE_LOGO =
   "https://raw.githubusercontent.com/scottyowen4683/Aspirereception/refs/heads/feature/ai-receptionist/frontend/aspire.png";
@@ -267,6 +247,25 @@ export default function Business() {
           </div>
         </div>
       </section>
+import React from "react";
+import OutboundCTA from "../components/OutboundCTA.jsx";
+
+export default function Business() {
+  const OUTBOUND_ID = import.meta.env.VITE_VAPI_ASSISTANT_ID_OUTBOUND_BIZ; // NEW: outbound
+  const FROM = import.meta.env.VITE_VAPI_FROM_NUMBER;
+
+  return (
+    <main className="container mx-auto max-w-4xl p-4">
+      {/* …existing content… */}
+
+      <OutboundCTA
+        variant="business"
+        assistantId={OUTBOUND_ID}
+        fromNumber={FROM}
+      />
+    </main>
+  );
+}
 
       {/* SMART AUTOMATIONS */}
       <section id="smart" className="py-16 bg-white">
