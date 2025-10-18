@@ -390,6 +390,10 @@ export default function Business() {
           </div>
         </div>
       </section>
+<VapiWidget
+  assistantId={import.meta.env.VITE_VAPI_ASSISTANT_ID_BUSINESS ?? import.meta.env.VITE_VAPI_ASSISTANT_ID_BIZ}
+  publicKey={import.meta.env.VITE_VAPI_PUBLIC_KEY}
+/>
 
       {/* FAQ */}
       <FAQSection />
