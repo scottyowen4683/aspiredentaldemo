@@ -1,13 +1,46 @@
 const VAPI_BASE_URL = "https://api.vapi.ai";
 
+// ---- Simple per-IP 24-hour limiter ----
+const DAY_MS = 24 * 60 * 60 * 1000;
+const MAX_DAILY_CALLS = 3;
+let ipLog = {}; // { ip: { count, ts } }
+
+function limitedToday(ip) {
+  const now = Date.now();
+  const record = ipLog[ip];
+  if (!record || now - record.ts > DAY_MS) {
+    ipLog[ip] = { count: 1, ts: now };
+    return false;
+  }
+  if (record.count >= MAX_DAILY_CALLS) return true;
+  record.count++;
+  ipLog[ip] = record;
+  return false;
+}
+
+// ---- Main handler ----
 exports.handler = async (event) => {
   if (event.httpMethod !== "POST") {
     return { statusCode: 405, body: "Method Not Allowed" };
   }
 
+  const ip =
+    event.headers["x-nf-client-connection-ip"] ||
+    event.headers["x-forwarded-for"] ||
+    "unknown";
+
+  // ✅ daily limit: 3 calls per IP per 24 hours
+  if (limitedToday(ip)) {
+    return {
+      statusCode: 429,
+      body: JSON.stringify({
+        message: "Daily call limit reached. Try again tomorrow.",
+      }),
+    };
+  }
+
   try {
     const { to, assistantId, context } = JSON.parse(event.body || "{}");
-
     if (!to || !assistantId) {
       return { statusCode: 400, body: JSON.stringify({ message: "Missing to/assistantId" }) };
     }
@@ -18,12 +51,15 @@ exports.handler = async (event) => {
     }
 
     if (!/^\+61\d{9}$/.test(to)) {
-      return { statusCode: 400, body: JSON.stringify({ message: "Enter a valid Australian number (e.g. 0412 345 678)" }) };
+      return {
+        statusCode: 400,
+        body: JSON.stringify({ message: "Enter a valid Australian number (e.g. 0412 345 678)" }),
+      };
     }
 
     const payload = {
       assistantId,
-      phoneNumberId,            // Vapi Phone Number **ID**, not E.164
+      phoneNumberId,
       customer: { number: to },
       metadata: { feature: "website-cta-outbound", ...(context || {}) },
     };
