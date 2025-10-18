@@ -26,6 +26,7 @@ import {
   Lock,
 } from "lucide-react";
 import VapiWidget from "../components/VapiWidget.jsx";
+import OutboundCTA from "../components/OutboundCTA.jsx";
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -80,91 +81,89 @@ export default function Business() {
 
   return (
     <div className="min-h-screen">
-     
-     {/* Header */}
-<header className="fixed top-0 w-full bg-white/95 backdrop-blur-sm border-b border-slate-200 z-50">
-  <div className="container mx-auto px-6 py-4 flex justify-between items-center">
-    {/* Left: logo + switch */}
-    <div className="flex items-center gap-4">
-      <img
-        src={ASPIRE_LOGO}
-        alt="Aspire Executive Solutions"
-        className="h-12 w-auto"
-      />
-      <button
-        onClick={() => {
-          localStorage.removeItem("audience");
-          window.location.href = "/";
-        }}
-        className="text-sm text-slate-600 hover:text-blue-600"
-      >
-        Switch audience
-      </button>
-    </div>
+      {/* Header */}
+      <header className="fixed top-0 w-full bg-white/95 backdrop-blur-sm border-b border-slate-200 z-50">
+        <div className="container mx-auto px-6 py-4 flex justify-between items-center">
+          {/* Left: logo + switch */}
+          <div className="flex items-center gap-4">
+            <img
+              src={ASPIRE_LOGO}
+              alt="Aspire Executive Solutions"
+              className="h-12 w-auto"
+            />
+            <button
+              onClick={() => {
+                localStorage.removeItem("audience");
+                window.location.href = "/";
+              }}
+              className="text-sm text-slate-600 hover:text-blue-600"
+            >
+              Switch audience
+            </button>
+          </div>
 
-    {/* Desktop nav */}
-    <nav className="hidden md:flex gap-8 items-center">
-      <a href="#offer" className="text-slate-700 hover:text-blue-600 font-medium">Offer</a>
-      <a href="#about" className="text-slate-700 hover:text-blue-600 font-medium">Leadership</a>
-      <a href="#how" className="text-slate-700 hover:text-blue-600 font-medium">How it works</a>
-      <a href="#smart" className="text-slate-700 hover:text-blue-600 font-medium">Smart Automations</a>
-      <a href="#why-us" className="text-slate-700 hover:text-blue-600 font-medium">Why Aspire</a>
-      <a href="#services" className="text-slate-700 hover:text-blue-600 font-medium">Capabilities</a>
-      <a href="#advanced" className="text-slate-700 hover:text-blue-600 font-medium">Advanced</a>
-      <a href="#demo" className="text-slate-700 hover:text-blue-600 font-medium">Demo</a>
-      <a href="#roi" className="text-slate-700 hover:text-blue-600 font-medium">ROI</a>
-      <a href="#pricing" className="text-slate-700 hover:text-blue-600 font-medium">Pricing</a>
-      <a href="#privacy" className="text-slate-700 hover:text-blue-600 font-medium">Privacy</a>
-      <a href="#faq" className="text-slate-700 hover:text-blue-600 font-medium">FAQ</a>
-      <a href="#contact" className="text-slate-700 hover:text-blue-600 font-medium">Contact</a>
-    </nav>
+          {/* Desktop nav */}
+          <nav className="hidden md:flex gap-8 items-center">
+            <a href="#offer" className="text-slate-700 hover:text-blue-600 font-medium">Offer</a>
+            <a href="#about" className="text-slate-700 hover:text-blue-600 font-medium">Leadership</a>
+            <a href="#how" className="text-slate-700 hover:text-blue-600 font-medium">How it works</a>
+            <a href="#smart" className="text-slate-700 hover:text-blue-600 font-medium">Smart Automations</a>
+            <a href="#why-us" className="text-slate-700 hover:text-blue-600 font-medium">Why Aspire</a>
+            <a href="#services" className="text-slate-700 hover:text-blue-600 font-medium">Capabilities</a>
+            <a href="#advanced" className="text-slate-700 hover:text-blue-600 font-medium">Advanced</a>
+            <a href="#demo" className="text-slate-700 hover:text-blue-600 font-medium">Demo</a>
+            <a href="#roi" className="text-slate-700 hover:text-blue-600 font-medium">ROI</a>
+            <a href="#pricing" className="text-slate-700 hover:text-blue-600 font-medium">Pricing</a>
+            <a href="#privacy" className="text-slate-700 hover:text-blue-600 font-medium">Privacy</a>
+            <a href="#faq" className="text-slate-700 hover:text-blue-600 font-medium">FAQ</a>
+            <a href="#contact" className="text-slate-700 hover:text-blue-600 font-medium">Contact</a>
+          </nav>
 
-    {/* Mobile toggle */}
-    <div className="md:hidden">
-      <button
-        onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-        className="p-2 text-slate-700 hover:text-blue-600 focus:outline-none"
-      >
-        <svg className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
-        </svg>
-      </button>
-    </div>
-  </div>
+          {/* Mobile toggle */}
+          <div className="md:hidden">
+            <button
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              className="p-2 text-slate-700 hover:text-blue-600 focus:outline-none"
+            >
+              <svg className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </button>
+          </div>
+        </div>
 
-  {/* Mobile dropdown */}
-  {mobileMenuOpen && (
-    <div className="md:hidden bg-white border-t border-slate-200 shadow-sm">
-      <div className="flex flex-col px-6 py-4 space-y-4">
-        {[
-          ["#offer", "Offer"],
-          ["#about", "Leadership"],
-          ["#how", "How it works"],
-          ["#smart", "Smart Automations"],
-          ["#why-us", "Why Aspire"],
-          ["#services", "Capabilities"],
-          ["#advanced", "Advanced"],
-          ["#demo", "Demo"],
-          ["#roi", "ROI"],
-          ["#pricing", "Pricing"],
-          ["#privacy", "Privacy"],
-          ["#faq", "FAQ"],
-          ["#contact", "Contact"],
-        ].map(([href, label]) => (
-          <a
-            key={href}
-            href={href}
-            onClick={() => setMobileMenuOpen(false)}
-            className="text-slate-700 hover:text-blue-600 font-medium"
-          >
-            {label}
-          </a>
-        ))}
-      </div>
-    </div>
-  )}
-</header>
-
+        {/* Mobile dropdown */}
+        {mobileMenuOpen && (
+          <div className="md:hidden bg-white border-t border-slate-200 shadow-sm">
+            <div className="flex flex-col px-6 py-4 space-y-4">
+              {[
+                ["#offer", "Offer"],
+                ["#about", "Leadership"],
+                ["#how", "How it works"],
+                ["#smart", "Smart Automations"],
+                ["#why-us", "Why Aspire"],
+                ["#services", "Capabilities"],
+                ["#advanced", "Advanced"],
+                ["#demo", "Demo"],
+                ["#roi", "ROI"],
+                ["#pricing", "Pricing"],
+                ["#privacy", "Privacy"],
+                ["#faq", "FAQ"],
+                ["#contact", "Contact"],
+              ].map(([href, label]) => (
+                <a
+                  key={href}
+                  href={href}
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="text-slate-700 hover:text-blue-600 font-medium"
+                >
+                  {label}
+                </a>
+              ))}
+            </div>
+          </div>
+        )}
+      </header>
 
       {/* HERO */}
       <section id="hero" className="pt-28 pb-16 bg-gradient-to-br from-slate-50 to-blue-50">
@@ -238,7 +237,7 @@ export default function Business() {
       <section id="how" className="py-16 bg-gradient-to-br from-slate-50 to-blue-50">
         <div className="container mx-auto px-6 max-w-6xl text-center">
           <h2 className="text-3xl font-bold text-slate-900 mb-2">How It Works</h2>
-          <p className="text-slate-600 mb-12">Built for clarity, speed, and control — no friction, no wasted time.</p>
+        <p className="text-slate-600 mb-12">Built for clarity, speed, and control — no friction, no wasted time.</p>
           <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
             <Step icon={<Phone />} title="1) AI Answers Instantly" text="Always on — phone, chat, or web, 24/7." />
             <Step icon={<HelpCircle />} title="2) Understands & Routes" text="Smart triage sends each query to the right place." />
@@ -247,25 +246,17 @@ export default function Business() {
           </div>
         </div>
       </section>
-import React from "react";
-import OutboundCTA from "../components/OutboundCTA.jsx";
 
-export default function Business() {
-  const OUTBOUND_ID = import.meta.env.VITE_VAPI_ASSISTANT_ID_OUTBOUND_BIZ; // NEW: outbound
-  const FROM = import.meta.env.VITE_VAPI_FROM_NUMBER;
-
-  return (
-    <main className="container mx-auto max-w-4xl p-4">
-      {/* …existing content… */}
-
-      <OutboundCTA
-        variant="business"
-        assistantId={OUTBOUND_ID}
-        fromNumber={FROM}
-      />
-    </main>
-  );
-}
+      {/* OUTBOUND CTA (business) */}
+      <section className="bg-gray-50">
+        <div className="container mx-auto px-6 py-10">
+          <OutboundCTA
+            variant="business"
+            assistantId={import.meta.env.VITE_VAPI_ASSISTANT_ID_OUTBOUND_BIZ}
+            fromNumber={import.meta.env.VITE_VAPI_FROM_NUMBER}
+          />
+        </div>
+      </section>
 
       {/* SMART AUTOMATIONS */}
       <section id="smart" className="py-16 bg-white">
@@ -408,10 +399,12 @@ export default function Business() {
           </div>
         </div>
       </section>
-<VapiWidget
-  assistantId={import.meta.env.VITE_VAPI_ASSISTANT_ID_BUSINESS ?? import.meta.env.VITE_VAPI_ASSISTANT_ID_BIZ}
-  publicKey={import.meta.env.VITE_VAPI_PUBLIC_KEY}
-/>
+
+      {/* Mount the Business Vapi bot (once) */}
+      <VapiWidget
+        assistantId={import.meta.env.VITE_VAPI_ASSISTANT_ID_BUSINESS ?? import.meta.env.VITE_VAPI_ASSISTANT_ID_BIZ}
+        publicKey={import.meta.env.VITE_VAPI_PUBLIC_KEY}
+      />
 
       {/* FAQ */}
       <FAQSection />
@@ -536,9 +529,6 @@ export default function Business() {
           </div>
         </div>
       </footer>
-
-      {/* Mount the Business Vapi bot once per page */}
-      <VapiWidget assistantId={import.meta.env.VITE_VAPI_ASSISTANT_ID_BIZ} />
     </div>
   );
 }
