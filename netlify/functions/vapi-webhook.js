@@ -1,136 +1,139 @@
 // netlify/functions/vapi-webhook.js
 const crypto = require("crypto");
 
+// ---- ENV ----
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SERVICE_KEY  = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const DISABLE_SIGNATURE_CHECK = process.env.DISABLE_SIGNATURE_CHECK === "1";
-const DEBUG = process.env.DEBUG_LOG === "1";
 const VAPI_WEBHOOK_SECRET = process.env.VAPI_WEBHOOK_SECRET || "";
 const DEFAULT_RUBRIC_ID = process.env.EVAL_DEFAULT_RUBRIC_ID || "43d9b1fe-570f-4c97-abdb-fbbb73ef3d08";
 
-function log(...a){ if (DEBUG) console.log(...a); }
+// ---- UTILS ----
+function log(...a){ try{console.log(...a);}catch{} }
 
 function verifySignature(raw, sig) {
   if (DISABLE_SIGNATURE_CHECK) return true;
+  if (!sig || !VAPI_WEBHOOK_SECRET) return false;
   const hmac = crypto.createHmac("sha256", VAPI_WEBHOOK_SECRET);
   hmac.update(raw, "utf8");
   const digest = `sha256=${hmac.digest("hex")}`;
-  try { return crypto.timingSafeEqual(Buffer.from(digest), Buffer.from(sig||"")); }
+  try { return crypto.timingSafeEqual(Buffer.from(digest), Buffer.from(sig)); }
   catch { return false; }
 }
 
 function mapStatus(s){
-  const m={queued:"created",ringing:"in-progress","in-progress":"in-progress",completed:"ended",ended:"ended"};
+  const m={queued:"created",created:"created",ringing:"in-progress","in-progress":"in-progress",completed:"ended",ended:"ended"};
   return m[String(s||"").toLowerCase()]||"unknown";
 }
 
-async function upsertSession(row){
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/sessions?on_conflict=id`,{
-    method:"POST",
-    headers:{
-      apikey:SERVICE_KEY,
-      Authorization:`Bearer ${SERVICE_KEY}`,
-      "Content-Type":"application/json",
-      Prefer:"resolution=merge-duplicates,return=minimal"
-    },
-    body:JSON.stringify(row)
-  });
-  return res.ok;
-}
-
-// ✅ update or insert into top_questions_30d table
-async function updateTopQuestions(questions) {
-  if (!questions || !questions.length) return;
-  const values = questions.map(q => ({
-    question_text: q,
-    asked_at: new Date().toISOString()
-  }));
-
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/top_questions_30d`, {
+// ---- SUPABASE HELPERS ----
+async function sbUpsertSession(row) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/sessions?on_conflict=id`, {
     method: "POST",
     headers: {
       apikey: SERVICE_KEY,
       Authorization: `Bearer ${SERVICE_KEY}`,
       "Content-Type": "application/json",
-      Prefer: "resolution=ignore-duplicates"
+      Prefer: "resolution=merge-duplicates,return=minimal"
     },
-    body: JSON.stringify(values)
+    body: JSON.stringify(row)
   });
-
-  if (!res.ok) {
-    const text = await res.text();
-    console.error("❌ Failed to insert top questions:", res.status, text);
-  } else {
-    log(`✅ Inserted ${values.length} top questions`);
-  }
+  const txt = await res.text();
+  log("sessions upsert ->", res.status, txt || "(no body)");
+  return res.ok;
 }
 
-exports.handler = async (event)=>{
-  if(event.httpMethod!=="POST") 
-    return {statusCode:200,body:"ok"};
-  const raw = event.isBase64Encoded?Buffer.from(event.body,"base64").toString():event.body;
-  const sig = event.headers["x-vapi-signature"];
-  if(!verifySignature(raw,sig))
-    return {statusCode:401,body:"bad sig"};
-
-  const payload = JSON.parse(raw);
-  const pc = payload.data?.phoneCall || payload.data?.call || payload.message?.phoneCall;
-  const call_id = pc?.id || payload.data?.id;
-  if(!call_id) return {statusCode:200,body:"no call id"};
-
-  const status = mapStatus(pc?.status);
-
-  // ✅ extract top user questions
-  let top_questions = [];
-  if (Array.isArray(pc?.messages)) {
-    top_questions = pc.messages
-      .filter(m => m.role === "user" && typeof m.text === "string")
-      .map(m => m.text)
-      .slice(0, 5);
-  }
-
-  const row = {
-    id: call_id,
-    assistant_id: pc?.assistantId || payload.assistantId,
-    started_at: pc?.createdAt || new Date().toISOString(),
-    ended_at: pc?.endedAt || null,
-    status,
-    direction: pc?.direction || "outbound",
-    from_number: pc?.from?.phoneNumber || null,
-    to_number: pc?.customer?.number || null,
-    last_event_type: payload.event || payload.type || "unknown",
-    top_questions,
-    updated_at: new Date().toISOString(),
-    raw: payload
+async function queueEval(session_id) {
+  const body = {
+    session_id,
+    rubric_id: DEFAULT_RUBRIC_ID,
+    status: "queued",
+    started_at: new Date().toISOString()
   };
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/eval_runs?on_conflict=session_id,rubric_id`, {
+    method: "POST",
+    headers: {
+      apikey: SERVICE_KEY,
+      Authorization: `Bearer ${SERVICE_KEY}`,
+      "Content-Type": "application/json",
+      Prefer: "resolution=merge-duplicates,return=minimal"
+    },
+    body: JSON.stringify(body)
+  });
+  log("eval_runs upsert ->", res.status);
+  return res.ok;
+}
 
-  log("UPSERT session", row);
-  const ok = await upsertSession(row);
-  if(!ok) return {statusCode:500,body:"db fail"};
+// ---- MAIN HANDLER ----
+exports.handler = async (event) => {
+  try {
+    if (event.httpMethod === "GET") {
+      const q = event.queryStringParameters || {};
+      if (q.diag === "write") {
+        const body = {
+          id: crypto.randomUUID(),
+          started_at: new Date(Date.now() - 60_000).toISOString(),
+          ended_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          assistant_id: null,
+          channel: "voice",
+          ip: "127.0.0.1",
+          outcome: "diag-write",
+          summary: "diagnostic insert from webhook",
+        };
+        const ok = await sbUpsertSession(body);
+        return { statusCode: ok ? 200 : 500, body: JSON.stringify({ ok, id: body.id }) };
+      }
+      return { statusCode: 200, body: "webhook alive" };
+    }
 
-  // ✅ also insert into 30-day top questions log
-  await updateTopQuestions(top_questions);
+    if (event.httpMethod !== "POST")
+      return { statusCode: 405, body: "Method Not Allowed" };
 
-  // ✅ queue eval automatically when ended
-  if(status==="ended"){
-    const evalBody = {
-      session_id: call_id,
-      rubric_id: DEFAULT_RUBRIC_ID,
-      status: "queued",
-      started_at: new Date().toISOString()
+    const raw = event.isBase64Encoded
+      ? Buffer.from(event.body || "", "base64").toString("utf8")
+      : (event.body || "");
+    const sig = event.headers["x-vapi-signature"] || event.headers["X-Vapi-Signature"] || "";
+    if (!verifySignature(raw, sig))
+      return { statusCode: 401, body: "bad sig" };
+
+    const payload = JSON.parse(raw);
+    const data = payload?.data || payload;
+    const call = data?.phoneCall || data?.call || payload?.message?.phoneCall || null;
+    const id = call?.id || data?.id || payload?.message?.callId || null;
+    if (!id) return { statusCode: 200, body: "no id" };
+
+    const created = call?.createdAt || data?.createdAt || new Date().toISOString();
+    const ended = call?.endedAt || call?.completedAt || null;
+    const status = mapStatus(call?.status);
+    const ip = call?.metadata?.ip || null;
+
+    const row = {
+      id,
+      assistant_id: call?.assistantId || null,
+      started_at: created,
+      ended_at: ended,
+      updated_at: new Date().toISOString(),
+      channel: "voice",
+      ip,
+      outcome: status,
+      summary: call?.summary || null,
+      hangup_reason: call?.endedReason || null,
+      cost_cents: call?.cost ? Math.round(call.cost * 100) : null,
     };
-    await fetch(`${SUPABASE_URL}/rest/v1/eval_runs`,{
-      method:"POST",
-      headers:{
-        apikey:SERVICE_KEY,
-        Authorization:`Bearer ${SERVICE_KEY}`,
-        "Content-Type":"application/json",
-        Prefer:"resolution=merge-duplicates,return=minimal"
-      },
-      body:JSON.stringify(evalBody)
-    });
-    log("queued eval for", call_id);
-  }
 
-  return {statusCode:200,body:"ok"};
+    log("UPSERT SESSION:", row);
+    const ok = await sbUpsertSession(row);
+    if (!ok) return { statusCode: 500, body: "db fail" };
+
+    // trigger eval only once per completed call
+    if (status === "ended" && ended) {
+      await queueEval(id);
+    }
+
+    return { statusCode: 200, body: "ok" };
+  } catch (err) {
+    console.error("webhook error", err);
+    return { statusCode: 500, body: "server error" };
+  }
 };
