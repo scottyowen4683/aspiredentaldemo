@@ -72,16 +72,18 @@ function toRow(payload) {
 
 // ✅ Safe async function (no top-level await)
 async function supabaseUpsert(row) {
-  // Insert ONLY columns that exist on public.sessions
-  // From your screenshot: provider_session_id, assistant_id, channel, started_at
+  // helper: validate UUID
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+  // Build a sessions row using only columns that exist.
   const sessionRow = {
-    provider_session_id: row.call_id,                                     // text
-    assistant_id: row.assistant_id || "ce4fbbfc-37b9-437c-afed-d812867b4ff7", // uuid in your DB
-    channel: "voice",                                                     // text
-    started_at: row.started_at || new Date().toISOString(),              // timestamptz
+    provider_session_id: row.call_id,                       // text
+    channel: "voice",                                       // text
+    started_at: row.started_at || new Date().toISOString(), // timestamptz
+    // assistant_id only if it's a valid UUID
+    ...(UUID_RE.test(row.assistant_id) ? { assistant_id: row.assistant_id } : {}),
   };
 
-  // Plain insert into sessions (no on_conflict, since provider_session_id may not be unique)
   const res = await fetch(`${SUPABASE_URL}/rest/v1/sessions`, {
     method: "POST",
     headers: {
