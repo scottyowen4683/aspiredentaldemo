@@ -1,6 +1,7 @@
 // netlify/functions/eval-runner.js
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
-const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_SERVICE_ROLE_KEY;
+const SERVICE_KEY =
+  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_SERVICE_ROLE_KEY;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const EVAL_MODEL = process.env.EVAL_MODEL || "gpt-4o-mini";
 const BATCH_LIMIT = parseInt(process.env.EVAL_BATCH_LIMIT || "5", 10);
@@ -40,7 +41,6 @@ async function sbInsert(table, rows) {
   return res.json().catch(() => ({}));
 }
 const eq = (v) => `eq.${v}`;
-const is = (v) => `is.${v}`;
 
 // ---------- OpenAI helper ----------
 async function callOpenAI(system, user) {
@@ -77,7 +77,7 @@ WEIGHTS: ${weightsList}
 CHECKLIST (guidance):
 ${criteria.map(k => `- ${k}: ${checklist?.[k] || ""}`).join("\n")}
 
-AGENT PROMPT / POLICY (if provided, use it to judge adherence):
+AGENT SYSTEM PROMPT / POLICY (snapshot at call time; use for adherence checks):
 ${promptText ? promptText : "(none provided)"}
 
 TRANSCRIPT (chronological):
@@ -104,30 +104,23 @@ Rules:
 
 // ---------- Core evaluator ----------
 async function evaluateRun(evalRow) {
-  // Load transcript
-  const transcriptRow = await sbSelectOne("session_transcripts", `session_id=${eq(evalRow.session_id)}`);
-  const transcript = transcriptRow?.transcript || "";
+  // Load transcript + prompt from session_artifacts; fallback to assistant.prompt_text
+  const artifact = await sbSelectOne("session_artifacts", `session_id=${eq(evalRow.session_id)}`);
+  const transcript = artifact?.transcript_full || "";
 
-  // Load rubric
+  const sess = await sbSelectOne("sessions", `id=${eq(evalRow.session_id)}`);
+  const assistant =
+    sess?.assistant_id ? await sbSelectOne("assistants", `id=${eq(sess.assistant_id)}`) : null;
+  const promptText = artifact?.prompt_snapshot || assistant?.prompt_text || "";
+
+  // Rubric
   const rubric = await sbSelectOne("eval_rubrics", `id=${eq(evalRow.rubric_id)}`);
   if (!rubric) throw new Error("Rubric not found");
   const weights = rubric.weights || {};
   const checklist = rubric.checklist || {};
 
-  // --- Load assistant prompt text dynamically ---
-  let promptText = "";
-  if (evalRow.session_id) {
-    const session = await sbSelectOne("sessions", `id=${eq(evalRow.session_id)}`);
-    if (session?.assistant_id) {
-      const assistant = await sbSelectOne("assistants", `id=${eq(session.assistant_id)}`);
-      promptText = assistant?.prompt_text || "";
-    }
-  }
-
   const { sys, user } = buildPrompt({ transcript, rubric, weights, checklist, promptText });
-
   const result = await callOpenAI(sys, user);
-
   if (!result || typeof result !== "object" || result.parse_error) {
     throw new Error(`Eval parse error: ${result?.parse_error || "no JSON"}`);
   }
@@ -147,14 +140,18 @@ async function evaluateRun(evalRow) {
     error: null,
   });
 
-  await sbUpdate("sessions", `id=${eq(evalRow.session_id)}`, { eval_overall: overall }).catch(() => {});
+  await sbUpdate("sessions", `id=${eq(evalRow.session_id)}`, { eval_overall: overall })
+    .catch(() => {});
 
   return { ok: true, evalId: evalRow.id, overall };
 }
 
 // ---------- Fetch pending runs ----------
 async function getPending(limit) {
-  return sbSelect("eval_runs", `status=${eq("pending")}&order=started_at.desc&limit=${encodeURIComponent(limit)}`);
+  return sbSelect(
+    "eval_runs",
+    `status=${eq("pending")}&order=started_at.desc&limit=${encodeURIComponent(limit)}`
+  );
 }
 
 // ---------- HTTP handler ----------
@@ -180,7 +177,10 @@ exports.handler = async (event) => {
 
     // Single-session mode
     if (body.sessionId) {
-      const evalRow = await sbSelectOne("eval_runs", `session_id=${eq(body.sessionId)}&status=${eq("pending")}`);
+      const evalRow = await sbSelectOne(
+        "eval_runs",
+        `session_id=${eq(body.sessionId)}&status=${eq("pending")}`
+      );
       if (!evalRow) {
         return { statusCode: 404, body: JSON.stringify({ error: "No pending eval for that sessionId" }) };
       }
@@ -188,7 +188,7 @@ exports.handler = async (event) => {
       return { statusCode: 200, body: JSON.stringify(out) };
     }
 
-    // Batch mode
+    // Batch mode (default)
     const batch = body.batch === true;
     const limit = batch ? BATCH_LIMIT : 1;
     const pendings = await getPending(limit);
