@@ -1,30 +1,19 @@
 // netlify/functions/vapi-webhook.js
 const crypto = require("crypto");
 
-/**
- * Env (required)
- *  - SUPABASE_URL
- *  - SUPABASE_SERVICE_ROLE_KEY
- *  - EVAL_DEFAULT_RUBRIC_ID
- *
- * Env (optional)
- *  - VAPI_WEBHOOK_SECRET         (set + keep DISABLE_SIGNATURE_CHECK=0 in prod)
- *  - DISABLE_SIGNATURE_CHECK=1   (dev only)
- *  - DEBUG_LOG=1
- */
-
+// ---------- Env ----------
 const SUPABASE_URL  = process.env.SUPABASE_URL;
 const SERVICE_KEY   = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const VAPI_SECRET   = process.env.VAPI_WEBHOOK_SECRET || "";
-const SKIP_SIG      = process.env.DISABLE_SIGNATURE_CHECK === "1";
+const DISABLE_SIG   = process.env.DISABLE_SIGNATURE_CHECK === "1";
 const DEFAULT_RUBRIC_ID =
   process.env.EVAL_DEFAULT_RUBRIC_ID || "43d9b1fe-570f-4c97-abdb-fbbb73ef3d08";
-const DEBUG = process.env.DEBUG_LOG === "1";
-const log = (...a) => { if (DEBUG) try { console.log(...a); } catch {} };
 
-/* ------------------ signature ------------------ */
+// ---------- Utils ----------
+const log = (...a) => { try { console.log(...a); } catch {} };
+
 function verifySignature(raw, sig) {
-  if (SKIP_SIG) return true;
+  if (DISABLE_SIG) return true;
   if (!sig || !VAPI_SECRET) return false;
   const h = crypto.createHmac("sha256", VAPI_SECRET);
   h.update(raw, "utf8");
@@ -33,117 +22,188 @@ function verifySignature(raw, sig) {
   catch { return false; }
 }
 
-/* ------------------ supabase helpers ------------------ */
-async function sfetch(path, init = {}) {
-  return fetch(`${SUPABASE_URL}${path}`, {
-    ...init,
-    headers: {
-      apikey: SERVICE_KEY,
-      Authorization: `Bearer ${SERVICE_KEY}`,
-      ...(init.headers || {}),
-    },
-  });
+function mapStatus(s) {
+  const m = {
+    queued: "created",
+    created: "created",
+    ringing: "in-progress",
+    "in-progress": "in-progress",
+    inprogress: "in-progress",
+    completed: "ended",
+    ended: "ended",
+    failed: "ended",
+    busy: "ended",
+    canceled: "ended",
+    "no-answer": "ended",
+    noanswer: "ended",
+  };
+  return m[String(s || "").toLowerCase()] || "unknown";
 }
-async function upsertSession(row) {
-  const r = await sfetch(`/rest/v1/sessions?on_conflict=id`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Prefer: "resolution=merge-duplicates,return=minimal" },
-    body: JSON.stringify(row),
-  });
-  const t = await r.text(); log("sessions upsert ->", r.status, t || "(no body)");
-  return { ok: r.ok, status: r.status, text: t };
-}
-async function patchSession(id, patch) {
-  const r = await sfetch(`/rest/v1/sessions?id=eq.${id}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(patch),
-  });
-  return r.ok;
-}
-async function readTranscript(session_id) {
-  const r = await sfetch(`/rest/v1/session_transcripts?session_id=eq.${session_id}&select=content&limit=1`);
-  if (!r.ok) return "";
-  const rows = await r.json();
-  return rows?.[0]?.content || "";
-}
-async function writeTranscript(session_id, content) {
-  // upsert single-row per session_id
-  const r = await sfetch(`/rest/v1/session_transcripts?on_conflict=session_id`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Prefer: "resolution=merge-duplicates,return=representation" },
-    body: JSON.stringify({ session_id, content }),
-  });
-  const t = await r.text(); log("transcript upsert ->", r.status, t || "(no body)");
-  return r.ok;
-}
-async function lookupAssistantFromCalls(call_id) {
-  // your calls table has call_id + assistant_id
-  const r = await sfetch(`/rest/v1/calls?select=assistant_id&call_id=eq.${encodeURIComponent(call_id)}&limit=1`);
-  if (!r.ok) return null;
-  const rows = await r.json();
-  return rows?.[0]?.assistant_id || null;
-}
-async function queueEval(session_id) {
-  const r = await sfetch(`/rest/v1/eval_runs?on_conflict=session_id,rubric_id`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Prefer: "resolution=merge-duplicates,return=minimal" },
-    body: JSON.stringify({
+
+// ---------- Supabase helpers ----------
+const SBASE = {
+  async fetch(path, init = {}) {
+    const res = await fetch(`${SUPABASE_URL}${path}`, {
+      ...init,
+      headers: {
+        apikey: SERVICE_KEY,
+        Authorization: `Bearer ${SERVICE_KEY}`,
+        "Content-Type": "application/json",
+        ...(init.headers || {}),
+      },
+    });
+    return res;
+  },
+  getSession: async (id) => {
+    const r = await SBASE.fetch(`/rest/v1/sessions?id=eq.${id}&select=id,started_at,assistant_id&limit=1`);
+    if (!r.ok) return null;
+    const rows = await r.json();
+    return rows?.[0] || null;
+  },
+  upsertSession: async (row) => {
+    const r = await SBASE.fetch(`/rest/v1/sessions?on_conflict=id`, {
+      method: "POST",
+      body: JSON.stringify(row),
+      headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+    });
+    const text = await r.text();
+    log("sessions upsert ->", r.status, text || "(no body)");
+    return { ok: r.ok, status: r.status, text };
+  },
+  patchSession: async (id, patch) => {
+    const r = await SBASE.fetch(`/rest/v1/sessions?id=eq.${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+      headers: { Prefer: "return=minimal" },
+    });
+    const text = await r.text();
+    log("sessions patch ->", r.status, text || "(no body)");
+    return r.ok;
+  },
+  insertTurns: async (rows) => {
+    if (!rows?.length) return true;
+    const r = await SBASE.fetch(`/rest/v1/turns`, {
+      method: "POST",
+      body: JSON.stringify(rows),
+      headers: { Prefer: "return=minimal" },
+    });
+    const text = await r.text();
+    log("turns insert ->", r.status, text || "(no body)");
+    return r.ok;
+  },
+  upsertEvalRun: async (session_id) => {
+    const body = {
       session_id,
       rubric_id: DEFAULT_RUBRIC_ID,
       status: "queued",
       started_at: new Date().toISOString(),
-    }),
-  });
-  const t = await r.text(); log("eval_runs upsert ->", r.status, t || "(no body)");
-  return r.ok;
+    };
+    const r = await SBASE.fetch(`/rest/v1/eval_runs?on_conflict=session_id,rubric_id`, {
+      method: "POST",
+      body: JSON.stringify(body),
+      headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+    });
+    const text = await r.text();
+    log("eval_runs upsert ->", r.status, text || "(no body)");
+    return r.ok;
+  },
+};
+
+// ---------- Vapi payload helpers ----------
+const msgOf = (p) => p?.message || null;
+const dataOf = (p) => p?.data || p || null;
+
+function deriveSessionId(payload) {
+  const msg = msgOf(payload);
+  const d = dataOf(payload);
+  const call =
+    d?.phoneCall || d?.call || d?.conversation || msg?.phoneCall || msg?.conversation || null;
+  return (
+    call?.id ||
+    d?.id ||
+    msg?.callId ||
+    msg?.phoneCallId ||
+    msg?.conversationId ||
+    `fallback-${msg?.timestamp || Date.now()}`
+  );
 }
 
-/* ------------------ payload helpers ------------------ */
-const isUuid = v => typeof v === "string" && /^[0-9a-f-]{36}$/i.test(v);
-const getMsg  = p => p?.message || null;
-
-function deriveSessionId(msg) {
-  const candidates = [msg?.callId, msg?.phoneCallId, msg?.conversationId];
-  for (const c of candidates) if (isUuid(c)) return c;
-  // deterministically mint a uuid from assistantId + first timestamp
-  const seed = `${msg?.assistantId || ""}|${msg?.timestamp || Date.now()}`;
-  const hash = crypto.createHash("sha1").update(seed).digest("hex");
-  // make a uuid-like string from sha1 (not RFC4122 strict, but 36 chars)
-  return `${hash.slice(0,8)}-${hash.slice(8,12)}-${hash.slice(12,16)}-${hash.slice(16,20)}-${hash.slice(20,32)}`;
+function assistantFrom(payload) {
+  const msg = msgOf(payload);
+  const d = dataOf(payload);
+  const call = d?.phoneCall || d?.call || d?.conversation || msg?.phoneCall || msg?.conversation;
+  return call?.assistantId || msg?.assistantId || null;
 }
 
-function timesFromMsg(msg) {
-  const ts = typeof msg?.timestamp === "number" ? new Date(msg.timestamp) : new Date();
-  const ended_at   = ts.toISOString();
-  const started_at = new Date(ts.getTime() - 2*60*1000).toISOString();
-  return { started_at, ended_at };
+function statusFrom(payload) {
+  const d = dataOf(payload);
+  const call = d?.phoneCall || d?.call || d?.conversation;
+  return mapStatus(call?.status);
 }
 
-function renderTranscriptFromMessages(messages) {
-  if (!Array.isArray(messages) || messages.length === 0) return "";
-  return messages
-    .map(m => {
-      const text = m.message ?? m.content ?? m.text ?? "";
-      const who =
-        m.role === "user"      ? "User" :
-        m.role === "assistant" ? "AI"   :
-        (m.role || "system");
-      return `${who}: ${text}`.trim();
-    })
-    .filter(Boolean)
-    .join("\n");
+function summaryFrom(payload) {
+  const msg = msgOf(payload);
+  return (
+    msg?.analysis?.summary ||
+    msg?.artifact?.summary ||
+    null
+  );
 }
 
-/* ------------------ handler ------------------ */
+function recordingUrlFrom(payload) {
+  const d = dataOf(payload);
+  const call = d?.phoneCall || d?.call || d?.conversation;
+  return call?.recordingUrl || d?.recordingUrl || null;
+}
+
+// ---------- Time handling ----------
+async function ensureSessionStart(session_id, tsMillis) {
+  if (!Number.isFinite(tsMillis)) return;
+  const sess = await SBASE.getSession(session_id);
+  const haveStart = sess?.started_at ? new Date(sess.started_at).getTime() : null;
+  if (!haveStart || tsMillis < haveStart) {
+    await SBASE.patchSession(session_id, {
+      started_at: new Date(tsMillis).toISOString(),
+      channel: "voice",
+    });
+  }
+}
+
+// ---------- Transcript capture ----------
+function turnsFromConversationUpdate(session_id, payload) {
+  const msg = msgOf(payload);
+  const convo = payload?.conversation || msg?.conversation;
+  const arr = msg?.artifact?.messages || convo?.messages || [];
+  const ts = Number(msg?.timestamp) || Date.now();
+
+  // We only persist simple user/assistant text lines to keep it lightweight
+  const rows = [];
+  for (const m of arr) {
+    const role = m.role || m.speaker || m.name || "";
+    const text = m.text || m.content || m.message || "";
+    if (!text || !role) continue;
+    if (!/^(user|assistant)$/i.test(role)) continue;
+    rows.push({
+      session_id,
+      role: role.toLowerCase() === "user" ? "user" : "assistant",
+      content: text,
+      created_at: new Date(ts).toISOString(),
+    });
+  }
+  return rows;
+}
+
+// ---------- Handler ----------
 exports.handler = async (event) => {
   try {
-    const raw = event.isBase64Encoded
+    // Body
+    const rawBody = event.isBase64Encoded
       ? Buffer.from(event.body || "", "base64").toString("utf8")
       : (event.body || "");
-    log("📞 webhook preview:", raw.slice(0, 900));
+    const preview = rawBody.slice(0, 1000);
+    log("📞 Incoming webhook body preview:", preview);
 
-    // quick diagnostics
+    // Diagnostics
     if (event.httpMethod === "GET") {
       const q = event.queryStringParameters || {};
       if (q.diag === "env") {
@@ -152,107 +212,87 @@ exports.handler = async (event) => {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             ok: true,
-            SUPABASE_URL: !!SUPABASE_URL,
-            SERVICE_KEY: !!SERVICE_KEY,
-            EVAL_DEFAULT_RUBRIC_ID: DEFAULT_RUBRIC_ID,
-            SKIP_SIG,
+            SUPABASE_URL_present: !!SUPABASE_URL,
+            SERVICE_KEY_present: !!SERVICE_KEY,
+            VAPI_SECRET_present: !!VAPI_SECRET || DISABLE_SIG,
+            DEFAULT_RUBRIC_ID,
+            DISABLE_SIG,
           }),
         };
       }
       return { statusCode: 200, body: "vapi-webhook alive" };
     }
 
-    if (event.httpMethod !== "POST") return { statusCode: 405, body: "Method Not Allowed" };
-
-    const sig = event.headers["x-vapi-signature"] || event.headers["X-Vapi-Signature"] || "";
-    if (!verifySignature(raw, sig)) return { statusCode: 401, body: "bad sig" };
-
-    const payload = JSON.parse(raw);
-    const msg = getMsg(payload);
-    if (!msg) return { statusCode: 200, body: "no message" };
-
-    // Build/derive a session id that stays stable for all related messages
-    const session_id = deriveSessionId(msg);
-
-    // If we see an assistantId early, attach it so the dashboard shows a name
-    if (msg.assistantId) {
-      await upsertSession({ id: session_id, assistant_id: msg.assistantId, channel: "voice" });
+    if (event.httpMethod !== "POST") {
+      return { statusCode: 405, body: "Method Not Allowed" };
     }
 
-    // 1) Accumulate transcript during the call on speech/conversation updates
-    if (["speech-update", "conversation-update", "user-interrupted"].includes(msg.type)) {
-      // Try to turn whatever messages are present into readable lines, then append
-      const chunk = renderTranscriptFromMessages(msg?.artifact?.messages || msg?.conversation || []);
-      if (chunk) {
-        const existing = await readTranscript(session_id);
-        const merged = existing ? `${existing}\n${chunk}` : chunk;
-        await writeTranscript(session_id, merged);
-      }
+    // Signature
+    const sig = event.headers["x-vapi-signature"] || event.headers["X-Vapi-Signature"] || "";
+    if (!verifySignature(rawBody, sig)) return { statusCode: 401, body: "bad sig" };
+
+    // Parse
+    const payload = JSON.parse(rawBody);
+    const msg = msgOf(payload);
+    const session_id = deriveSessionId(payload);
+
+    // 1) On ANY event: capture assistant_id if present & ensure/advance started_at
+    const maybeAssistant = assistantFrom(payload);
+    if (maybeAssistant) {
+      await SBASE.patchSession(session_id, { assistant_id: maybeAssistant, channel: "voice" });
+    }
+    if (typeof msg?.timestamp === "number") {
+      await ensureSessionStart(session_id, msg.timestamp);
+    }
+
+    // 2) For conversation updates, append simple turns so the transcript view has content
+    if (msg?.type === "conversation-update") {
+      const rows = turnsFromConversationUpdate(session_id, payload);
+      if (rows.length) await SBASE.insertTurns(rows);
       return { statusCode: 200, body: "ok" };
     }
 
-    // 2) Finalize on end events
-    if (msg.type === "status-update" && String(msg.status).toLowerCase() === "ended") {
-      // do nothing here; wait for the end-of-call-report to carry summary/analysis
-      return { statusCode: 200, body: "ended ack" };
-    }
+    // 3) Final event: end-of-call-report -> finalize session + queue eval
+    if (msg?.type === "end-of-call-report") {
+      const endedAtMs = Number(msg.timestamp) || Date.now();
+      const ended_at = new Date(endedAtMs).toISOString();
 
-    if (msg.type === "end-of-call-report") {
-      const { started_at, ended_at } = timesFromMsg(msg);
-      const aht_seconds = Math.max(0, Math.round((new Date(ended_at) - new Date(started_at)) / 1000));
+      const sess = await SBASE.getSession(session_id);
+      const started_at =
+        sess?.started_at ? new Date(sess.started_at).toISOString() : ended_at;
 
-      // pull transcript lines from:
-      //   (a) previously accumulated transcript rows
-      //   (b) artifact.messages on the report itself (fallback)
-      let transcript = await readTranscript(session_id);
-      if (!transcript) {
-        const fromReport = renderTranscriptFromMessages(msg?.artifact?.messages || []);
-        if (fromReport) {
-          transcript = fromReport;
-          await writeTranscript(session_id, transcript);
-        }
-      }
+      const aht_seconds = Math.max(
+        0,
+        Math.round((new Date(ended_at).getTime() - new Date(started_at).getTime()) / 1000)
+      );
 
-      // try to fill assistant_id if still empty via calls table
-      let assistant_id = msg?.assistantId || await lookupAssistantFromCalls(session_id);
-
-      const summary =
-        msg?.analysis?.summary ||
-        msg?.artifact?.summary ||
-        null;
-
-      const hangup_reason = msg?.endedReason || "customer-ended-call";
+      const outcome = "ended";
+      const summary = summaryFrom(payload);
+      const recUrl = recordingUrlFrom(payload);
+      const ended_reason = msg?.endedReason || "customer-ended-call";
 
       const row = {
         id: session_id,
-        assistant_id: assistant_id || null,
+        assistant_id: maybeAssistant || sess?.assistant_id || null,
+        channel: "voice",
         started_at,
         ended_at,
-        channel: "voice",
-        outcome: "ended",
-        summary,
-        hangup_reason,
+        outcome,
         aht_seconds,
+        summary,
+        ended_reason,
+        recording_url: recUrl,
+        updated_at: new Date().toISOString(),
       };
 
-      log("UPSERT SESSION ROW:", row);
-      const up = await upsertSession(row);
-      if (!up.ok) {
-        return {
-          statusCode: 500,
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ok: false, where: "sessions", status: up.status, text: up.text }),
-        };
-      }
-
-      // enqueue eval so the SCORE column populates
-      await queueEval(session_id);
+      await SBASE.upsertSession(row);
+      await SBASE.upsertEvalRun(session_id);
 
       return { statusCode: 200, body: "ok" };
     }
 
-    // ignore other noise
-    return { statusCode: 200, body: "ignored" };
+    // Ignore mid-call noise we don't use explicitly
+    return { statusCode: 200, body: "ok" };
   } catch (err) {
     console.error("webhook error", err);
     return { statusCode: 500, body: "server error" };
