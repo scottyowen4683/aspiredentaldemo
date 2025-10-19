@@ -1,6 +1,6 @@
-// frontend/src/pages/Admin.jsx
-import React, { useEffect, useState } from "react";
-import { supabase } from "../lib/supabase";
+// frontend/src/pages/admin.jsx
+import React, { useEffect, useMemo, useState } from "react";
+import { supabase } from "../supabase";
 
 function Badge({ tone = "gray", children }) {
   const toneMap = {
@@ -25,66 +25,79 @@ function scoreToneLabel(score) {
 }
 
 export default function Admin() {
-  const [stats, setStats] = useState({ total: 0, containment: 0, aht: 0 });
-  const [rows, setRows] = useState([]); // from admin_sessions_recent
-  const [topQs, setTopQs] = useState([]); // from top_questions_30d
-
+  const [sinceDays] = useState(30);
+  const [rows, setRows] = useState([]);
+  const [topQs, setTopQs] = useState([]);
   const [detail, setDetail] = useState(null);
-  // detail = { id, provider_session_id, assistant_name, started_at, aht_seconds, outcome, score, ... }
-  const [detailTab, setDetailTab] = useState("transcript"); // 'transcript' | 'eval'
+  const [detailTab, setDetailTab] = useState("transcript");
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailTranscript, setDetailTranscript] = useState("");
-  const [detailEval, setDetailEval] = useState(null); // { overall_score, summary, suggestions: [] }
+  const [detailEval, setDetailEval] = useState(null);
+  const [assistantFilter, setAssistantFilter] = useState("all");
+
+  const [stats, setStats] = useState({ total: 0, containment: 0, aht: 0 });
 
   useEffect(() => {
     async function load() {
-      const sinceISO = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+      const sinceISO = new Date(Date.now() - sinceDays * 24 * 3600 * 1000).toISOString();
 
-      // Sessions (from the view you created)
-      const { data: recent, error } = await supabase
+      // Load sessions
+      let query = supabase
         .from("admin_sessions_recent")
         .select("*")
         .gte("started_at", sinceISO)
         .order("started_at", { ascending: false })
-        .limit(100);
+        .limit(200);
+
+      const { data: recent, error } = await query;
       if (error) {
         console.error("admin_sessions_recent error", error);
         return;
       }
 
-      // KPIs
       const total = recent.length;
-      const resolved = recent.filter(r => r.outcome === "resolved").length;
+      const resolved = recent.filter((r) => r.outcome === "resolved").length;
       const containment = total ? Math.round((resolved / total) * 100) : 0;
-      const aht = total && recent.some(r => r.aht_seconds != null)
+      const aht = total && recent.some((r) => r.aht_seconds != null)
         ? Math.round(recent.reduce((acc, r) => acc + (r.aht_seconds || 0), 0) / total)
         : 0;
 
-      // Scores
-      const graded = recent.map(r => {
-        const score = typeof r.overall_score === "number"
-          ? Math.max(0, Math.min(100, Math.round(r.overall_score)))
-          : (r.outcome === "resolved" ? 100 : 0);
+      const graded = recent.map((r) => {
+        const score =
+          typeof r.overall_score === "number"
+            ? Math.max(0, Math.min(100, Math.round(r.overall_score)))
+            : r.outcome === "resolved"
+            ? 100
+            : 0;
         const { tone, label } = scoreToneLabel(score);
         return { ...r, score, scoreTone: tone, scoreLabel: label };
       });
 
-      setStats({ total, containment, aht });
       setRows(graded);
+      setStats({ total, containment, aht });
 
-      // Top Questions (30 days)
-      const { data: qdata, error: qerr } = await supabase
+      const { data: qdata } = await supabase
         .from("top_questions_30d")
         .select("*")
         .order("times", { ascending: false })
         .limit(12);
-      if (!qerr && qdata) setTopQs(qdata);
+      if (qdata) setTopQs(qdata);
     }
     load();
-  }, []);
+  }, [sinceDays]);
+
+  const assistantOptions = useMemo(() => {
+    const uniq = Array.from(new Set(rows.map((r) => r.assistant_id).filter(Boolean)));
+    return uniq;
+  }, [rows]);
+
+  const filteredRows = useMemo(() => {
+    return assistantFilter === "all"
+      ? rows
+      : rows.filter((r) => r.assistant_id === assistantFilter);
+  }, [rows, assistantFilter]);
 
   async function refreshTopQs() {
-    // Optional: try to refresh materialized view (if function exists)
     await supabase.rpc("refresh_top_questions_30d").catch(() => {});
     const { data } = await supabase
       .from("top_questions_30d")
@@ -99,6 +112,7 @@ export default function Admin() {
       id: row.id,
       provider_session_id: row.provider_session_id,
       assistant_name: row.assistant_name,
+      assistant_id: row.assistant_id,
       started_at: row.started_at,
       aht_seconds: row.aht_seconds,
       outcome: row.outcome,
@@ -113,30 +127,35 @@ export default function Admin() {
     setDetailEval(null);
 
     try {
-      // Load full transcript
       const { data: art } = await supabase
         .from("session_artifacts")
         .select("transcript_full")
-        .eq("session_id", row.id)
+        .eq("session_id", row.provider_session_id)
+        .order("updated_at", { ascending: false })
         .limit(1)
         .maybeSingle();
       if (art?.transcript_full) setDetailTranscript(art.transcript_full);
 
-      // Load latest eval
       const { data: evals } = await supabase
         .from("eval_runs")
         .select("overall_score, summary, suggestions, status, completed_at")
-        .eq("session_id", row.id)
-        .order("started_at", { ascending: false })
+        .eq("session_id", row.provider_session_id)
+        .order("completed_at", { ascending: false })
         .limit(1);
-      if (evals && evals[0]) {
-        setDetailEval(evals[0]);
-      }
+      if (evals && evals[0]) setDetailEval(evals[0]);
     } catch (e) {
       console.error("detail load error", e);
     } finally {
       setDetailLoading(false);
     }
+  }
+
+  async function deleteSession(sessionId) {
+    if (!window.confirm("Delete this session and its artifacts/evals?")) return;
+    // cascade via FK
+    await supabase.from("sessions").delete().eq("provider_session_id", sessionId);
+    setRows((r) => r.filter((x) => x.provider_session_id !== sessionId));
+    setDetail(null);
   }
 
   const td = "px-3 py-3 align-top border-b border-gray-100 text-sm";
@@ -146,8 +165,8 @@ export default function Admin() {
     <div className="p-6 bg-gray-50 min-h-screen">
       <h1 className="text-xl font-bold mb-6">Aspire AI — Admin Dashboard</h1>
 
-      {/* KPIs */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+      {/* Filters + KPIs */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
         <div className="bg-white rounded-lg shadow p-5">
           <div className="text-gray-500 text-sm">Total Sessions (30 days)</div>
           <div className="text-3xl font-bold">{stats.total}</div>
@@ -159,6 +178,19 @@ export default function Admin() {
         <div className="bg-white rounded-lg shadow p-5">
           <div className="text-gray-500 text-sm">Avg Handle Time (s)</div>
           <div className="text-3xl font-bold">{stats.aht}</div>
+        </div>
+        <div className="bg-white rounded-lg shadow p-5">
+          <div className="text-gray-500 text-sm mb-1">Assistant</div>
+          <select
+            value={assistantFilter}
+            onChange={(e) => setAssistantFilter(e.target.value)}
+            className="border rounded px-2 py-1 w-full"
+          >
+            <option value="all">All</option>
+            {assistantOptions.map((id) => (
+              <option key={id} value={id}>{id}</option>
+            ))}
+          </select>
         </div>
       </div>
 
@@ -175,13 +207,17 @@ export default function Admin() {
                 <th className={th}>AHT (s)</th>
                 <th className={th}>Score</th>
                 <th className={th}>Transcript</th>
+                <th className={th}>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map(r => (
+              {filteredRows.map((r) => (
                 <tr key={r.provider_session_id}>
                   <td className={td}>{new Date(r.started_at).toLocaleString()}</td>
-                  <td className={td}>{r.assistant_name || "-"}</td>
+                  <td className={td}>
+                    <div className="text-sm text-gray-800">{r.assistant_name || "Assistant"}</div>
+                    <div className="text-xs text-gray-500">{r.assistant_id || "—"}</div>
+                  </td>
                   <td className={td}>
                     <Badge tone={r.outcome === "resolved" ? "green" : r.outcome ? "yellow" : "gray"}>
                       {r.outcome || "in-progress"}
@@ -209,12 +245,20 @@ export default function Admin() {
                       <span className="text-xs text-gray-400">—</span>
                     )}
                   </td>
+                  <td className={td}>
+                    <button
+                      className="text-xs text-red-600 hover:underline"
+                      onClick={() => deleteSession(r.provider_session_id)}
+                    >
+                      Delete
+                    </button>
+                  </td>
                 </tr>
               ))}
-              {!rows.length && (
+              {!filteredRows.length && (
                 <tr>
-                  <td className="px-3 py-8 text-center text-gray-500 text-sm" colSpan={6}>
-                    No sessions in the last 30 days.
+                  <td className="px-3 py-8 text-center text-gray-500 text-sm" colSpan={7}>
+                    No sessions in the last {sinceDays} days.
                   </td>
                 </tr>
               )}
@@ -288,7 +332,9 @@ export default function Admin() {
               {detailLoading && <div className="text-sm text-gray-500">Loading…</div>}
 
               {!detailLoading && detailTab === "transcript" && (
-                <pre className="whitespace-pre-wrap text-sm text-gray-900">{detailTranscript || "No transcript available."}</pre>
+                <pre className="whitespace-pre-wrap text-sm text-gray-900">
+                  {detailTranscript || "No transcript available."}
+                </pre>
               )}
 
               {!detailLoading && detailTab === "eval" && (
@@ -326,6 +372,18 @@ export default function Admin() {
                   )}
                 </div>
               )}
+            </div>
+
+            <div className="px-5 py-3 border-t flex items-center justify-between">
+              <div className="text-xs text-gray-500">
+                Assistant: {detail.assistant_id || "—"}
+              </div>
+              <button
+                className="text-xs text-red-600 hover:underline"
+                onClick={() => deleteSession(detail.provider_session_id)}
+              >
+                Delete Session
+              </button>
             </div>
           </div>
         </div>
