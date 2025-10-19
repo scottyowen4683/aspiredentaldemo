@@ -48,7 +48,6 @@ async function sbSelectOne(table, query) {
   return data?.[0] || null;
 }
 
-// URL helpers
 const eq = (v) => `eq.${v}`;
 
 // ---------- Resolve assistant/client ----------
@@ -93,10 +92,10 @@ exports.handler = async (event) => {
   try {
     const body = JSON.parse(event.body || "{}");
 
-    // Always log the full payload for debugging
+    // Keep raw for debugging
     await sbInsert("webhook_debug", { headers: event.headers, payload: body });
 
-    // --- Normalize payload shape ---
+    // --- Normalize payload shape (Messaging "Server URL" vs webhooks) ---
     const msg = body.message || body;
     const evtType = body.type || body.event || msg.type || msg.event || null;
     const call = msg.call || msg.data?.call || msg.data || {};
@@ -111,6 +110,7 @@ exports.handler = async (event) => {
       fromNumber,
     });
 
+    // Heuristics when evtType absent
     const isStart =
       evtType === "call.started" ||
       (!!call && !call.endedAt && !msg.role && !msg.text && !msg.toolName && !msg.turnId);
@@ -123,7 +123,7 @@ exports.handler = async (event) => {
       typeof msg.text === "string" ||
       !!msg.role || !!msg.toolName;
 
-    // --- Session start or first sight ---
+    // --- Upsert session on start/first sight ---
     if (sessionId && (isStart || (!isEnd && !isMessage))) {
       await sbUpsert(
         "sessions",
@@ -136,6 +136,7 @@ exports.handler = async (event) => {
           prompt_version: msg.metadata?.promptVersion || "v1",
           kb_version: msg.metadata?.kbVersion || "v1",
           experiment: msg.metadata?.experiment || null,
+          outcome: null, // will be set on end
         },
         "provider_session_id"
       );
@@ -162,17 +163,41 @@ exports.handler = async (event) => {
       }
     }
 
-    // --- Session end ---
+    // --- Session end: compute AHT and default outcome if missing ---
     if (sessionId && isEnd) {
+      // fetch started_at for AHT
+      const existing = await sbSelectOne("sessions", {
+        select: "id, started_at",
+        provider_session_id: eq(sessionId),
+      });
+
+      const endedAt = call.endedAt || new Date().toISOString();
+      let ahtSeconds = null;
+      if (existing?.started_at) {
+        const startMs = new Date(existing.started_at).getTime();
+        const endMs = new Date(endedAt).getTime();
+        ahtSeconds = Math.max(0, Math.round((endMs - startMs) / 1000));
+      }
+
+      // default outcome if not supplied
+      const outcome =
+        msg.outcome ||
+        (call.hangupReason ? "abandoned" : "resolved");
+
+      const containment =
+        typeof msg.containment === "boolean"
+          ? msg.containment
+          : outcome === "resolved"
+          ? true
+          : null;
+
       await sbUpdate("sessions", { provider_session_id: eq(sessionId) }, {
-        ended_at: call.endedAt || new Date().toISOString(),
+        ended_at: endedAt,
         hangup_reason: call.hangupReason || msg.hangupReason || null,
         cost_cents: msg.costCents ?? null,
-        aht_seconds: msg.ahtSeconds ?? null,
-        outcome: msg.outcome || (call.hangupReason ? "abandoned" : "resolved"),
-        containment: typeof msg.containment === "boolean"
-          ? msg.containment
-          : (msg.outcome === "resolved" ? true : null),
+        aht_seconds: ahtSeconds,
+        outcome,
+        containment,
       });
     }
 
