@@ -2,6 +2,8 @@
 import React from "react";
 import { Routes, Route, Outlet, useNavigate, Link } from "react-router-dom";
 import AudienceModal from "./components/AudienceModal.jsx";
+import Government from "./pages/Government.jsx";
+import Business from "./pages/Business.jsx";
 
 const ASPIRE_LOGO =
   "https://raw.githubusercontent.com/scottyowen4683/Aspirereception/refs/heads/feature/ai-receptionist/frontend/aspire.png";
@@ -10,7 +12,6 @@ const ASPIRE_LOGO =
 function Layout() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
-      {/* Popup chooser still appears */}
       <AudienceModal />
 
       <header className="w-full py-6">
@@ -19,7 +20,6 @@ function Layout() {
             <img src={ASPIRE_LOGO} alt="Aspire Executive Solutions" className="h-10 w-auto" />
           </Link>
 
-          {/* Quick switch: clears remembered audience and reopens modal */}
           <button
             onClick={() => {
               localStorage.removeItem("audience");
@@ -39,7 +39,7 @@ function Layout() {
   );
 }
 
-/* ---------- Landing page (your existing content) ---------- */
+/* ---------- Landing (unchanged) ---------- */
 function Landing() {
   const navigate = useNavigate();
   return (
@@ -74,45 +74,14 @@ function Landing() {
   );
 }
 
-/* ---------- Government page (placeholder; replace with your real content if you have it) ---------- */
-function GovernmentPage() {
-  return (
-    <div className="max-w-3xl text-center">
-      <h2 className="text-2xl md:text-3xl font-bold text-slate-900">Government Solutions</h2>
-      <p className="mt-3 text-slate-700">
-        Your government offerings go here. If you already have a component/page, plug it in below.
-      </p>
-      <div className="mt-6">
-        <Link to="/" className="text-blue-600 hover:underline">← Back to Home</Link>
-      </div>
-    </div>
-  );
-}
-
-/* ---------- Business page (placeholder; replace with your real content if you have it) ---------- */
-function BusinessPage() {
-  return (
-    <div className="max-w-3xl text-center">
-      <h2 className="text-2xl md:text-3xl font-bold text-slate-900">Business Solutions</h2>
-      <p className="mt-3 text-slate-700">
-        Your business offerings go here. If you already have a component/page, plug it in below.
-      </p>
-      <div className="mt-6">
-        <Link to="/" className="text-blue-600 hover:underline">← Back to Home</Link>
-      </div>
-    </div>
-  );
-}
-
-/* ---------- App with nested routes ---------- */
+/* ---------- App with real routes ---------- */
 export default function App() {
   return (
     <Routes>
       <Route element={<Layout />}>
         <Route index element={<Landing />} />
-        <Route path="government" element={<GovernmentPage />} />
-        <Route path="business" element={<BusinessPage />} />
-        {/* Fallback to Landing for unknown paths under App */}
+        <Route path="government" element={<Government />} />
+        <Route path="business" element={<Business />} />
         <Route path="*" element={<Landing />} />
       </Route>
     </Routes>
