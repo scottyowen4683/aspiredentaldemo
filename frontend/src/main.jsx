@@ -6,6 +6,10 @@ import Admin from "./pages/admin.jsx";
 import Government from "./pages/government.jsx";
 import Business from "./pages/business.jsx";
 import "./index.css";
+import AdminCalls from "./pages/admin.jsx";
+// ...
+{ path: "/admin", element: <AdminCalls /> },
+
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
