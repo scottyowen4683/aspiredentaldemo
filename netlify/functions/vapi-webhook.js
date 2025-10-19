@@ -3,6 +3,11 @@ const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SERVICE_KEY =
   process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_SERVICE_ROLE_KEY;
 
+// OPTIONAL: set your default rubric UUID here to auto-queue evals on call end.
+// You can also set NETLIFY env EVAL_DEFAULT_RUBRIC_ID instead of hardcoding.
+const EVAL_DEFAULT_RUBRIC_ID =
+  process.env.EVAL_DEFAULT_RUBRIC_ID || "REPLACE_WITH_YOUR_RUBRIC_UUID";
+
 const headers = {
   "Content-Type": "application/json",
   apikey: SERVICE_KEY,
@@ -49,22 +54,21 @@ async function sbSelectOne(table, query) {
   return data?.[0] || null;
 }
 const eq = (v) => `eq.${v}`;
+const truthy = (v) => v !== undefined && v !== null && v !== "";
 
-// ---------- Flexible extractors ----------
+// ---------- Extractors ----------
 function pickText(msg, call) {
   const cands = [
     msg?.text,
     msg?.content?.text,
-    msg?.transcript,             // Vapi often provides this
+    msg?.transcript,   // Vapi often provides this
     msg?.asr,
     msg?.nlu?.text,
     msg?.message?.text,
     call?.lastUtterance,
     call?.summary,
   ];
-  for (const v of cands) {
-    if (typeof v === "string" && v.trim()) return v;
-  }
+  for (const v of cands) if (typeof v === "string" && v.trim()) return v;
   return null;
 }
 function pickRole(msg) {
@@ -73,7 +77,6 @@ function pickRole(msg) {
   if (msg?.toolName) return "tool";
   return "agent";
 }
-function truthy(v) { return v !== undefined && v !== null && v !== ""; }
 
 // ---------- Resolve assistant/client (auto-create assistant) ----------
 async function resolveClientAndAssistant({ providerAssistantId, clientId, fromNumber }) {
@@ -141,10 +144,10 @@ exports.handler = async (event) => {
   try {
     const raw = JSON.parse(event.body || "{}");
 
-    // Full raw for deep debug
+    // Log full raw payload for debugging
     await sbInsert("webhook_debug", { headers: event.headers, payload: raw });
 
-    // Normalize to your payload shape
+    // Normalize (based on your sample Payload 2)
     const msg = raw.message || raw;
     const call = msg.call || msg.data?.call || msg.data || {};
     const evtType = raw.type || raw.event || msg.type || msg.event || null;
@@ -167,6 +170,8 @@ exports.handler = async (event) => {
       null;
 
     const fromNumber =
+      msg?.phoneNumber?.number ||
+      call?.phoneNumber?.number ||
       call?.customer?.number ||
       call?.from ||
       call?.callerNumber ||
@@ -186,7 +191,7 @@ exports.handler = async (event) => {
     const text = pickText(msg, call);
     const role = pickRole(msg);
 
-    // From your confirmed payload:
+    // From your payload: prompt + transcript + extras
     const transcriptFull =
       msg?.transcript ||
       msg?.call?.transcript ||
@@ -199,11 +204,14 @@ exports.handler = async (event) => {
       msg?.artifact?.messages?.[0]?.message ||
       null;
 
+    const assistantName =
+      msg?.assistant?.name || call?.assistantName || null;
+
     const summary = msg?.summary || msg?.analysis?.summary || null;
     const endedReason = msg?.endedReason || msg?.call?.endedReason || null;
     const recordingUrl = msg?.recordingUrl || msg?.call?.recordingUrl || null;
 
-    // Slim debug
+    // Slim debug row
     await sbInsert("webhook_debug", {
       headers: { slim: true },
       payload: {
@@ -215,12 +223,40 @@ exports.handler = async (event) => {
       },
     });
 
-    // Resolve entities
+    // Resolve entities (& auto-create assistant)
     const { resolvedClientId, resolvedAssistantId } = await resolveClientAndAssistant({
       providerAssistantId: assistantId,
       clientId: msg?.metadata?.clientId || raw?.metadata?.clientId || null,
       fromNumber,
     });
+
+    // Keep assistant record fresh (name, versions, prompt)
+    if (resolvedAssistantId) {
+      const assistantPatch = {
+        name: assistantName || undefined,
+        prompt_version: msg?.metadata?.promptVersion || undefined,
+        kb_version: msg?.metadata?.kbVersion || undefined,
+      };
+      if (promptSnapshot) assistantPatch.prompt_text = promptSnapshot;
+
+      if (Object.values(assistantPatch).some((v) => v !== undefined)) {
+        await sbUpdate("assistants", { id: eq(resolvedAssistantId) }, assistantPatch);
+      }
+    }
+
+    // Create/refresh entrypoint (phone number -> assistant)
+    if (fromNumber && resolvedAssistantId) {
+      await sbUpsert(
+        "entrypoints",
+        {
+          type: "phone_number",
+          value: fromNumber,
+          name: msg?.phoneNumber?.name || call?.phoneNumber?.name || null,
+          assistant_id: resolvedAssistantId,
+        },
+        "type,value"
+      );
+    }
 
     // Event heuristics
     const isMessage =
@@ -302,14 +338,13 @@ exports.handler = async (event) => {
       }
     }
 
-    // End-of-call: ensure session exists, then patch + store artifacts
+    // End-of-call: ensure session exists, then patch + store artifacts + auto-queue eval
     if (sessionId && isEnd) {
       let existing = await sbSelectOne("sessions", {
         select: "id, started_at",
         provider_session_id: eq(sessionId),
       });
 
-      // If we never saw a start/message, create a minimal session now
       if (!existing) {
         await sbUpsert(
           "sessions",
@@ -340,16 +375,9 @@ exports.handler = async (event) => {
         ahtSeconds = Math.max(0, Math.round((endMs - startMs) / 1000));
       }
 
-      const outcome =
-        msg?.outcome ||
-        (call?.hangupReason ? "abandoned" : "resolved");
-
+      const outcome = msg?.outcome || (call?.hangupReason ? "abandoned" : "resolved");
       const containment =
-        typeof msg?.containment === "boolean"
-          ? msg?.containment
-          : outcome === "resolved"
-          ? true
-          : null;
+        typeof msg?.containment === "boolean" ? msg?.containment : outcome === "resolved" ? true : null;
 
       await sbUpdate("sessions", { provider_session_id: eq(sessionId) }, {
         ended_at: endTs,
@@ -365,7 +393,6 @@ exports.handler = async (event) => {
         recording_url: recordingUrl || null,
       });
 
-      // Store artifacts if present
       if (existing?.id && (transcriptFull || promptSnapshot)) {
         await sbUpsert(
           "session_artifacts",
@@ -384,7 +411,7 @@ exports.handler = async (event) => {
           "session_id"
         );
 
-        // Optional: add a synthetic "full transcript" turn so UI shows content even without per-turn events
+        // Add a synthetic "full transcript" turn so UI shows content even if no per-turn events
         if (transcriptFull) {
           await sbInsert("turns", {
             session_id: existing.id,
@@ -393,6 +420,16 @@ exports.handler = async (event) => {
             text: `[FULL TRANSCRIPT]\n${String(transcriptFull).slice(0, 8000)}`,
           });
         }
+      }
+
+      // Auto-queue an eval if we have a rubric & transcript
+      if (existing?.id && EVAL_DEFAULT_RUBRIC_ID && transcriptFull) {
+        await sbInsert("eval_runs", {
+          session_id: existing.id,
+          rubric_id: EVAL_DEFAULT_RUBRIC_ID,
+          status: "pending",
+          started_at: new Date().toISOString(),
+        }).catch(() => {});
       }
     }
 
