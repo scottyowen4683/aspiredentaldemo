@@ -191,12 +191,23 @@ exports.handler = async (event) => {
     const payload = JSON.parse(rawBody);
     const row = toRow(payload);
 
-    if (!row.call_id) {
-      log("Webhook payload missing call_id; skipping upsert. last_event_type=", row.last_event_type);
-      // Log a small sample to help debug shapes (avoid huge logs)
-      log("Payload sample:", rawBody.slice(0, 800));
-      return { statusCode: 200, body: JSON.stringify({ ok: true, skipped: "no call_id" }) };
-    }
+    // Try alternative IDs if call_id is missing (Vapi renamed fields)
+if (!row.call_id) {
+  const fallback_id =
+    payload?.id ||
+    payload?.data?.id ||
+    payload?.data?.provider_session_id ||
+    payload?.message?.provider_session_id ||
+    payload?.message?.callId ||
+    null;
+
+  row.call_id = fallback_id || `fallback-${Date.now()}`;
+
+  if (!fallback_id) {
+    console.warn("⚠️ No call/session ID found; using fallback placeholder");
+  }
+}
+
 
     log("Upserting call row:", JSON.stringify(row));
     const r = await supabaseUpsert(row);
