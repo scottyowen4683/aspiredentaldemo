@@ -77,14 +77,32 @@ async function sbUpsertEvalRun(session_id) {
 
 function getCall(payload) {
   const d = payload?.data || payload;
-  return d?.phoneCall || d?.call || payload?.message?.phoneCall || null;
+  const msg = payload?.message;
+  return (
+    d?.phoneCall ||
+    d?.call ||
+    d?.conversation ||
+    msg?.phoneCall ||
+    msg?.conversation ||
+    d ||
+    null
+  );
 }
+
 function getCallId(payload) {
   const d = payload?.data || payload;
   const msg = payload?.message;
   const call = getCall(payload);
-  return call?.id || d?.id || msg?.callId || msg?.phoneCallId || null;
+  return (
+    call?.id ||
+    d?.id ||
+    msg?.callId ||
+    msg?.phoneCallId ||
+    msg?.conversationId ||
+    null
+  );
 }
+
 function getTimes(payload) {
   const msg = payload?.message;
   const d = payload?.data || payload;
