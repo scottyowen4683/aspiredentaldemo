@@ -4,30 +4,28 @@ import ReactDOM from "react-dom/client";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import App from "./App.jsx";
 import Admin from "./pages/admin.jsx";
-import "./index.css"; // <- brings back Tailwind/styles
+import "./index.css"; // keep Tailwind / global styles
 
-// Try to import real pages if they exist; otherwise fall back to App
-let Government = App;
-let Business = App;
-
-try {
-  // If you have these files, great:
-  //   frontend/src/pages/government.jsx
-  //   frontend/src/pages/business.jsx
-  Government = (await import("./pages/government.jsx")).default;
-} catch {}
-try {
-  Business = (await import("./pages/business.jsx")).default;
-} catch {}
+function GovernmentFallback() { return <App />; }
+function BusinessFallback() { return <App />; }
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
     <BrowserRouter>
       <Routes>
+        {/* Home (your existing landing page) */}
         <Route path="/" element={<App />} />
+
+        {/* Admin dashboard */}
         <Route path="/admin" element={<Admin />} />
-        <Route path="/government" element={<Government />} />
-        <Route path="/business" element={<Business />} />
+
+        {/* Temporary fallbacks so these routes don’t break.
+           If you later add real files at:
+           frontend/src/pages/government.jsx
+           frontend/src/pages/business.jsx
+           you can import them here instead of the fallbacks. */}
+        <Route path="/government" element={<GovernmentFallback />} />
+        <Route path="/business" element={<BusinessFallback />} />
       </Routes>
     </BrowserRouter>
   </React.StrictMode>
