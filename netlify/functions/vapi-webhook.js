@@ -119,6 +119,14 @@ function getStatus(payload) {
 
 exports.handler = async (event) => {
   try {
+        // --- TEMP DIAGNOSTIC LOGGING ---
+    const rawBody = event.isBase64Encoded
+      ? Buffer.from(event.body || "", "base64").toString("utf8")
+      : (event.body || "");
+
+    const preview = rawBody.slice(0, 1000);
+    console.log("📞 Incoming webhook body preview:", preview);
+
     if (event.httpMethod === "GET") {
       const q = event.queryStringParameters || {};
 
