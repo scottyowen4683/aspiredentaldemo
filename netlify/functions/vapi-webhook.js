@@ -367,12 +367,20 @@ exports.handler = async (event) => {
       }
 
       const endTs = endedAt || new Date().toISOString();
-      let ahtSeconds = null;
-      if (existing?.started_at) {
+
+      // ---- AHT: prefer provider durationSeconds (then durationMs), fallback to timestamps
+      let ahtSeconds =
+        Math.round(
+          (call?.durationSeconds ?? msg?.durationSeconds ??
+            (typeof msg?.durationMs === "number" ? msg.durationMs / 1000 : NaN))
+        ) || null;
+
+      if (!ahtSeconds && existing?.started_at) {
         const startMs = new Date(existing.started_at).getTime();
         const endMs = new Date(endTs).getTime();
         ahtSeconds = Math.max(0, Math.round((endMs - startMs) / 1000));
       }
+      // ---------------------------------------
 
       const outcome = msg?.outcome || (call?.hangupReason ? "abandoned" : "resolved");
       const containment =
