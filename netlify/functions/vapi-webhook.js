@@ -1,7 +1,6 @@
 // netlify/functions/vapi-webhook.js
 const crypto = require("crypto");
 
-// ---- Env ----
 const SUPABASE_URL  = process.env.SUPABASE_URL;
 const SERVICE_KEY   = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const DISABLE_SIG   = process.env.DISABLE_SIGNATURE_CHECK === "1";
@@ -9,7 +8,6 @@ const VAPI_SECRET   = process.env.VAPI_WEBHOOK_SECRET || "";
 const DEFAULT_RUBRIC_ID =
   process.env.EVAL_DEFAULT_RUBRIC_ID || "43d9b1fe-570f-4c97-abdb-fbbb73ef3d08";
 
-// ---- Utils ----
 function log(...a) { try { console.log(...a); } catch {} }
 
 function verifySignature(raw, sig) {
@@ -37,7 +35,6 @@ function mapStatus(s) {
   return m[String(s || "").toLowerCase()] || "unknown";
 }
 
-// ---- Supabase helpers ----
 async function sbUpsertSession(row) {
   const url = `${SUPABASE_URL}/rest/v1/sessions?on_conflict=id`;
   const res = await fetch(url, {
@@ -102,20 +99,17 @@ function getStatus(payload) {
   return mapStatus(call?.status);
 }
 
-// ---- Main handler ----
 exports.handler = async (event) => {
   try {
     if (event.httpMethod === "GET") {
       const q = event.queryStringParameters || {};
 
-      // ✅ Diagnostic write
       if (q.diag === "write") {
         const id = crypto.randomUUID();
         const row = {
           id,
           started_at: new Date(Date.now() - 60_000).toISOString(),
           ended_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
           assistant_id: null,
           channel: "voice",
           outcome: "ended",
@@ -139,7 +133,6 @@ exports.handler = async (event) => {
         };
       }
 
-      // ✅ Simple heartbeat
       return { statusCode: 200, body: "vapi-webhook alive" };
     }
 
@@ -147,7 +140,6 @@ exports.handler = async (event) => {
       return { statusCode: 405, body: "Method Not Allowed" };
     }
 
-    // Verify payload
     const raw = event.isBase64Encoded
       ? Buffer.from(event.body || "", "base64").toString("utf8")
       : (event.body || "");
@@ -167,7 +159,6 @@ exports.handler = async (event) => {
       assistant_id: call?.assistantId || null,
       started_at,
       ended_at,
-      updated_at: new Date().toISOString(),
       channel: "voice",
       outcome,
       summary: call?.summary || null,
@@ -185,7 +176,6 @@ exports.handler = async (event) => {
       };
     }
 
-    // Queue eval when ended
     if (outcome === "ended" && ended_at) await sbUpsertEvalRun(id);
 
     return { statusCode: 200, body: "ok" };
