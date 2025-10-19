@@ -50,6 +50,31 @@ async function sbSelectOne(table, query) {
 }
 const eq = (v) => `eq.${v}`;
 
+// ---------- Flexible extractors ----------
+function pickText(msg, call) {
+  const cands = [
+    msg?.text,
+    msg?.content?.text,
+    msg?.transcript,
+    msg?.asr,
+    msg?.nlu?.text,
+    msg?.message?.text,
+    call?.lastUtterance,
+  ];
+  for (const v of cands) {
+    if (typeof v === "string" && v.trim()) return v;
+  }
+  return null;
+}
+function pickRole(msg) {
+  if (msg?.role) return msg.role;
+  if (msg?.speaker) return msg.speaker; // some payloads use "speaker"
+  if (msg?.toolName) return "tool";
+  // crude fallback
+  return "agent";
+}
+function truthy(v) { return v !== undefined && v !== null && v !== ""; }
+
 // ---------- Resolve assistant/client (auto-create assistant) ----------
 async function resolveClientAndAssistant({ providerAssistantId, clientId, fromNumber }) {
   let assistantRow = null;
@@ -60,7 +85,6 @@ async function resolveClientAndAssistant({ providerAssistantId, clientId, fromNu
       provider_assistant_id: eq(providerAssistantId),
     }).catch(() => null);
 
-    // Auto-create if new
     if (!assistantRow) {
       await sbUpsert(
         "assistants",
@@ -117,64 +141,82 @@ exports.handler = async (event) => {
   try {
     const raw = JSON.parse(event.body || "{}");
 
-    // Keep full raw debug
+    // 1) Store the full raw (once) for deep debugging if needed
     await sbInsert("webhook_debug", { headers: event.headers, payload: raw });
 
-    // Normalize
+    // 2) Normalize across Vapi variants
     const msg = raw.message || raw;
-    const evtType = raw.type || raw.event || msg.type || msg.event || null;
     const call = msg.call || msg.data?.call || msg.data || {};
+
+    const evtType = raw.type || raw.event || msg.type || msg.event || null;
+
     const assistantId =
-      call.assistantId ||
-      msg.assistantId ||
-      msg.assistant?.id ||
-      raw.assistantId ||
+      call?.assistantId ||
+      msg?.assistantId ||
+      msg?.assistant?.id ||
+      raw?.assistantId ||
+      call?.assistant?.id ||
       null;
-    const sessionId = call.id || msg.sessionId || msg.callId || msg.id || null;
-    const fromNumber = call.from || msg.from || msg.callerNumber || null;
-    const channel = call.type ? "voice" : msg.channel || "voice";
 
-    // Soft end detection (cover different payloads)
-    const status = call.status || msg.status || "";
-    const endedAt = call.endedAt || msg.endedAt || null;
-    const hasEndedFlag = /ended|completed|hangup|disconnected/i.test(String(status || ""));
-    const endDetected = Boolean(endedAt || hasEndedFlag);
+    const sessionId =
+      call?.id ||
+      msg?.sessionId ||
+      msg?.callId ||
+      msg?.id ||
+      msg?.conversationId ||
+      raw?.callId ||
+      null;
 
-    // Slim debug to verify extraction
+    const fromNumber =
+      call?.from ||
+      call?.callerNumber ||
+      msg?.from ||
+      msg?.callerNumber ||
+      null;
+
+    const channel = call?.type ? "voice" : msg?.channel || "voice";
+
+    const status = call?.status || msg?.status || "";
+    const endedAt =
+      call?.endedAt ||
+      msg?.endedAt ||
+      msg?.completedAt ||
+      (status && /ended|completed|hangup|disconnected/i.test(String(status)) ? new Date().toISOString() : null);
+
+    const text = pickText(msg, call);
+    const role = pickRole(msg);
+
+    // 3) Write a slim debug row of what we think we parsed
     await sbInsert("webhook_debug", {
       headers: { slim: true },
-      payload: {
-        evtType,
-        sessionId,
-        assistantId,
-        fromNumber,
-        status,
-        endedAt: endedAt || null,
-        text: typeof msg.text === "string" ? msg.text.slice(0, 120) : null,
-      },
+      payload: { evtType, sessionId, assistantId, fromNumber, status, endedAt, role, hasText: !!text },
     });
 
-    // Resolve client/assistant (auto-create assistant)
+    // 4) Resolve client/assistant (and auto-create assistant if needed)
     const { resolvedClientId, resolvedAssistantId } = await resolveClientAndAssistant({
       providerAssistantId: assistantId,
-      clientId: msg.metadata?.clientId || raw.metadata?.clientId || null,
+      clientId: msg?.metadata?.clientId || raw?.metadata?.clientId || null,
       fromNumber,
     });
 
-    // Heuristics for event kind
+    // 5) Event type heuristics
     const isMessage =
       evtType === "message.created" ||
-      typeof msg.text === "string" ||
-      !!msg.role ||
-      !!msg.toolName;
+      truthy(text) ||
+      !!msg?.role ||
+      !!msg?.speaker ||
+      !!msg?.toolName;
 
     const isStart =
       evtType === "call.started" ||
-      (!!call && !endDetected && !isMessage);
+      (!!call && !endedAt && !isMessage);
 
-    const isEnd = evtType === "call.ended" || endDetected || msg.outcome === "ended";
+    const isEnd =
+      evtType === "call.ended" ||
+      !!endedAt ||
+      msg?.outcome === "ended";
 
-    // Ensure session exists ASAP
+    // 6) Ensure session exists as soon as we see the call
     if (sessionId && (isStart || (!isEnd && !isMessage))) {
       await sbUpsert(
         "sessions",
@@ -183,17 +225,17 @@ exports.handler = async (event) => {
           client_id: resolvedClientId,
           assistant_id: resolvedAssistantId,
           channel,
-          started_at: call.startedAt || msg.createdAt || new Date().toISOString(),
-          prompt_version: msg.metadata?.promptVersion || "v1",
-          kb_version: msg.metadata?.kbVersion || "v1",
-          experiment: msg.metadata?.experiment || null,
+          started_at: call?.startedAt || msg?.createdAt || new Date().toISOString(),
+          prompt_version: msg?.metadata?.promptVersion || "v1",
+          kb_version: msg?.metadata?.kbVersion || "v1",
+          experiment: msg?.metadata?.experiment || null,
           outcome: null,
         },
         "provider_session_id"
       );
     }
 
-    // Message turns (create session if missing)
+    // 7) Message turns (create session if missing)
     if (sessionId && isMessage) {
       let session = await sbSelectOne("sessions", {
         select: "id, started_at",
@@ -208,10 +250,10 @@ exports.handler = async (event) => {
             client_id: resolvedClientId,
             assistant_id: resolvedAssistantId,
             channel,
-            started_at: call.startedAt || msg.createdAt || new Date().toISOString(),
-            prompt_version: msg.metadata?.promptVersion || "v1",
-            kb_version: msg.metadata?.kbVersion || "v1",
-            experiment: msg.metadata?.experiment || null,
+            started_at: call?.startedAt || msg?.createdAt || new Date().toISOString(),
+            prompt_version: msg?.metadata?.promptVersion || "v1",
+            kb_version: msg?.metadata?.kbVersion || "v1",
+            experiment: msg?.metadata?.experiment || null,
           },
           "provider_session_id"
         );
@@ -224,50 +266,53 @@ exports.handler = async (event) => {
       if (session?.id) {
         await sbInsert("turns", {
           session_id: session.id,
-          role: msg.role || "agent",
-          started_at: msg.createdAt || new Date().toISOString(),
-          latency_ms: msg.latencyMs ?? null,
-          text: typeof msg.text === "string" ? msg.text : null,
-          tool_name: msg.toolName || null,
-          fallback: !!msg.fallback,
-          tokens_in: msg.tokensIn ?? null,
-          tokens_out: msg.tokensOut ?? null,
+          role,
+          started_at: msg?.createdAt || new Date().toISOString(),
+          latency_ms: msg?.latencyMs ?? null,
+          text: text,
+          tool_name: msg?.toolName || null,
+          fallback: !!msg?.fallback,
+          tokens_in: msg?.tokensIn ?? null,
+          tokens_out: msg?.tokensOut ?? null,
         });
       }
     }
 
-    // Session end: set outcome + AHT
+    // 8) End-of-call patch (AHT, outcome, containment)
     if (sessionId && isEnd) {
       const existing = await sbSelectOne("sessions", {
         select: "id, started_at",
         provider_session_id: eq(sessionId),
       });
 
-      const ended = endedAt || new Date().toISOString();
+      const endTs = endedAt || new Date().toISOString();
       let ahtSeconds = null;
       if (existing?.started_at) {
         const startMs = new Date(existing.started_at).getTime();
-        const endMs = new Date(ended).getTime();
+        const endMs = new Date(endTs).getTime();
         ahtSeconds = Math.max(0, Math.round((endMs - startMs) / 1000));
       }
 
       const outcome =
-        msg.outcome ||
-        (call.hangupReason ? "abandoned" : "resolved");
+        msg?.outcome ||
+        (call?.hangupReason ? "abandoned" : "resolved");
+
       const containment =
-        typeof msg.containment === "boolean"
-          ? msg.containment
+        typeof msg?.containment === "boolean"
+          ? msg?.containment
           : outcome === "resolved"
           ? true
           : null;
 
       await sbUpdate("sessions", { provider_session_id: eq(sessionId) }, {
-        ended_at: ended,
-        hangup_reason: call.hangupReason || msg.hangupReason || null,
-        cost_cents: msg.costCents ?? null,
+        ended_at: endTs,
+        hangup_reason: call?.hangupReason || msg?.hangupReason || null,
+        cost_cents: msg?.costCents ?? null,
         aht_seconds: ahtSeconds,
         outcome,
         containment,
+        assistant_id: resolvedAssistantId ?? null,
+        client_id: resolvedClientId ?? null,
       });
     }
 
@@ -278,6 +323,9 @@ exports.handler = async (event) => {
     };
   } catch (err) {
     console.error("[vapi-webhook] error", err);
-    return { statusCode: 500, body: JSON.stringify({ error: err.message || "internal error" }) };
+    return {
+      statusCode: 500,
+      body: JSON.stringify({ error: err.message || "internal error" }),
+    };
   }
 };
