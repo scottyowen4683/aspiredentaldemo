@@ -1,6 +1,7 @@
 // netlify/functions/vapi-webhook.js
 const crypto = require("crypto");
 
+// --- Environment ------------------------------------------------------------
 const SUPABASE_URL  = process.env.SUPABASE_URL;
 const SERVICE_KEY   = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const DISABLE_SIG   = process.env.DISABLE_SIGNATURE_CHECK === "1";
@@ -8,6 +9,7 @@ const VAPI_SECRET   = process.env.VAPI_WEBHOOK_SECRET || "";
 const DEFAULT_RUBRIC_ID =
   process.env.EVAL_DEFAULT_RUBRIC_ID || "43d9b1fe-570f-4c97-abdb-fbbb73ef3d08";
 
+// --- Utility ----------------------------------------------------------------
 function log(...a) { try { console.log(...a); } catch {} }
 
 function verifySignature(raw, sig) {
@@ -76,73 +78,47 @@ async function sbUpsertEvalRun(session_id) {
   return { ok: res.ok, status: res.status, text };
 }
 
-// --- Helpers to read Vapi payloads -----------------------------------------
+// --- Payload parsing --------------------------------------------------------
 function getMessage(payload) {
   return payload?.message || null;
 }
 
-// On end-of-call-report we may not get a call id.
-// Fall back to a stable synthetic id based on timestamp.
-function deriveSessionId(msg) {
+function getCall(payload) {
   return (
-    msg?.callId ||
-    msg?.phoneCallId ||
-    msg?.conversationId ||
-    `fallback-${msg?.timestamp || Date.now()}`
+    payload?.data?.phoneCall ||
+    payload?.data?.call ||
+    payload?.message?.phoneCall ||
+    payload?.message?.conversation ||
+    payload?.data ||
+    null
   );
 }
 
 function getTimesFromMessage(msg) {
-  // msg.timestamp is millisecond epoch per your logs
-  const ts = typeof msg?.timestamp === "number"
-    ? new Date(msg.timestamp)
-    : new Date();
-
+  const ts = typeof msg?.timestamp === "number" ? new Date(msg.timestamp) : new Date();
   const ended_at = ts.toISOString();
-  // started_at not sent on message payloads; pick a safe earlier time so UI sorts correctly
   const started_at = new Date(ts.getTime() - 2 * 60 * 1000).toISOString();
   return { started_at, ended_at };
 }
 
 function extractSummaryFromMessage(msg) {
-  // Vapi end-of-call-report usually carries { analysis: { summary, successEvaluation, ... } }
-  const summary =
-    msg?.analysis?.summary ||
-    msg?.artifact?.summary ||
-    null;
-  return summary;
+  return msg?.analysis?.summary || msg?.artifact?.summary || null;
 }
 
 // --- Main handler -----------------------------------------------------------
 exports.handler = async (event) => {
   try {
-    // TEMP: Body preview to see incoming shapes
+    // Preview
     const rawBody = event.isBase64Encoded
       ? Buffer.from(event.body || "", "base64").toString("utf8")
       : (event.body || "");
-    const preview = rawBody.slice(0, 1000);
-    log("📞 Incoming webhook body preview:", preview);
+    log("📞 Incoming webhook body preview:", rawBody.slice(0, 1000));
 
-    // -------------------- GET: diagnostics --------------------
+    // ---------- Diagnostics ----------
     if (event.httpMethod === "GET") {
       const q = event.queryStringParameters || {};
-
-      if (q.diag === "env") {
-        return {
-          statusCode: 200,
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            ok: true,
-            SUPABASE_URL: !!SUPABASE_URL,
-            SERVICE_KEY: !!SERVICE_KEY,
-            DEFAULT_RUBRIC_ID,
-            DISABLE_SIGNATURE_CHECK: DISABLE_SIG,
-          }),
-        };
-      }
-
       if (q.diag === "write") {
-        const id = msg?.callId || msg?.phoneCallId || msg?.conversationId || crypto.randomUUID();
+        const id = crypto.randomUUID();
         const row = {
           id,
           started_at: new Date(Date.now() - 60_000).toISOString(),
@@ -151,13 +127,10 @@ exports.handler = async (event) => {
           channel: "voice",
           outcome: "ended",
           summary: "diagnostic insert from webhook",
-          hangup_reason: null,
-          cost_cents: null,
         };
         const result = await sbUpsertSession(row);
         let evalResult = null;
         if (result.ok) evalResult = await sbUpsertEvalRun(id);
-
         return {
           statusCode: result.ok ? 200 : 500,
           headers: { "Content-Type": "application/json" },
@@ -169,14 +142,12 @@ exports.handler = async (event) => {
           }),
         };
       }
-
       return { statusCode: 200, body: "vapi-webhook alive" };
     }
 
-    // -------------------- POST: real events --------------------
-    if (event.httpMethod !== "POST") {
+    // ---------- Webhook ----------
+    if (event.httpMethod !== "POST")
       return { statusCode: 405, body: "Method Not Allowed" };
-    }
 
     const raw = rawBody;
     const sig = event.headers["x-vapi-signature"] || event.headers["X-Vapi-Signature"] || "";
@@ -184,28 +155,29 @@ exports.handler = async (event) => {
 
     const payload = JSON.parse(raw);
     const msg = getMessage(payload);
+    if (!msg || msg.type !== "end-of-call-report") return { statusCode: 200, body: "ignored" };
 
-    // We only persist the final event that contains summary/transcript/etc.
-    if (!msg || msg.type !== "end-of-call-report") {
-      // Ignore mid-call noise so we don’t spam sessions
-      return { statusCode: 200, body: "ignored" };
-    }
+    const call = getCall(payload);
+    const id =
+      call?.id ||
+      msg?.callId ||
+      msg?.phoneCallId ||
+      msg?.conversationId ||
+      crypto.randomUUID();
 
-    const id = deriveSessionId(msg);
     const { started_at, ended_at } = getTimesFromMessage(msg);
-    const outcome = "ended";
     const summary = extractSummaryFromMessage(msg);
 
     const row = {
-      id,                       // uuid or fallback string -> make sure your column is uuid; if not, swap to text
-      assistant_id: msg?.assistantId || null,
+      id,
+      assistant_id: msg?.assistantId || call?.assistantId || null,
       started_at,
       ended_at,
       channel: "voice",
-      outcome,
-      summary,                  // short LLM summary from end-of-call-report
-      hangup_reason: msg?.endedReason || null,
-      cost_cents: null,         // unknown here; leave null
+      outcome: "ended",
+      summary,
+      hangup_reason: msg?.endedReason || call?.endedReason || null,
+      cost_cents: call?.cost ? Math.round(Number(call.cost) * 100) : null,
     };
 
     log("UPSERT SESSION ROW:", row);
@@ -218,10 +190,9 @@ exports.handler = async (event) => {
       };
     }
 
-    // Queue the rubric evaluation for this session
     await sbUpsertEvalRun(id);
-
     return { statusCode: 200, body: "ok" };
+
   } catch (err) {
     console.error("webhook error", err);
     return { statusCode: 500, body: "server error" };
