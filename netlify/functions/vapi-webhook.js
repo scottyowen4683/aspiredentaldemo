@@ -142,26 +142,47 @@ exports.handler = async (event) => {
       );
     }
 
-    // --- Message turns ---
-    if (sessionId && isMessage) {
-      const session = await sbSelectOne("sessions", {
-        select: "id",
-        provider_session_id: eq(sessionId),
-      });
-      if (session?.id) {
-        await sbInsert("turns", {
-          session_id: session.id,
-          role: msg.role || "agent",
-          started_at: msg.createdAt || new Date().toISOString(),
-          latency_ms: msg.latencyMs ?? null,
-          text: msg.text || null,
-          tool_name: msg.toolName || null,
-          fallback: !!msg.fallback,
-          tokens_in: msg.tokensIn ?? null,
-          tokens_out: msg.tokensOut ?? null,
-        });
-      }
-    }
+   // --- Message turns (ensure session exists first) ---
+if (sessionId && isMessage) {
+  // Ensure session exists (create a minimal one if not)
+  let session = await sbSelectOne("sessions", {
+    select: "id, started_at",
+    provider_session_id: eq(sessionId),
+  });
+
+  if (!session) {
+    await sbUpsert("sessions", {
+      provider_session_id: sessionId,
+      client_id: resolvedClientId,
+      assistant_id: resolvedAssistantId,
+      channel,
+      started_at: call.startedAt || msg.createdAt || new Date().toISOString(),
+      prompt_version: msg.metadata?.promptVersion || "v1",
+      kb_version: msg.metadata?.kbVersion || "v1",
+      experiment: msg.metadata?.experiment || null,
+    }, "provider_session_id");
+
+    session = await sbSelectOne("sessions", {
+      select: "id",
+      provider_session_id: eq(sessionId),
+    });
+  }
+
+  if (session?.id) {
+    await sbInsert("turns", {
+      session_id: session.id,
+      role: msg.role || "agent",
+      started_at: msg.createdAt || new Date().toISOString(),
+      latency_ms: msg.latencyMs ?? null,
+      text: msg.text || null,
+      tool_name: msg.toolName || null,
+      fallback: !!msg.fallback,
+      tokens_in: msg.tokensIn ?? null,
+      tokens_out: msg.tokensOut ?? null,
+    });
+  }
+}
+
 
     // --- Session end: compute AHT and default outcome if missing ---
     if (sessionId && isEnd) {
