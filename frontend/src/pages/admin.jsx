@@ -1,198 +1,186 @@
 import React, { useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
 
+function Badge({ color = "slate", children }) {
+  const map = {
+    green: "bg-green-100 text-green-700",
+    yellow: "bg-yellow-100 text-yellow-700",
+    red: "bg-red-100 text-red-700",
+    slate: "bg-slate-100 text-slate-700",
+    blue: "bg-blue-100 text-blue-700",
+  };
+  return <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium ${map[color]}`}>{children}</span>;
+}
+
+function ScorePill({ score }) {
+  let label = "Excellent", color = "green";
+  if (score < 90 && score >= 60) { label = "Good"; color = "yellow"; }
+  else if (score < 60) { label = "Needs Review"; color = "red"; }
+  return <Badge color={color}>{label} ({Math.max(0, Math.min(100, Math.round(score)))})</Badge>;
+}
+
 export default function Admin() {
   const [stats, setStats] = useState({ total: 0, containment: 0, aht: 0 });
   const [rows, setRows] = useState([]);
+  const [detail, setDetail] = useState(null); // for modal
 
   useEffect(() => {
     (async () => {
       const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
-      // 1) recent sessions
-      const { data: sessions, error: sErr } = await supabase
+      // Pull sessions joined with assistants & clients if available
+      const { data: sessionsData, error } = await supabase
         .from("sessions")
-        .select("id,provider_session_id,started_at,ended_at,outcome,containment,aht_seconds")
+        .select(`*,
+                 assistant:assistant_id ( name ),
+                 client:client_id ( name ),
+                 eval:eval_runs!eval_runs_session_id_fkey( overall_score, summary, suggestions, status )`)
         .gte("started_at", since)
         .order("started_at", { ascending: false })
-        .limit(50);
-      if (sErr || !sessions) return;
+        .limit(100);
 
-      // 2) evals for those sessions
-      const sessionIds = sessions.map((s) => s.id);
-      let evalsBySession = {};
-      if (sessionIds.length) {
-        const { data: evals } = await supabase
-          .from("eval_runs")
-          .select("session_id,overall_score,status,summary")
-          .in("session_id", sessionIds);
-        (evals || []).forEach((e) => {
-          evalsBySession[e.session_id] = e;
-        });
-      }
-
-      // helper: compute AHT if not stored
-      const computeAht = (s) => {
-        if (typeof s.aht_seconds === "number") return s.aht_seconds;
-        if (s.started_at && s.ended_at) {
-          const start = new Date(s.started_at).getTime();
-          const end = new Date(s.ended_at).getTime();
-          return Math.max(0, Math.round((end - start) / 1000));
-        }
-        return null;
-      };
+      if (error) { console.error(error); return; }
+      const sessions = sessionsData || [];
 
       // KPIs
       const total = sessions.length;
-      const resolved = sessions.filter((s) => s.outcome === "resolved").length;
+      const resolved = sessions.filter(s => s.outcome === "resolved").length;
       const containment = total ? Math.round((resolved / total) * 100) : 0;
-      const aht = total
-        ? Math.round(
-            sessions.reduce((acc, s) => acc + (computeAht(s) || 0), 0) / total
-          )
-        : 0;
 
-      // Map display rows
-      const mapped = sessions.map((s) => {
-        const evalRow = evalsBySession[s.id];
-        const ahtVal = computeAht(s);
-        const inProgress = !s.outcome && !s.ended_at;
+      const ahtVals = sessions.map(s => s.aht_seconds).filter(v => typeof v === "number" && v > 0);
+      const aht = ahtVals.length ? Math.round(ahtVals.reduce((a,b)=>a+b,0) / ahtVals.length) : 0;
 
-        // Prefer LLM score
-        let score =
-          typeof evalRow?.overall_score === "number"
-            ? Math.round(evalRow.overall_score)
-            : null;
+      setStats({ total, containment, aht });
 
-        // Fallback heuristic if LLM score missing
-        if (score === null) {
-          let tmp = 100;
-          if (!inProgress && s.outcome !== "resolved") tmp -= 30;
-          if ((ahtVal || 0) > 180) tmp -= 10;
-          if (s.containment === false) tmp -= 10;
-          score = Math.max(0, Math.min(100, tmp));
-        }
-
-        // traffic light
-        let label = "Excellent",
-          color = "bg-green-500";
-        if (score < 90 && score >= 60) {
-          label = "Good";
-          color = "bg-yellow-500";
-        } else if (score < 60) {
-          label = "Needs Review";
-          color = "bg-red-500";
-        }
-
-        // summary (first line only)
-        const summary =
-          (evalRow?.summary || "")
-            .split(/\n+/)[0]
-            .slice(0, 160) || null;
+      // normalize rows with score
+      const list = sessions.map(s => {
+        const score = typeof s.eval?.overall_score === "number" ? s.eval.overall_score : null;
+        let scorePill = null;
+        if (score !== null) scorePill = <ScorePill score={score} />;
+        else if (s.eval?.status === "pending") scorePill = <Badge color="yellow">eval pending</Badge>;
+        else scorePill = <Badge>—</Badge>;
 
         return {
-          ...s,
+          id: s.provider_session_id,
+          started_at: s.started_at,
+          outcome: s.outcome || "in-progress",
+          aht: s.aht_seconds || 0,
+          client: s.client?.name || "—",
+          assistant: s.assistant?.name || "—",
           score,
-          label,
-          color,
-          ahtVal,
-          inProgress,
-          evalStatus: evalRow?.status || (evalRow ? "complete" : null),
-          evalSummary: summary,
+          scorePill,
+          details: {
+            summary: s.eval?.summary || "",
+            suggestions: Array.isArray(s.eval?.suggestions) ? s.eval.suggestions : [],
+          }
         };
       });
 
-      setStats({ total, containment, aht });
-      setRows(mapped);
+      setRows(list);
     })();
   }, []);
 
-  const fmtSecs = (s) => (s || s === 0 ? Math.round(s) : "–");
-
   return (
     <div className="p-8 bg-gray-50 min-h-screen">
-      <h1 className="text-2xl font-bold mb-6">Aspire AI – Admin Dashboard</h1>
+      <h1 className="text-2xl font-bold mb-6">Aspire AI — Admin Dashboard</h1>
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-3 gap-4 mb-8">
-        <div className="bg-white p-4 rounded shadow text-center">
-          <h2 className="text-gray-500">Total Sessions (24 h)</h2>
-          <p className="text-3xl font-bold">{stats.total}</p>
+      {/* KPIs */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+        <div className="bg-white p-5 rounded-xl shadow">
+          <div className="text-slate-500">Total Sessions (24 h)</div>
+          <div className="text-4xl font-bold mt-1">{stats.total}</div>
         </div>
-        <div className="bg-white p-4 rounded shadow text-center">
-          <h2 className="text-gray-500">Containment %</h2>
-          <p className="text-3xl font-bold">{stats.containment}%</p>
+        <div className="bg-white p-5 rounded-xl shadow">
+          <div className="text-slate-500">Containment %</div>
+          <div className="text-4xl font-bold mt-1">{stats.containment}%</div>
         </div>
-        <div className="bg-white p-4 rounded shadow text-center">
-          <h2 className="text-gray-500">Avg Handle Time (s)</h2>
-          <p className="text-3xl font-bold">{stats.aht}</p>
+        <div className="bg-white p-5 rounded-xl shadow">
+          <div className="text-slate-500">Avg Handle Time (s)</div>
+          <div className="text-4xl font-bold mt-1">{stats.aht}</div>
         </div>
       </div>
 
-      {/* Sessions Table */}
-      <div className="bg-white rounded shadow overflow-hidden">
+      {/* Table */}
+      <div className="bg-white rounded-xl shadow overflow-hidden">
         <table className="w-full text-left">
-          <thead className="bg-gray-100">
+          <thead className="bg-slate-100 text-slate-700">
             <tr>
-              <th className="p-2">Started At</th>
-              <th className="p-2">Outcome</th>
-              <th className="p-2">AHT (s)</th>
-              <th className="p-2 w-64">Score</th>
+              <th className="p-3">Started At</th>
+              <th className="p-3">Client</th>
+              <th className="p-3">Assistant</th>
+              <th className="p-3">Outcome</th>
+              <th className="p-3">AHT (s)</th>
+              <th className="p-3">Score</th>
+              <th className="p-3"></th>
             </tr>
           </thead>
-          <tbody>
-            {rows.map((s) => (
-              <tr key={s.provider_session_id} className="border-b align-top">
-                <td className="p-2">{new Date(s.started_at).toLocaleString()}</td>
-                <td className="p-2">
-                  {s.inProgress ? (
-                    <span className="inline-flex px-2 py-1 text-xs rounded bg-gray-100 text-gray-700">
-                      in-progress
-                    </span>
-                  ) : s.outcome ? (
-                    <span
-                      className={`inline-flex px-2 py-1 text-xs rounded ${
-                        s.outcome === "resolved"
-                          ? "bg-green-100 text-green-700"
-                          : "bg-gray-100 text-gray-700"
-                      }`}
-                    >
-                      {s.outcome}
-                    </span>
-                  ) : (
-                    <span className="text-gray-400">—</span>
-                  )}
-                  {s.evalStatus === "pending" && (
-                    <span className="ml-2 inline-flex px-2 py-0.5 text-[10px] rounded bg-amber-100 text-amber-700">
-                      eval pending
-                    </span>
-                  )}
+          <tbody className="divide-y">
+            {rows.map((r) => (
+              <tr key={r.id} className="hover:bg-slate-50">
+                <td className="p-3">{new Date(r.started_at).toLocaleString()}</td>
+                <td className="p-3">{r.client}</td>
+                <td className="p-3">{r.assistant}</td>
+                <td className="p-3">
+                  {r.outcome === "resolved" && <Badge color="green">resolved</Badge>}
+                  {r.outcome === "abandoned" && <Badge color="red">abandoned</Badge>}
+                  {r.outcome === "in-progress" && <Badge color="blue">in-progress</Badge>}
                 </td>
-                <td className="p-2">{fmtSecs(s.ahtVal)}</td>
-                <td className="p-2">
-                  <div className="flex flex-col gap-1">
-                    <span className={`text-white px-2 py-1 rounded text-sm ${s.color}`}>
-                      {s.label} ({s.score})
-                    </span>
-                    {s.evalSummary && (
-                      <div className="text-xs text-slate-600">
-                        {s.evalSummary}
-                      </div>
-                    )}
-                  </div>
+                <td className="p-3">{r.aht}</td>
+                <td className="p-3">{r.scorePill}</td>
+                <td className="p-3">
+                  <button
+                    onClick={() => setDetail({ id: r.id, ...r.details })}
+                    className="text-sm px-3 py-1 rounded bg-slate-900 text-white hover:bg-slate-800"
+                  >
+                    View details
+                  </button>
                 </td>
               </tr>
             ))}
             {rows.length === 0 && (
-              <tr>
-                <td className="p-4 text-gray-500" colSpan={4}>
-                  No sessions in the last 24 hours.
-                </td>
-              </tr>
+              <tr><td className="p-6 text-slate-500" colSpan={7}>No sessions in the last 24 hours.</td></tr>
             )}
           </tbody>
         </table>
       </div>
+
+      {/* Modal */}
+      {detail && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white w-full max-w-2xl rounded-xl shadow-xl p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold">Session details</h2>
+              <button onClick={() => setDetail(null)} className="text-slate-500 hover:text-slate-700">✕</button>
+            </div>
+            <div className="space-y-4 max-h-[70vh] overflow-auto">
+              {detail.summary && (
+                <section>
+                  <h3 className="font-medium text-slate-700">Summary</h3>
+                  <p className="mt-1 text-slate-800 whitespace-pre-wrap">{detail.summary}</p>
+                </section>
+              )}
+              {detail.suggestions?.length > 0 && (
+                <section>
+                  <h3 className="font-medium text-slate-700">Suggestions</h3>
+                  <ul className="mt-2 list-disc pl-5 space-y-1">
+                    {detail.suggestions.map((s, i) => (
+                      <li key={i} className="text-slate-800">
+                        {typeof s === "string" ? s : `${s.criterion ? `${s.criterion}: ` : ""}${s.tip || JSON.stringify(s)}`}
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              )}
+              {!detail.summary && (!detail.suggestions || detail.suggestions.length === 0) && (
+                <p className="text-slate-600">No evaluator details for this session yet.</p>
+              )}
+            </div>
+            <div className="mt-6 text-right">
+              <button onClick={() => setDetail(null)} className="px-4 py-2 rounded bg-slate-900 text-white">Close</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
