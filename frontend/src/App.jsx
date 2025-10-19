@@ -2,8 +2,10 @@
 import React from "react";
 import { Routes, Route, Outlet, useNavigate, Link } from "react-router-dom";
 import AudienceModal from "./components/AudienceModal.jsx";
-import Government from "./pages/Government.jsx";
-import Business from "./pages/Business.jsx";
+
+// ✅ lowercase imports to match pages/government.jsx & pages/business.jsx
+import Government from "./pages/government.jsx";
+import Business from "./pages/business.jsx";
 
 const ASPIRE_LOGO =
   "https://raw.githubusercontent.com/scottyowen4683/Aspirereception/refs/heads/feature/ai-receptionist/frontend/aspire.png";
@@ -39,7 +41,7 @@ function Layout() {
   );
 }
 
-/* ---------- Landing (unchanged) ---------- */
+/* ---------- Landing page ---------- */
 function Landing() {
   const navigate = useNavigate();
   return (
@@ -74,7 +76,7 @@ function Landing() {
   );
 }
 
-/* ---------- App with real routes ---------- */
+/* ---------- App with lowercase pages ---------- */
 export default function App() {
   return (
     <Routes>
