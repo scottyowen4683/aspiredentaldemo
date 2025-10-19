@@ -1,86 +1,147 @@
+// netlify/functions/vapi-outbound-call.js
 const VAPI_BASE_URL = "https://api.vapi.ai";
 
-// ---- Simple per-IP 24-hour limiter ----
-const DAY_MS = 24 * 60 * 60 * 1000;
-const MAX_DAILY_CALLS = 3;
-let ipLog = {}; // { ip: { count, ts } }
+/**
+ * Required Netlify env:
+ * - VAPI_API_KEY
+ * - VAPI_PHONE_NUMBER_ID    (Vapi "phone number ID", not the E.164)
+ *
+ * Optional:
+ * - MAX_DAILY_CALLS         (number; 0 or unset = no limit)
+ * - DEBUG_LOG=1             (prints verbose logs in Netlify function logs)
+ */
 
-function limitedToday(ip) {
-  const now = Date.now();
-  const record = ipLog[ip];
-  if (!record || now - record.ts > DAY_MS) {
-    ipLog[ip] = { count: 1, ts: now };
-    return false;
-  }
-  if (record.count >= MAX_DAILY_CALLS) return true;
-  record.count++;
-  ipLog[ip] = record;
-  return false;
+const DEBUG = process.env.DEBUG_LOG === "1";
+function log(...args) { if (DEBUG) console.log(...args); }
+
+// ---------- Simple per-IP 24h limiter (in-memory; resets on cold start) ----------
+const DAY_MS = 24 * 60 * 60 * 1000;
+const MAX_DAILY_CALLS = Number(process.env.MAX_DAILY_CALLS || "0"); // 0 = no cap
+const ipLog = new Map(); // key: "<ip>:YYYY-MM-DD" -> { count, ts }
+
+function getClientIp(event) {
+  const xff = event.headers["x-forwarded-for"] || event.headers["x-real-ip"] || event.headers["client-ip"];
+  if (!xff) return "unknown";
+  // x-forwarded-for can be "client, proxy1, proxy2" - take the first
+  return String(xff).split(",")[0].trim() || "unknown";
 }
 
-// ---- Main handler ----
+function checkAndCount(ip) {
+  if (!MAX_DAILY_CALLS) return { ok: true, used: 0, limit: 0 };
+  const today = new Date().toISOString().slice(0, 10);
+  const key = `${ip}:${today}`;
+  const rec = ipLog.get(key);
+
+  if (!rec) {
+    ipLog.set(key, { count: 1, ts: Date.now() });
+    return { ok: true, used: 1, limit: MAX_DAILY_CALLS };
+  }
+
+  // reset if over a day old (defensive; we already key by date)
+  if (Date.now() - rec.ts > DAY_MS) {
+    ipLog.set(key, { count: 1, ts: Date.now() });
+    return { ok: true, used: 1, limit: MAX_DAILY_CALLS };
+  }
+
+  if (rec.count >= MAX_DAILY_CALLS) {
+    return { ok: false, used: rec.count, limit: MAX_DAILY_CALLS };
+  }
+
+  rec.count += 1;
+  rec.ts = Date.now();
+  ipLog.set(key, rec);
+  return { ok: true, used: rec.count, limit: MAX_DAILY_CALLS };
+}
+
+// ---------- Helpers ----------
+function normalizeAuNumber(input) {
+  if (!input) return null;
+  const n = String(input).replace(/\s+/g, "");
+  // Accept 04xxxxxxxx and convert to +614xxxxxxxx
+  if (/^04\d{8}$/.test(n)) return n.replace(/^0/, "+61");
+  // Accept +61xxxxxxxxx (9 digits after +61)
+  if (/^\+61\d{9}$/.test(n)) return n;
+  return null;
+}
+
+// ---------- Main handler ----------
 exports.handler = async (event) => {
   if (event.httpMethod !== "POST") {
     return { statusCode: 405, body: "Method Not Allowed" };
   }
 
-  const ip =
-    event.headers["x-nf-client-connection-ip"] ||
-    event.headers["x-forwarded-for"] ||
-    "unknown";
-
-  // ✅ daily limit: 3 calls per IP per 24 hours
-  if (limitedToday(ip)) {
-    return {
-      statusCode: 429,
-      body: JSON.stringify({
-        message: "Daily call limit reached. Try again tomorrow.",
-      }),
-    };
-  }
-
   try {
+    const ip = getClientIp(event);
     const { to, assistantId, context } = JSON.parse(event.body || "{}");
+
     if (!to || !assistantId) {
       return { statusCode: 400, body: JSON.stringify({ message: "Missing to/assistantId" }) };
     }
 
-    const phoneNumberId = process.env.VAPI_PHONE_NUMBER_ID;
-    if (!phoneNumberId) {
-      return { statusCode: 500, body: JSON.stringify({ message: "Server missing VAPI_PHONE_NUMBER_ID" }) };
+    // Rate limit (soft)
+    const gate = checkAndCount(ip);
+    if (!gate.ok) {
+      log(`CALL BLOCKED: ip=${ip} used=${gate.used}/${gate.limit}`);
+      return {
+        statusCode: 429,
+        body: JSON.stringify({
+          message: "Daily call limit reached. Try again tomorrow.",
+          ip,
+          limit: gate.limit,
+        }),
+      };
     }
 
-    if (!/^\+61\d{9}$/.test(to)) {
+    const API_KEY = process.env.VAPI_API_KEY;
+    const PHONE_ID = process.env.VAPI_PHONE_NUMBER_ID;
+    if (!API_KEY || !PHONE_ID) {
+      return {
+        statusCode: 500,
+        body: JSON.stringify({ message: "Server missing VAPI_API_KEY or VAPI_PHONE_NUMBER_ID" }),
+      };
+    }
+
+    const e164 = normalizeAuNumber(to);
+    if (!e164) {
       return {
         statusCode: 400,
-        body: JSON.stringify({ message: "Enter a valid Australian number (e.g. 0412 345 678)" }),
+        body: JSON.stringify({
+          message: "Enter a valid Australian mobile: 04xxxxxxxx or +61xxxxxxxxx",
+        }),
       };
     }
 
     const payload = {
       assistantId,
-      phoneNumberId,
-      customer: { number: to },
-      metadata: { feature: "website-cta-outbound", ...(context || {}) },
+      type: "outbound-phone-call",
+      phoneNumberId: PHONE_ID,
+      customer: { number: e164 },
+      metadata: { feature: "website-cta-outbound", ip, ...(context || {}) },
     };
 
-    const r = await fetch(`${VAPI_BASE_URL}/call/phone`, {
+    log("Outbound payload -> Vapi:", JSON.stringify(payload));
+    const res = await fetch(`${VAPI_BASE_URL}/call`, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${process.env.VAPI_API_KEY}`,
+        Authorization: `Bearer ${API_KEY}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify(payload),
     });
 
-    const text = await r.text();
-    if (!r.ok) {
-      return { statusCode: r.status, body: JSON.stringify({ message: `Vapi error: ${text}` }) };
+    const text = await res.text();
+    log("Vapi /call response:", res.status, text);
+
+    if (!res.ok) {
+      return {
+        statusCode: res.status,
+        body: JSON.stringify({ message: "Vapi error", status: res.status, details: text }),
+      };
     }
 
-    return { statusCode: 201, body: text };
-  } catch (e) {
-    console.error(e);
+    return { statusCode: 200, body: text };
+  } catch (err) {
+    console.error("outbound-call error:", err);
     return { statusCode: 500, body: JSON.stringify({ message: "Server error triggering call." }) };
   }
 };
