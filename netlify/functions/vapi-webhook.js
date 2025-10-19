@@ -1,6 +1,5 @@
 // netlify/functions/vapi-webhook.js
 const crypto = require("crypto");
-const fetch = require("node-fetch");
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SERVICE_KEY  = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -39,6 +38,33 @@ async function upsertSession(row){
   return res.ok;
 }
 
+// ✅ update or insert into top_questions_30d table
+async function updateTopQuestions(questions) {
+  if (!questions || !questions.length) return;
+  const values = questions.map(q => ({
+    question_text: q,
+    asked_at: new Date().toISOString()
+  }));
+
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/top_questions_30d`, {
+    method: "POST",
+    headers: {
+      apikey: SERVICE_KEY,
+      Authorization: `Bearer ${SERVICE_KEY}`,
+      "Content-Type": "application/json",
+      Prefer: "resolution=ignore-duplicates"
+    },
+    body: JSON.stringify(values)
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    console.error("❌ Failed to insert top questions:", res.status, text);
+  } else {
+    log(`✅ Inserted ${values.length} top questions`);
+  }
+}
+
 exports.handler = async (event)=>{
   if(event.httpMethod!=="POST") 
     return {statusCode:200,body:"ok"};
@@ -53,6 +79,16 @@ exports.handler = async (event)=>{
   if(!call_id) return {statusCode:200,body:"no call id"};
 
   const status = mapStatus(pc?.status);
+
+  // ✅ extract top user questions
+  let top_questions = [];
+  if (Array.isArray(pc?.messages)) {
+    top_questions = pc.messages
+      .filter(m => m.role === "user" && typeof m.text === "string")
+      .map(m => m.text)
+      .slice(0, 5);
+  }
+
   const row = {
     id: call_id,
     assistant_id: pc?.assistantId || payload.assistantId,
@@ -63,6 +99,7 @@ exports.handler = async (event)=>{
     from_number: pc?.from?.phoneNumber || null,
     to_number: pc?.customer?.number || null,
     last_event_type: payload.event || payload.type || "unknown",
+    top_questions,
     updated_at: new Date().toISOString(),
     raw: payload
   };
@@ -71,7 +108,10 @@ exports.handler = async (event)=>{
   const ok = await upsertSession(row);
   if(!ok) return {statusCode:500,body:"db fail"};
 
-  // if ended -> queue eval
+  // ✅ also insert into 30-day top questions log
+  await updateTopQuestions(top_questions);
+
+  // ✅ queue eval automatically when ended
   if(status==="ended"){
     const evalBody = {
       session_id: call_id,
