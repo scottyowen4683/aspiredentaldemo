@@ -55,7 +55,7 @@ function pickText(msg, call) {
   const cands = [
     msg?.text,
     msg?.content?.text,
-    msg?.transcript,
+    msg?.transcript,             // Vapi often provides this
     msg?.asr,
     msg?.nlu?.text,
     msg?.message?.text,
@@ -144,7 +144,7 @@ exports.handler = async (event) => {
     // Full raw for deep debug
     await sbInsert("webhook_debug", { headers: event.headers, payload: raw });
 
-    // Normalize
+    // Normalize to your payload shape
     const msg = raw.message || raw;
     const call = msg.call || msg.data?.call || msg.data || {};
     const evtType = raw.type || raw.event || msg.type || msg.event || null;
@@ -167,6 +167,7 @@ exports.handler = async (event) => {
       null;
 
     const fromNumber =
+      call?.customer?.number ||
       call?.from ||
       call?.callerNumber ||
       msg?.from ||
@@ -185,13 +186,32 @@ exports.handler = async (event) => {
     const text = pickText(msg, call);
     const role = pickRole(msg);
 
-    // Slim debug to verify extraction
+    // From your confirmed payload:
+    const transcriptFull =
+      msg?.transcript ||
+      msg?.call?.transcript ||
+      msg?.artifact?.transcript ||
+      msg?.analysis?.summary ||
+      null;
+
+    const promptSnapshot =
+      msg?.assistant?.model?.messages?.[0]?.content ||
+      msg?.artifact?.messages?.[0]?.message ||
+      null;
+
+    const summary = msg?.summary || msg?.analysis?.summary || null;
+    const endedReason = msg?.endedReason || msg?.call?.endedReason || null;
+    const recordingUrl = msg?.recordingUrl || msg?.call?.recordingUrl || null;
+
+    // Slim debug
     await sbInsert("webhook_debug", {
       headers: { slim: true },
       payload: {
         evtType, sessionId, assistantId, fromNumber, status,
         endedAt: endedAt || null, role,
-        textPreview: typeof text === "string" ? text.slice(0, 40) : null,
+        textPreview: typeof text === "string" ? text.slice(0, 60) : null,
+        hasTranscriptFull: !!transcriptFull,
+        hasPrompt: !!promptSnapshot,
       },
     });
 
@@ -282,7 +302,7 @@ exports.handler = async (event) => {
       }
     }
 
-    // End-of-call: ensure session exists, then patch
+    // End-of-call: ensure session exists, then patch + store artifacts
     if (sessionId && isEnd) {
       let existing = await sbSelectOne("sessions", {
         select: "id, started_at",
@@ -340,7 +360,40 @@ exports.handler = async (event) => {
         containment,
         assistant_id: resolvedAssistantId ?? null,
         client_id: resolvedClientId ?? null,
+        summary: summary || null,
+        ended_reason: endedReason || null,
+        recording_url: recordingUrl || null,
       });
+
+      // Store artifacts if present
+      if (existing?.id && (transcriptFull || promptSnapshot)) {
+        await sbUpsert(
+          "session_artifacts",
+          {
+            session_id: existing.id,
+            provider_session_id: sessionId,
+            prompt_snapshot: promptSnapshot || null,
+            transcript_full: transcriptFull || null,
+            extras: {
+              costBreakdown: msg?.costBreakdown || null,
+              analysis: msg?.analysis || null,
+              artifactLogUrl: msg?.artifact?.logUrl || null,
+              recordingUrl: recordingUrl || null,
+            },
+          },
+          "session_id"
+        );
+
+        // Optional: add a synthetic "full transcript" turn so UI shows content even without per-turn events
+        if (transcriptFull) {
+          await sbInsert("turns", {
+            session_id: existing.id,
+            role: "agent",
+            started_at: endTs,
+            text: `[FULL TRANSCRIPT]\n${String(transcriptFull).slice(0, 8000)}`,
+          });
+        }
+      }
     }
 
     return {
