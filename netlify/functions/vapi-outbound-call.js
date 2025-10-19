@@ -1,5 +1,8 @@
 // /netlify/functions/vapi-outbound-call.js
-// Triggers a Vapi outbound call using your assistant + fromNumber
+// Handles outbound calls through Vapi and ensures call event data
+// returns to your webhook for transcript + scoring + dashboard logging.
+
+const VAPI_BASE_URL = "https://api.vapi.ai";
 
 export const handler = async (event) => {
   if (event.httpMethod !== "POST") {
@@ -7,58 +10,94 @@ export const handler = async (event) => {
   }
 
   try {
-    const {
-      to,
-      fromNumber = process.env.VITE_VAPI_FROM_NUMBER, // E.164 callerID
-      assistantId,
-      context = {},
-    } = JSON.parse(event.body || "{}");
+    // Parse body from front end
+    const { to, assistantId, context = {} } = JSON.parse(event.body || "{}");
 
     if (!to || !assistantId) {
       return {
         statusCode: 400,
-        body: JSON.stringify({ message: "Missing to or assistantId" }),
+        body: JSON.stringify({ message: "Missing 'to' or 'assistantId'" }),
       };
     }
 
+    // --- Load environment values ---
     const VAPI_API_KEY = process.env.VAPI_API_KEY;
     const VAPI_PHONE_NUMBER_ID = process.env.VAPI_PHONE_NUMBER_ID;
+    const FROM_NUMBER = process.env.VITE_VAPI_FROM_NUMBER;
+    const WEBHOOK_URL =
+      process.env.VAPI_WEBHOOK_URL ||
+      "https://aspireexecutive.ai/.netlify/functions/vapi-webhook";
+
     if (!VAPI_API_KEY || !VAPI_PHONE_NUMBER_ID) {
       return {
         statusCode: 500,
-        body: JSON.stringify({ message: "Server missing VAPI credentials" }),
+        body: JSON.stringify({
+          message:
+            "Server missing required Vapi environment variables (VAPI_API_KEY or VAPI_PHONE_NUMBER_ID).",
+        }),
       };
     }
 
-    // Optional simple abuse guard (per IP / day)
-    const maxDaily = parseInt(process.env.MAX_DAILY_CALLS || "50", 10);
-    const ip = event.headers["x-forwarded-for"]?.split(",")[0] || "unknown";
-    // You can wire a Redis/Supabase counter here if needed. Keeping minimal.
+    // --- Optional: basic call limit / IP metadata ---
+    const ip =
+      event.headers["x-forwarded-for"]?.split(",")[0] ||
+      event.headers["client-ip"] ||
+      "unknown";
 
-    const res = await fetch("https://api.vapi.ai/call", {
+    // --- Compose request body for Vapi API ---
+    const body = {
+      assistantId,
+      phoneNumberId: VAPI_PHONE_NUMBER_ID,
+      from: FROM_NUMBER,
+      to,
+      webhook: WEBHOOK_URL, // 👈 ensures call events come back to your webhook
+      metadata: { ip, ...context },
+    };
+
+    // --- Make request to Vapi ---
+    const res = await fetch(`${VAPI_BASE_URL}/call`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${VAPI_API_KEY}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        assistantId,
-        phoneNumberId: VAPI_PHONE_NUMBER_ID,
-        from: fromNumber,          // your purchased number
-        to,                        // target number
-        metadata: { ip, ...context }, // comes back in webhook
-      }),
+      body: JSON.stringify(body),
     });
 
+    const text = await res.text();
     if (!res.ok) {
-      const text = await res.text();
-      return { statusCode: 502, body: JSON.stringify({ message: text }) };
+      console.error("Vapi API error:", res.status, text);
+      return {
+        statusCode: 502,
+        body: JSON.stringify({
+          ok: false,
+          status: res.status,
+          error: text,
+        }),
+      };
     }
 
-    const data = await res.json();
-    return { statusCode: 200, body: JSON.stringify({ ok: true, data }) };
-  } catch (e) {
-    console.error(e);
-    return { statusCode: 500, body: JSON.stringify({ message: "Server error" }) };
+    // --- Parse success response ---
+    let data = {};
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = { raw: text };
+    }
+
+    console.log("✅ Outbound call triggered:", data);
+    return {
+      statusCode: 200,
+      body: JSON.stringify({ ok: true, data }),
+    };
+  } catch (err) {
+    console.error("❌ Outbound call error:", err);
+    return {
+      statusCode: 500,
+      body: JSON.stringify({
+        message: "Server error during outbound call.",
+        error: err.message,
+      }),
+    };
   }
 };
