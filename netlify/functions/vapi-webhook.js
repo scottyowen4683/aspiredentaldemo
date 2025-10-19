@@ -97,6 +97,7 @@ exports.handler = async (event) => {
 
   try {
     const body = JSON.parse(event.body || "{}");
+    await sbInsert("webhook_debug", { headers: event.headers, payload: body });
     const { type, data } = body;
 
     // Pull common fields we may need from the event
