@@ -60,6 +60,7 @@ function pickText(msg, call) {
     msg?.nlu?.text,
     msg?.message?.text,
     call?.lastUtterance,
+    call?.summary,
   ];
   for (const v of cands) {
     if (typeof v === "string" && v.trim()) return v;
@@ -68,9 +69,8 @@ function pickText(msg, call) {
 }
 function pickRole(msg) {
   if (msg?.role) return msg.role;
-  if (msg?.speaker) return msg.speaker; // some payloads use "speaker"
+  if (msg?.speaker) return msg.speaker;
   if (msg?.toolName) return "tool";
-  // crude fallback
   return "agent";
 }
 function truthy(v) { return v !== undefined && v !== null && v !== ""; }
@@ -141,13 +141,12 @@ exports.handler = async (event) => {
   try {
     const raw = JSON.parse(event.body || "{}");
 
-    // 1) Store the full raw (once) for deep debugging if needed
+    // Full raw for deep debug
     await sbInsert("webhook_debug", { headers: event.headers, payload: raw });
 
-    // 2) Normalize across Vapi variants
+    // Normalize
     const msg = raw.message || raw;
     const call = msg.call || msg.data?.call || msg.data || {};
-
     const evtType = raw.type || raw.event || msg.type || msg.event || null;
 
     const assistantId =
@@ -186,20 +185,24 @@ exports.handler = async (event) => {
     const text = pickText(msg, call);
     const role = pickRole(msg);
 
-    // 3) Write a slim debug row of what we think we parsed
+    // Slim debug to verify extraction
     await sbInsert("webhook_debug", {
       headers: { slim: true },
-      payload: { evtType, sessionId, assistantId, fromNumber, status, endedAt, role, hasText: !!text },
+      payload: {
+        evtType, sessionId, assistantId, fromNumber, status,
+        endedAt: endedAt || null, role,
+        textPreview: typeof text === "string" ? text.slice(0, 40) : null,
+      },
     });
 
-    // 4) Resolve client/assistant (and auto-create assistant if needed)
+    // Resolve entities
     const { resolvedClientId, resolvedAssistantId } = await resolveClientAndAssistant({
       providerAssistantId: assistantId,
       clientId: msg?.metadata?.clientId || raw?.metadata?.clientId || null,
       fromNumber,
     });
 
-    // 5) Event type heuristics
+    // Event heuristics
     const isMessage =
       evtType === "message.created" ||
       truthy(text) ||
@@ -213,10 +216,11 @@ exports.handler = async (event) => {
 
     const isEnd =
       evtType === "call.ended" ||
+      evtType === "end-of-call-report" ||
       !!endedAt ||
       msg?.outcome === "ended";
 
-    // 6) Ensure session exists as soon as we see the call
+    // Ensure session exists on start/first sight
     if (sessionId && (isStart || (!isEnd && !isMessage))) {
       await sbUpsert(
         "sessions",
@@ -235,7 +239,7 @@ exports.handler = async (event) => {
       );
     }
 
-    // 7) Message turns (create session if missing)
+    // Message turns (create session if missing)
     if (sessionId && isMessage) {
       let session = await sbSelectOne("sessions", {
         select: "id, started_at",
@@ -269,7 +273,7 @@ exports.handler = async (event) => {
           role,
           started_at: msg?.createdAt || new Date().toISOString(),
           latency_ms: msg?.latencyMs ?? null,
-          text: text,
+          text,
           tool_name: msg?.toolName || null,
           fallback: !!msg?.fallback,
           tokens_in: msg?.tokensIn ?? null,
@@ -278,12 +282,35 @@ exports.handler = async (event) => {
       }
     }
 
-    // 8) End-of-call patch (AHT, outcome, containment)
+    // End-of-call: ensure session exists, then patch
     if (sessionId && isEnd) {
-      const existing = await sbSelectOne("sessions", {
+      let existing = await sbSelectOne("sessions", {
         select: "id, started_at",
         provider_session_id: eq(sessionId),
       });
+
+      // If we never saw a start/message, create a minimal session now
+      if (!existing) {
+        await sbUpsert(
+          "sessions",
+          {
+            provider_session_id: sessionId,
+            client_id: resolvedClientId,
+            assistant_id: resolvedAssistantId,
+            channel,
+            started_at: call?.startedAt || msg?.createdAt || (endedAt || new Date().toISOString()),
+            prompt_version: msg?.metadata?.promptVersion || "v1",
+            kb_version: msg?.metadata?.kbVersion || "v1",
+            experiment: msg?.metadata?.experiment || null,
+            outcome: null,
+          },
+          "provider_session_id"
+        );
+        existing = await sbSelectOne("sessions", {
+          select: "id, started_at",
+          provider_session_id: eq(sessionId),
+        });
+      }
 
       const endTs = endedAt || new Date().toISOString();
       let ahtSeconds = null;
