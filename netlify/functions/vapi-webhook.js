@@ -35,6 +35,7 @@ function mapStatus(s) {
   return m[String(s || "").toLowerCase()] || "unknown";
 }
 
+// --- Supabase helpers -------------------------------------------------------
 async function sbUpsertSession(row) {
   const url = `${SUPABASE_URL}/rest/v1/sessions?on_conflict=id`;
   const res = await fetch(url, {
@@ -75,60 +76,70 @@ async function sbUpsertEvalRun(session_id) {
   return { ok: res.ok, status: res.status, text };
 }
 
-function getCall(payload) {
-  const d = payload?.data || payload;
-  const msg = payload?.message;
-  return (
-    d?.phoneCall ||
-    d?.call ||
-    d?.conversation ||
-    msg?.phoneCall ||
-    msg?.conversation ||
-    d ||
-    null
-  );
+// --- Helpers to read Vapi payloads -----------------------------------------
+function getMessage(payload) {
+  return payload?.message || null;
 }
 
-function getCallId(payload) {
-  const d = payload?.data || payload;
-  const msg = payload?.message;
-  const call = getCall(payload);
+// On end-of-call-report we may not get a call id.
+// Fall back to a stable synthetic id based on timestamp.
+function deriveSessionId(msg) {
   return (
-    call?.id ||
-    d?.id ||
     msg?.callId ||
     msg?.phoneCallId ||
     msg?.conversationId ||
-    null
+    `fallback-${msg?.timestamp || Date.now()}`
   );
 }
 
-function getTimes(payload) {
-  const msg = payload?.message;
-  const d = payload?.data || payload;
-  const call = getCall(payload);
-  const createdAt = call?.createdAt || d?.createdAt || (msg?.timestamp ? new Date(msg.timestamp).toISOString() : null);
-  const started_at = call?.startedAt || createdAt || new Date().toISOString();
-  const ended_at = call?.endedAt || call?.completedAt || null;
+function getTimesFromMessage(msg) {
+  // msg.timestamp is millisecond epoch per your logs
+  const ts = typeof msg?.timestamp === "number"
+    ? new Date(msg.timestamp)
+    : new Date();
+
+  const ended_at = ts.toISOString();
+  // started_at not sent on message payloads; pick a safe earlier time so UI sorts correctly
+  const started_at = new Date(ts.getTime() - 2 * 60 * 1000).toISOString();
   return { started_at, ended_at };
 }
-function getStatus(payload) {
-  const call = getCall(payload);
-  return mapStatus(call?.status);
+
+function extractSummaryFromMessage(msg) {
+  // Vapi end-of-call-report usually carries { analysis: { summary, successEvaluation, ... } }
+  const summary =
+    msg?.analysis?.summary ||
+    msg?.artifact?.summary ||
+    null;
+  return summary;
 }
 
+// --- Main handler -----------------------------------------------------------
 exports.handler = async (event) => {
   try {
-        // --- TEMP DIAGNOSTIC LOGGING ---
+    // TEMP: Body preview to see incoming shapes
     const rawBody = event.isBase64Encoded
       ? Buffer.from(event.body || "", "base64").toString("utf8")
       : (event.body || "");
-
     const preview = rawBody.slice(0, 1000);
-    console.log("📞 Incoming webhook body preview:", preview);
+    log("📞 Incoming webhook body preview:", preview);
 
+    // -------------------- GET: diagnostics --------------------
     if (event.httpMethod === "GET") {
       const q = event.queryStringParameters || {};
+
+      if (q.diag === "env") {
+        return {
+          statusCode: 200,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ok: true,
+            SUPABASE_URL: !!SUPABASE_URL,
+            SERVICE_KEY: !!SERVICE_KEY,
+            DEFAULT_RUBRIC_ID,
+            DISABLE_SIGNATURE_CHECK: DISABLE_SIG,
+          }),
+        };
+      }
 
       if (q.diag === "write") {
         const id = crypto.randomUUID();
@@ -162,34 +173,39 @@ exports.handler = async (event) => {
       return { statusCode: 200, body: "vapi-webhook alive" };
     }
 
+    // -------------------- POST: real events --------------------
     if (event.httpMethod !== "POST") {
       return { statusCode: 405, body: "Method Not Allowed" };
     }
 
-    const raw = event.isBase64Encoded
-      ? Buffer.from(event.body || "", "base64").toString("utf8")
-      : (event.body || "");
+    const raw = rawBody;
     const sig = event.headers["x-vapi-signature"] || event.headers["X-Vapi-Signature"] || "";
     if (!verifySignature(raw, sig)) return { statusCode: 401, body: "bad sig" };
 
     const payload = JSON.parse(raw);
-    const id = getCallId(payload);
-    if (!id) return { statusCode: 200, body: "no id" };
+    const msg = getMessage(payload);
 
-    const { started_at, ended_at } = getTimes(payload);
-    const outcome = getStatus(payload);
-    const call = getCall(payload);
+    // We only persist the final event that contains summary/transcript/etc.
+    if (!msg || msg.type !== "end-of-call-report") {
+      // Ignore mid-call noise so we don’t spam sessions
+      return { statusCode: 200, body: "ignored" };
+    }
+
+    const id = deriveSessionId(msg);
+    const { started_at, ended_at } = getTimesFromMessage(msg);
+    const outcome = "ended";
+    const summary = extractSummaryFromMessage(msg);
 
     const row = {
-      id,
-      assistant_id: call?.assistantId || null,
+      id,                       // uuid or fallback string -> make sure your column is uuid; if not, swap to text
+      assistant_id: msg?.assistantId || null,
       started_at,
       ended_at,
       channel: "voice",
       outcome,
-      summary: call?.summary || null,
-      hangup_reason: call?.endedReason || null,
-      cost_cents: call?.cost ? Math.round(Number(call.cost) * 100) : null,
+      summary,                  // short LLM summary from end-of-call-report
+      hangup_reason: msg?.endedReason || null,
+      cost_cents: null,         // unknown here; leave null
     };
 
     log("UPSERT SESSION ROW:", row);
@@ -202,7 +218,8 @@ exports.handler = async (event) => {
       };
     }
 
-    if (outcome === "ended" && ended_at) await sbUpsertEvalRun(id);
+    // Queue the rubric evaluation for this session
+    await sbUpsertEvalRun(id);
 
     return { statusCode: 200, body: "ok" };
   } catch (err) {
