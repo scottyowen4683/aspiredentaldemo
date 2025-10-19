@@ -1,6 +1,9 @@
 // netlify/functions/vapi-webhook.js
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+// --- Env (server-side) ---
+// Make sure Netlify has SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY set (server env).
+const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+const SERVICE_KEY =
+  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_SERVICE_ROLE_KEY;
 
 const headers = {
   "Content-Type": "application/json",
@@ -20,11 +23,14 @@ async function sbInsert(table, rows) {
 }
 
 async function sbUpsert(table, rows, onConflict) {
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?on_conflict=${encodeURIComponent(onConflict)}`, {
-    method: "POST",
-    headers: { ...headers, Prefer: "resolution=merge-duplicates" },
-    body: JSON.stringify(Array.isArray(rows) ? rows : [rows]),
-  });
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/${table}?on_conflict=${encodeURIComponent(onConflict)}`,
+    {
+      method: "POST",
+      headers: { ...headers, Prefer: "resolution=merge-duplicates" },
+      body: JSON.stringify(Array.isArray(rows) ? rows : [rows]),
+    }
+  );
   if (!res.ok) console.error(`Upsert ${table} failed: ${res.status} ${await res.text()}`);
   return res.json().catch(() => ({}));
 }
@@ -50,15 +56,41 @@ async function sbSelectOne(table, query) {
 
 const eq = (v) => `eq.${v}`;
 
-// ---------- Resolve assistant/client ----------
+// ---------- Resolve assistant/client (and auto-create assistant if new) ----------
 async function resolveClientAndAssistant({ providerAssistantId, clientId, fromNumber }) {
   let assistantRow = null;
+
+  // Try lookup by provider assistant id
   if (providerAssistantId) {
     assistantRow = await sbSelectOne("assistants", {
       select: "*",
       provider_assistant_id: eq(providerAssistantId),
     }).catch(() => null);
+
+    // --- Auto-insert assistant if we haven't seen it before
+    if (!assistantRow) {
+      await sbUpsert(
+        "assistants",
+        {
+          provider_assistant_id: providerAssistantId,
+          client_id: clientId || null,
+          name: `Assistant ${String(providerAssistantId).slice(0, 6)}`,
+          channel: "voice",
+          status: "live",
+          prompt_version: "v1",
+          kb_version: "v1",
+          prompt_text: null, // you can paste later in Supabase UI
+        },
+        "provider_assistant_id"
+      );
+      assistantRow = await sbSelectOne("assistants", {
+        select: "*",
+        provider_assistant_id: eq(providerAssistantId),
+      }).catch(() => null);
+    }
   }
+
+  // Fallback: resolve via entrypoint (e.g., inbound phone number)
   if (!assistantRow && fromNumber) {
     const ep = await sbSelectOne("entrypoints", {
       select: "*,assistant:assistant_id(*)",
@@ -66,12 +98,13 @@ async function resolveClientAndAssistant({ providerAssistantId, clientId, fromNu
     }).catch(() => null);
     if (ep?.assistant) assistantRow = ep.assistant;
   }
+
   const resolvedClientId = clientId || assistantRow?.client_id || null;
   const resolvedAssistantId = assistantRow?.id || null;
   return { resolvedClientId, resolvedAssistantId };
 }
 
-// ---------- Main Netlify Function ----------
+// ---------- Netlify Function ----------
 exports.handler = async (event) => {
   // CORS
   if (event.httpMethod === "OPTIONS") {
@@ -95,14 +128,14 @@ exports.handler = async (event) => {
     // Keep raw for debugging
     await sbInsert("webhook_debug", { headers: event.headers, payload: body });
 
-    // --- Normalize payload shape (Messaging "Server URL" vs webhooks) ---
+    // --- Normalize payload shape (Messaging "Server URL" vs Dashboard Webhooks) ---
     const msg = body.message || body;
     const evtType = body.type || body.event || msg.type || msg.event || null;
     const call = msg.call || msg.data?.call || msg.data || {};
     const assistantId = call.assistantId || msg.assistantId || null;
     const sessionId = call.id || msg.sessionId || msg.callId || msg.id || null;
     const fromNumber = call.from || msg.from || msg.callerNumber || null;
-    const channel = call.type ? "voice" : (msg.channel || "voice");
+    const channel = call.type ? "voice" : msg.channel || "voice";
 
     const { resolvedClientId, resolvedAssistantId } = await resolveClientAndAssistant({
       providerAssistantId: assistantId,
@@ -110,20 +143,20 @@ exports.handler = async (event) => {
       fromNumber,
     });
 
-    // Heuristics when evtType absent
+    // --- Heuristics when evtType absent ---
     const isStart =
       evtType === "call.started" ||
       (!!call && !call.endedAt && !msg.role && !msg.text && !msg.toolName && !msg.turnId);
 
-    const isEnd =
-      evtType === "call.ended" || !!call?.endedAt || msg.outcome === "ended";
+    const isEnd = evtType === "call.ended" || !!call?.endedAt || msg.outcome === "ended";
 
     const isMessage =
       evtType === "message.created" ||
       typeof msg.text === "string" ||
-      !!msg.role || !!msg.toolName;
+      !!msg.role ||
+      !!msg.toolName;
 
-    // --- Upsert session on start/first sight ---
+    // --- Upsert session on start/first sight of call ---
     if (sessionId && (isStart || (!isEnd && !isMessage))) {
       await sbUpsert(
         "sessions",
@@ -136,57 +169,59 @@ exports.handler = async (event) => {
           prompt_version: msg.metadata?.promptVersion || "v1",
           kb_version: msg.metadata?.kbVersion || "v1",
           experiment: msg.metadata?.experiment || null,
-          outcome: null, // will be set on end
+          outcome: null,
         },
         "provider_session_id"
       );
     }
 
-   // --- Message turns (ensure session exists first) ---
-if (sessionId && isMessage) {
-  // Ensure session exists (create a minimal one if not)
-  let session = await sbSelectOne("sessions", {
-    select: "id, started_at",
-    provider_session_id: eq(sessionId),
-  });
+    // --- Message turns (ensure session exists first) ---
+    if (sessionId && isMessage) {
+      // Ensure session row exists
+      let session = await sbSelectOne("sessions", {
+        select: "id, started_at",
+        provider_session_id: eq(sessionId),
+      });
 
-  if (!session) {
-    await sbUpsert("sessions", {
-      provider_session_id: sessionId,
-      client_id: resolvedClientId,
-      assistant_id: resolvedAssistantId,
-      channel,
-      started_at: call.startedAt || msg.createdAt || new Date().toISOString(),
-      prompt_version: msg.metadata?.promptVersion || "v1",
-      kb_version: msg.metadata?.kbVersion || "v1",
-      experiment: msg.metadata?.experiment || null,
-    }, "provider_session_id");
+      if (!session) {
+        await sbUpsert(
+          "sessions",
+          {
+            provider_session_id: sessionId,
+            client_id: resolvedClientId,
+            assistant_id: resolvedAssistantId,
+            channel,
+            started_at: call.startedAt || msg.createdAt || new Date().toISOString(),
+            prompt_version: msg.metadata?.promptVersion || "v1",
+            kb_version: msg.metadata?.kbVersion || "v1",
+            experiment: msg.metadata?.experiment || null,
+          },
+          "provider_session_id"
+        );
 
-    session = await sbSelectOne("sessions", {
-      select: "id",
-      provider_session_id: eq(sessionId),
-    });
-  }
+        session = await sbSelectOne("sessions", {
+          select: "id",
+          provider_session_id: eq(sessionId),
+        });
+      }
 
-  if (session?.id) {
-    await sbInsert("turns", {
-      session_id: session.id,
-      role: msg.role || "agent",
-      started_at: msg.createdAt || new Date().toISOString(),
-      latency_ms: msg.latencyMs ?? null,
-      text: msg.text || null,
-      tool_name: msg.toolName || null,
-      fallback: !!msg.fallback,
-      tokens_in: msg.tokensIn ?? null,
-      tokens_out: msg.tokensOut ?? null,
-    });
-  }
-}
-
+      if (session?.id) {
+        await sbInsert("turns", {
+          session_id: session.id,
+          role: msg.role || "agent",
+          started_at: msg.createdAt || new Date().toISOString(),
+          latency_ms: msg.latencyMs ?? null,
+          text: msg.text || null,
+          tool_name: msg.toolName || null,
+          fallback: !!msg.fallback,
+          tokens_in: msg.tokensIn ?? null,
+          tokens_out: msg.tokensOut ?? null,
+        });
+      }
+    }
 
     // --- Session end: compute AHT and default outcome if missing ---
     if (sessionId && isEnd) {
-      // fetch started_at for AHT
       const existing = await sbSelectOne("sessions", {
         select: "id, started_at",
         provider_session_id: eq(sessionId),
@@ -200,11 +235,7 @@ if (sessionId && isMessage) {
         ahtSeconds = Math.max(0, Math.round((endMs - startMs) / 1000));
       }
 
-      // default outcome if not supplied
-      const outcome =
-        msg.outcome ||
-        (call.hangupReason ? "abandoned" : "resolved");
-
+      const outcome = msg.outcome || (call.hangupReason ? "abandoned" : "resolved");
       const containment =
         typeof msg.containment === "boolean"
           ? msg.containment
