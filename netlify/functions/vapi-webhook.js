@@ -72,21 +72,23 @@ function toRow(payload) {
 
 // ✅ Safe async function (no top-level await)
 async function supabaseUpsert(row) {
+  // Insert ONLY columns that exist on public.sessions
+  // From your screenshot: provider_session_id, assistant_id, channel, started_at
   const sessionRow = {
-    provider_session_id: row.call_id,
-    assistant_id: row.assistant_id || "ce4fbbfc-37b9-437c-afed-d812867b4ff7",
-    channel: "voice",
-    started_at: row.started_at || new Date().toISOString(),
-    status: row.status || "created",
+    provider_session_id: row.call_id,                                     // text
+    assistant_id: row.assistant_id || "ce4fbbfc-37b9-437c-afed-d812867b4ff7", // uuid in your DB
+    channel: "voice",                                                     // text
+    started_at: row.started_at || new Date().toISOString(),              // timestamptz
   };
 
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/sessions?on_conflict=provider_session_id`, {
+  // Plain insert into sessions (no on_conflict, since provider_session_id may not be unique)
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/sessions`, {
     method: "POST",
     headers: {
       apikey: SERVICE_KEY,
       Authorization: `Bearer ${SERVICE_KEY}`,
       "Content-Type": "application/json",
-      Prefer: "resolution=merge-duplicates,return=minimal",
+      Prefer: "return=minimal",
     },
     body: JSON.stringify(sessionRow),
   });
@@ -94,6 +96,7 @@ async function supabaseUpsert(row) {
   const text = await res.text();
   return { ok: res.ok, status: res.status, text };
 }
+
 
 // ✅ Exported handler (async)
 exports.handler = async (event) => {
