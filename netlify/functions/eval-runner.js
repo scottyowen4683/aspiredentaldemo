@@ -1,222 +1,180 @@
 // netlify/functions/eval-runner.js
-const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
-const SERVICE_KEY =
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_SERVICE_ROLE_KEY;
+
+/**
+ * Purpose:
+ *  - Pick eval_runs with status='queued'
+ *  - Read session + transcript
+ *  - Call OpenAI (EVAL_MODEL) to produce {overall:number, summary:string}
+ *  - Update sessions.eval_overall + sessions.eval_summary
+ *  - Mark eval_runs.status='completed'
+ *
+ * Required env:
+ *  - SUPABASE_URL
+ *  - SUPABASE_SERVICE_ROLE_KEY
+ *  - OPENAI_API_KEY
+ *  - EVAL_MODEL               (e.g., "gpt-4o-mini")
+ * Optional:
+ *  - EVAL_BATCH_LIMIT=5
+ *  - DEBUG_LOG=1
+ */
+
+const DEBUG = process.env.DEBUG_LOG === "1";
+function log(...a) { if (DEBUG) try { console.log(...a); } catch {} }
+
+const SUPABASE_URL  = process.env.SUPABASE_URL;
+const SERVICE_KEY   = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const EVAL_MODEL    = process.env.EVAL_MODEL || "gpt-4o-mini";
+const BATCH_LIMIT   = Number(process.env.EVAL_BATCH_LIMIT || "5");
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const EVAL_MODEL = process.env.EVAL_MODEL || "gpt-4o-mini";
-const BATCH_LIMIT = parseInt(process.env.EVAL_BATCH_LIMIT || "5", 10);
 
-const jsonHeaders = {
-  "Content-Type": "application/json",
-  apikey: SERVICE_KEY,
-  Authorization: `Bearer ${SERVICE_KEY}`,
-};
+async function sbFetch(path, init = {}) {
+  const res = await fetch(`${SUPABASE_URL}${path}`, {
+    ...init,
+    headers: {
+      apikey: SERVICE_KEY,
+      Authorization: `Bearer ${SERVICE_KEY}`,
+      ...(init.headers || {}),
+    },
+  });
+  return res;
+}
 
-// ---------- Supabase helpers ----------
-async function sbSelect(table, qs) {
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${qs}`, { headers: jsonHeaders });
-  if (!res.ok) throw new Error(`Select ${table} failed: ${res.status} ${await res.text()}`);
+async function getQueuedRuns() {
+  const res = await sbFetch(`/rest/v1/eval_runs?status=eq.queued&order=started_at.asc&limit=${BATCH_LIMIT}`);
+  if (!res.ok) return [];
   return res.json();
 }
-async function sbSelectOne(table, qs) {
-  const data = await sbSelect(table, `${qs}&limit=1`);
-  return data?.[0] || null;
-}
-async function sbUpdate(table, qs, patch) {
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${qs}`, {
-    method: "PATCH",
-    headers: jsonHeaders,
-    body: JSON.stringify(patch),
-  });
-  if (!res.ok) throw new Error(`Update ${table} failed: ${res.status} ${await res.text()}`);
-  return res.json().catch(() => ({}));
-}
-async function sbInsert(table, rows) {
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
-    method: "POST",
-    headers: jsonHeaders,
-    body: JSON.stringify(Array.isArray(rows) ? rows : [rows]),
-  });
-  if (!res.ok) throw new Error(`Insert ${table} failed: ${res.status} ${await res.text()}`);
-  return res.json().catch(() => ({}));
-}
-const eq = (v) => `eq.${v}`;
 
-// ---------- OpenAI helper ----------
-async function callOpenAI(system, user) {
-  if (!OPENAI_API_KEY) throw new Error("Missing OPENAI_API_KEY");
-  const res = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${OPENAI_API_KEY}` },
+async function getSession(session_id) {
+  const res = await sbFetch(`/rest/v1/sessions?id=eq.${session_id}&select=id,summary,started_at,ended_at`);
+  if (!res.ok) return null;
+  const rows = await res.json();
+  return rows?.[0] || null;
+}
+
+async function getTranscript(session_id) {
+  const res = await sbFetch(`/rest/v1/session_transcripts?session_id=eq.${session_id}&select=content&limit=1`);
+  if (!res.ok) return null;
+  const rows = await res.json();
+  return rows?.[0]?.content || null;
+}
+
+async function setRunStatus(run_id, status) {
+  const res = await sbFetch(`/rest/v1/eval_runs?id=eq.${run_id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: EVAL_MODEL,
-      temperature: 0,
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: user },
-      ],
+      status,
+      completed_at: status === "completed" ? new Date().toISOString() : null,
     }),
   });
-  if (!res.ok) throw new Error(`OpenAI error: ${res.status} ${await res.text()}`);
-  const data = await res.json();
-  const text = data?.choices?.[0]?.message?.content || "{}";
-  try { return JSON.parse(text); } catch { return { parse_error: text }; }
+  return res.ok;
 }
 
-// ---------- Build eval prompt ----------
-function buildPrompt({ transcript, rubric, weights, checklist, promptText }) {
-  const criteria = Object.keys(weights);
-  const weightsList = criteria.map(k => `${k}: ${weights[k]}`).join(", ");
-
-  const sys = `You are an expert QA evaluator for voice/chat AI agents. Score objectively from 0 to 100 for each criterion based on transcript evidence. Be strict but fair. Use the provided weights to compute overall_score = sum(weight_i * score_i) * 100 (weights sum to 1). Return strict JSON.`;
-
-  const user = `
-RUBRIC NAME: ${rubric.name} (${rubric.version})
-WEIGHTS: ${weightsList}
-CHECKLIST (guidance):
-${criteria.map(k => `- ${k}: ${checklist?.[k] || ""}`).join("\n")}
-
-AGENT SYSTEM PROMPT / POLICY (snapshot at call time; use for adherence checks):
-${promptText ? promptText : "(none provided)"}
-
-TRANSCRIPT (chronological):
-${transcript || "(empty)"}
-
-Return JSON:
-{
-  "scores": { "${criteria.join(`": 0, "`)}": 0 },
-  "overall_score": 0,
-  "summary": "one-paragraph overview of performance",
-  "suggestions": [
-    {"criterion": "accuracy", "tip": "Keep rates aligned with the July 2024 schedule...", "impact": "high"},
-    {"criterion": "tone", "tip": "Acknowledge resident concern before giving policy.", "impact": "medium"}
-  ]
-}
-Rules:
-- scores are integers 0..100
-- overall_score is 0..100 (weighted by WEIGHTS, not a plain average)
-- suggestions: 3–6 items, each actionable and specific
-`;
-
-  return { sys, user };
-}
-
-// ---------- Core evaluator ----------
-async function evaluateRun(evalRow) {
-  // Load transcript + prompt from session_artifacts; fallback to assistant.prompt_text
-  const artifact = await sbSelectOne("session_artifacts", `session_id=${eq(evalRow.session_id)}`);
-  const transcript = artifact?.transcript_full || "";
-
-  const sess = await sbSelectOne("sessions", `id=${eq(evalRow.session_id)}`);
-  const assistant =
-    sess?.assistant_id ? await sbSelectOne("assistants", `id=${eq(sess.assistant_id)}`) : null;
-  const promptText = artifact?.prompt_snapshot || assistant?.prompt_text || "";
-
-  // Rubric
-  const rubric = await sbSelectOne("eval_rubrics", `id=${eq(evalRow.rubric_id)}`);
-  if (!rubric) throw new Error("Rubric not found");
-  const weights = rubric.weights || {};
-  const checklist = rubric.checklist || {};
-
-  const { sys, user } = buildPrompt({ transcript, rubric, weights, checklist, promptText });
-  const result = await callOpenAI(sys, user);
-  if (!result || typeof result !== "object" || result.parse_error) {
-    throw new Error(`Eval parse error: ${result?.parse_error || "no JSON"}`);
-  }
-
-  const scores = result.scores || {};
-  const overall = Math.max(0, Math.min(100, Math.round(result.overall_score || 0)));
-  const summary = result.summary || "";
-  const suggestions = Array.isArray(result.suggestions) ? result.suggestions.slice(0, 8) : [];
-
-  await sbUpdate("eval_runs", `id=${eq(evalRow.id)}`, {
-    scores,
-    overall_score: overall,
-    summary,
-    suggestions,
-    status: "complete",
-    completed_at: new Date().toISOString(),
-    error: null,
+async function updateSessionEval(session_id, overall, summary) {
+  const res = await sbFetch(`/rest/v1/sessions?id=eq.${session_id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      eval_overall: overall,
+      eval_summary: summary,
+    }),
   });
-
-  await sbUpdate("sessions", `id=${eq(evalRow.session_id)}`, { eval_overall: overall })
-    .catch(() => {});
-
-  return { ok: true, evalId: evalRow.id, overall };
+  return res.ok;
 }
 
-// ---------- Fetch pending runs ----------
-async function getPending(limit) {
-  return sbSelect(
-    "eval_runs",
-    `status=${eq("pending")}&order=started_at.desc&limit=${encodeURIComponent(limit)}`
-  );
+async function askOpenAI(model, prompt) {
+  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${OPENAI_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model,
+      messages: [{ role: "user", content: prompt }],
+      response_format: { type: "json_object" },
+      temperature: 0,
+    }),
+  });
+  if (!res.ok) {
+    const t = await res.text();
+    throw new Error(`OpenAI ${res.status}: ${t}`);
+  }
+  const data = await res.json();
+  const content = data?.choices?.[0]?.message?.content || "{}";
+  return JSON.parse(content);
 }
 
-// ---------- HTTP handler ----------
-exports.handler = async (event) => {
-  // CORS
-  if (event.httpMethod === "OPTIONS") {
-    return {
-      statusCode: 204,
-      headers: {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization",
-      },
-      body: "",
-    };
-  }
-  if (event.httpMethod !== "POST") {
-    return { statusCode: 405, body: "Method Not Allowed" };
-  }
+function buildEvalPrompt({ transcript, sessionSummary }) {
+  const rubric = `
+You are an evaluator. Score the assistant's performance from 0-100 and write a 1-2 sentence overview.
+Consider clarity, helpfulness, tone, and whether the call purpose was addressed.
+Return strict JSON: {"overall": <number 0-100>, "summary": "<short text>"}.
+`;
+  return `${rubric}
 
+=== TRANSCRIPT ===
+${transcript || "(no transcript available)"}
+
+=== SESSION SUMMARY ===
+${sessionSummary || "(none)"}
+`;
+}
+
+async function processOne(run) {
   try {
-    const body = JSON.parse(event.body || "{}");
+    const session = await getSession(run.session_id);
+    if (!session) { await setRunStatus(run.id, "failed"); return; }
 
-    // Single-session mode
-    if (body.sessionId) {
-      const evalRow = await sbSelectOne(
-        "eval_runs",
-        `session_id=${eq(body.sessionId)}&status=${eq("pending")}`
-      );
-      if (!evalRow) {
-        return { statusCode: 404, body: JSON.stringify({ error: "No pending eval for that sessionId" }) };
+    const transcript = await getTranscript(run.session_id);
+    const prompt = buildEvalPrompt({
+      transcript,
+      sessionSummary: session.summary || "",
+    });
+
+    const result = await askOpenAI(EVAL_MODEL, prompt);
+    const overall  = Math.max(0, Math.min(100, Number(result.overall) || 0));
+    const overview = String(result.summary || "").slice(0, 2000);
+
+    await updateSessionEval(run.session_id, overall, overview);
+    await setRunStatus(run.id, "completed");
+  } catch (e) {
+    console.error("eval error", e);
+    await setRunStatus(run.id, "failed");
+  }
+}
+
+exports.handler = async (event) => {
+  try {
+    // GET ?diag=env: quick sanity
+    if (event.httpMethod === "GET") {
+      const q = event.queryStringParameters || {};
+      if (q.diag === "env") {
+        return {
+          statusCode: 200,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ok: true,
+            SUPABASE_URL: !!SUPABASE_URL,
+            SERVICE_KEY: !!SERVICE_KEY,
+            OPENAI_API_KEY: !!OPENAI_API_KEY,
+            EVAL_MODEL,
+            BATCH_LIMIT,
+          }),
+        };
       }
-      const out = await evaluateRun(evalRow);
-      return { statusCode: 200, body: JSON.stringify(out) };
     }
 
-    // Batch mode (default)
-    const batch = body.batch === true;
-    const limit = batch ? BATCH_LIMIT : 1;
-    const pendings = await getPending(limit);
-    if (!pendings.length) {
-      return { statusCode: 200, body: JSON.stringify({ ok: true, processed: 0 }) };
+    const runs = await getQueuedRuns();
+    log(`eval-runner picked ${runs.length} run(s)`);
+    for (const r of runs) {
+      await processOne(r);
     }
 
-    const results = [];
-    for (const ev of pendings) {
-      try {
-        results.push(await evaluateRun(ev));
-      } catch (err) {
-        await sbUpdate("eval_runs", `id=${eq(ev.id)}`, {
-          status: "error",
-          error: String(err.message || err),
-          completed_at: new Date().toISOString(),
-        }).catch(() => {});
-        results.push({ ok: false, evalId: ev.id, error: String(err.message || err) });
-      }
-    }
-
-    return {
-      statusCode: 200,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
-      body: JSON.stringify({ ok: true, processed: results.length, results }),
-    };
+    return { statusCode: 200, body: JSON.stringify({ ok: true, processed: runs.length }) };
   } catch (err) {
     console.error("eval-runner error", err);
-    return { statusCode: 500, body: JSON.stringify({ error: err.message || "internal error" }) };
+    return { statusCode: 500, body: JSON.stringify({ ok: false }) };
   }
 };
