@@ -142,7 +142,7 @@ exports.handler = async (event) => {
       }
 
       if (q.diag === "write") {
-        const id = crypto.randomUUID();
+        const id = msg?.callId || msg?.phoneCallId || msg?.conversationId || crypto.randomUUID();
         const row = {
           id,
           started_at: new Date(Date.now() - 60_000).toISOString(),
