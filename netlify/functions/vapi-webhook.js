@@ -116,19 +116,15 @@ function toRow(payload) {
 }
 
 async function supabaseUpsert(row) {
-  // Convert the call payload into a sessions-style row
+  // Build a session-style record (only valid columns for 'sessions' table)
   const sessionRow = {
     provider_session_id: row.call_id,
-    assistant_id: row.assistant_id,
+    assistant_id: row.assistant_id || "ce4fbbfc-37b9-437c-afed-d812867b4ff7",
     channel: "voice",
-    started_at: row.started_at,
-    status: row.status,
-    transcript: row.transcript,
-    raw: row.raw,
-    updated_at: row.updated_at,
+    started_at: row.started_at || new Date().toISOString(),
+    status: row.status || "created",
   };
 
-  // Upsert directly into the sessions table (what the dashboard reads)
   const res = await fetch(`${SUPABASE_URL}/rest/v1/sessions?on_conflict=provider_session_id`, {
     method: "POST",
     headers: {
@@ -139,6 +135,11 @@ async function supabaseUpsert(row) {
     },
     body: JSON.stringify(sessionRow),
   });
+
+  const text = await res.text();
+  return { ok: res.ok, status: res.status, text };
+}
+
 
   const text = await res.text();
   return { ok: res.ok, status: res.status, text };
