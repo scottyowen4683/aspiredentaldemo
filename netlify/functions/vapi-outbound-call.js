@@ -43,6 +43,9 @@ function normalizeAuNumber(input) {
   return null;
 }
 
+/** ---- DB helpers ---- */
+
+// Writes a full row to the legacy 'calls' table (you already have this)
 async function supabaseUpsertCall(row) {
   const url = `${process.env.SUPABASE_URL}/rest/v1/calls?on_conflict=call_id`;
   const res = await fetch(url, {
@@ -59,6 +62,35 @@ async function supabaseUpsertCall(row) {
   return { ok: res.ok, status: res.status, text };
 }
 
+// Writes a minimal row to 'sessions' (what your dashboard reads)
+async function supabaseInsertSession({ call_id, assistantId, startedAt }) {
+  const SUPABASE_URL = process.env.SUPABASE_URL;
+  const SERVICE_KEY  = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  // Only include assistant_id if it's a valid UUID (your column is uuid)
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const sessionRow = {
+    provider_session_id: call_id,                               // text
+    channel: "voice",                                           // text
+    started_at: startedAt || new Date().toISOString(),          // timestamptz
+    ...(UUID_RE.test(assistantId) ? { assistant_id: assistantId } : {}),
+  };
+
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/sessions`, {
+    method: "POST",
+    headers: {
+      apikey: SERVICE_KEY,
+      Authorization: `Bearer ${SERVICE_KEY}`,
+      "Content-Type": "application/json",
+      Prefer: "return=minimal", // no body on success
+    },
+    body: JSON.stringify(sessionRow),
+  });
+  const text = await res.text();
+  return { ok: res.ok, status: res.status, text };
+}
+
+/** ---- Vapi helper ---- */
 async function placeCallViaVapi(payload, apiKey) {
   // Primary route
   let res = await fetch(`${VAPI_BASE_URL}/call`, {
@@ -69,7 +101,7 @@ async function placeCallViaVapi(payload, apiKey) {
   let text = await res.text();
   if (DEBUG) console.log("Vapi /call response:", res.status, text);
 
-  // If legacy behavior is needed, try /call/phone with minimal payload
+  // Fallback to /call/phone if older behavior is needed
   if (!res.ok && (res.status === 400 || res.status === 404)) {
     const altPayload = {
       assistantId: payload.assistantId,
@@ -90,6 +122,7 @@ async function placeCallViaVapi(payload, apiKey) {
   return { ok: res.ok, status: res.status, text };
 }
 
+/** ---- Netlify function handler ---- */
 exports.handler = async (event) => {
   // ---- GET diagnostics (env + manual place) ----
   if (event.httpMethod === "GET") {
@@ -119,7 +152,7 @@ exports.handler = async (event) => {
       const assistantId = qs.assistantId;
       if (!toRaw || !assistantId) {
         return { statusCode: 400, body: JSON.stringify({ message: "Missing to and/or assistantId query params" }) };
-        }
+      }
       const e164 = normalizeAuNumber(toRaw);
       if (!e164) return { statusCode: 400, body: JSON.stringify({ message: "Enter 04xxxxxxxx or +61xxxxxxxxx" }) };
 
@@ -129,7 +162,7 @@ exports.handler = async (event) => {
 
       const payload = {
         assistantId,
-        type: "outboundPhoneCall", // ✅ correct type (camelCase)
+        type: "outboundPhoneCall", // ✅ correct type
         phoneNumberId: PHONE_ID,
         customer: { number: e164 },
         metadata: { feature: "diag-place" },
@@ -187,11 +220,11 @@ exports.handler = async (event) => {
       return { statusCode: result.status || 502, body: JSON.stringify({ message: "Vapi error", status: result.status, details: result.text }) };
     }
 
-    // 2) Upsert immediately using the response id (so dashboard updates now)
+    // 2) Upsert into 'calls' (legacy table you already have)
     let callObj; try { callObj = JSON.parse(result.text); } catch { callObj = null; }
     const call_id = callObj?.id || null;
 
-    const row = {
+    const callsRow = {
       call_id,
       assistant_id: assistantId,
       direction: "outbound",
@@ -208,14 +241,26 @@ exports.handler = async (event) => {
       updated_at: new Date().toISOString(),
     };
 
-    if (row.call_id) {
-      const up = await supabaseUpsertCall(row);
-      log("Supabase upsert after place:", up.status, up.text);
+    if (callsRow.call_id) {
+      const up1 = await supabaseUpsertCall(callsRow);
+      log("Supabase upsert CALL after place:", up1.status, up1.text);
     } else {
-      log("WARNING: Vapi response had no id; skipping DB upsert for creation.");
+      log("WARNING: Vapi response had no id; skipping CALLS upsert.");
     }
 
-    // 3) Return Vapi’s response to the UI
+    // 3) Also insert a minimal 'sessions' row so the dashboard updates now
+    if (call_id) {
+      const up2 = await supabaseInsertSession({
+        call_id,
+        assistantId,
+        startedAt: callObj?.createdAt,
+      });
+      log("Supabase upsert SESSION after place:", up2.status, up2.text);
+    } else {
+      log("WARNING: No call_id for sessions insert.");
+    }
+
+    // 4) Return Vapi’s response to the UI
     return { statusCode: 200, body: result.text };
   } catch (err) {
     console.error("outbound-call error:", err);
