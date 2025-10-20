@@ -1,0 +1,12 @@
+fastapi==0.110.1
+uvicorn==0.25.0
+python-dotenv>=1.0.1
+pydantic>=2.6.4
+email-validator>=2.2.0
+starlette>=0.37.2
+
+# MongoDB client libraries (pinned to compatible versions)
+pymongo==4.6.3
+motor==3.3.1
+
+sib-api-v3-sdk==7.6.0
