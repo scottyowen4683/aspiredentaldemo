@@ -1,5 +1,12 @@
-import React from "react";
-import { Routes, Route, Outlet, useNavigate, Link, useLocation } from "react-router-dom";
+import React, { useState } from "react";
+import {
+  Routes,
+  Route,
+  Outlet,
+  useNavigate,
+  Link,
+  useLocation,
+} from "react-router-dom";
 import AudienceModal from "./components/AudienceModal.jsx";
 
 import Government from "./pages/government.jsx";
@@ -8,42 +15,149 @@ import Business from "./pages/business.jsx";
 const ASPIRE_LOGO =
   "https://raw.githubusercontent.com/scottyowen4683/Aspirereception/refs/heads/feature/ai-receptionist/frontend/aspire.png";
 
-/* ---------- Shared layout (header + container) ---------- */
-function Layout() {
+/* ---------- Header (single source of truth) ---------- */
+function Header() {
   const { pathname } = useLocation();
-  const showLogo = pathname === "/"; // only show logo on the landing page
+  const onLanding = pathname === "/";
+
+  // Show the section nav on everything except the landing page
+  const showSectionNav = !onLanding;
+
+  const [open, setOpen] = useState(false);
+
+  // Your section links (used for desktop inline + mobile drawer)
+  const sectionLinks = [
+    { href: "#how", label: "How it works" },
+    { href: "#automations", label: "Smart Automations" },
+    { href: "#why", label: "Why Aspire" },
+    { href: "#capabilities", label: "Capabilities" },
+    { href: "#advanced", label: "Advanced" },
+    { href: "#demo", label: "Demo" },
+    { href: "#roi", label: "ROI" },
+    { href: "#pricing", label: "Pricing" },
+    { href: "#privacy", label: "Privacy" },
+    { href: "#faq", label: "FAQ" },
+    { href: "#contact", label: "Contact" },
+  ];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 flex flex-col">
-      <AudienceModal />
-
-      {/* Header */}
-      <header className="sticky top-0 z-50 h-16 bg-white/90 backdrop-blur border-b border-slate-200">
-        <div className="h-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between">
-          {showLogo && (
-            <Link to="/" className="flex items-center gap-2">
+    <>
+      {/* Top app bar */}
+      <header className="sticky top-0 z-50 bg-white border-b border-slate-200 shadow-sm">
+        {/* Bar height is fixed; content vertically centered */}
+        <div className="h-14 md:h-16 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center">
+          <div className="flex w-full items-center justify-between gap-3">
+            {/* Brand (kept compact so it sits neatly inside the bar) */}
+            <Link to="/" className="flex items-center gap-2 shrink-0">
               <img
                 src={ASPIRE_LOGO}
                 alt="Aspire Executive Solutions"
-                className="h-8 sm:h-10 w-auto"
+                className="h-7 md:h-8 w-auto"
               />
             </Link>
-          )}
 
-          <button
-            onClick={() => {
-              localStorage.removeItem("audience");
-              window.location.reload();
-            }}
-            className="text-xs sm:text-sm text-slate-600 hover:text-blue-600"
-          >
-            Switch audience
-          </button>
+            {/* Desktop section nav (inline). Hidden on small screens. */}
+            {showSectionNav && (
+              <nav className="hidden md:block">
+                <ul className="flex flex-wrap items-center gap-x-6 gap-y-2 text-[0.95rem] text-slate-800">
+                  {sectionLinks.map((l) => (
+                    <li key={l.href}>
+                      <a
+                        href={l.href}
+                        className="whitespace-nowrap hover:text-blue-700"
+                      >
+                        {l.label}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </nav>
+            )}
+
+            {/* Right actions */}
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => {
+                  localStorage.removeItem("audience");
+                  window.location.reload();
+                }}
+                className="hidden sm:inline text-sm text-slate-600 hover:text-blue-600"
+              >
+                Switch audience
+              </button>
+
+              {/* Mobile hamburger (only shows when section nav is relevant) */}
+              {showSectionNav && (
+                <button
+                  aria-label="Open menu"
+                  onClick={() => setOpen((v) => !v)}
+                  className="inline-flex md:hidden items-center justify-center rounded-md p-2 ring-1 ring-slate-300 text-slate-700"
+                >
+                  {/* Simple hamburger icon */}
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="h-5 w-5"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                  >
+                    <path d="M4 7h16M4 12h16M4 17h16" />
+                  </svg>
+                </button>
+              )}
+            </div>
+          </div>
         </div>
+
+        {/* Mobile drawer for section links */}
+        {showSectionNav && (
+          <div
+            className={`md:hidden overflow-hidden transition-[max-height] duration-300 ${
+              open ? "max-h-96" : "max-h-0"
+            }`}
+          >
+            <nav className="px-4 pb-3">
+              <ul className="grid grid-cols-2 gap-3 text-slate-800">
+                {sectionLinks.map((l) => (
+                  <li key={l.href}>
+                    <a
+                      href={l.href}
+                      className="block w-full rounded-md px-3 py-2 hover:bg-slate-100"
+                      onClick={() => setOpen(false)}
+                    >
+                      {l.label}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+              <button
+                onClick={() => {
+                  localStorage.removeItem("audience");
+                  window.location.reload();
+                }}
+                className="mt-3 inline-block w-full rounded-md px-3 py-2 text-left text-slate-600 ring-1 ring-slate-300 hover:bg-slate-100"
+              >
+                Switch audience
+              </button>
+            </nav>
+          </div>
+        )}
       </header>
 
-      {/* Main content */}
-      <main className="flex-grow px-4 sm:px-6 lg:px-8 pt-6 sm:pt-10 pb-20">
+      {/* Spacer is handled by header height via sticky + the content block below. */}
+    </>
+  );
+}
+
+/* ---------- Shared Layout ---------- */
+function Layout() {
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 flex flex-col">
+      <AudienceModal />
+      <Header />
+      {/* Content area; no grid centering so it doesn’t “float” under header */}
+      <main className="flex-grow px-4 sm:px-6 lg:px-8 pt-6 md:pt-8 pb-20">
         <div className="w-full max-w-7xl mx-auto">
           <Outlet />
         </div>
@@ -56,7 +170,7 @@ function Layout() {
 function Landing() {
   const navigate = useNavigate();
   return (
-    <div className="text-center px-4">
+    <div className="text-center">
       <img
         src={ASPIRE_LOGO}
         alt="Aspire Executive Solutions"
