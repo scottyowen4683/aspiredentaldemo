@@ -2,34 +2,130 @@
 @tailwind components;
 @tailwind utilities;
 
-* { box-sizing: border-box; }
-html { scroll-behavior: smooth; }
-.App { min-height: 100vh; }
-
-button, a, input, textarea {
-  transition: color 0.3s ease, background-color 0.3s ease, border-color 0.3s ease, opacity 0.3s ease, transform 0.2s ease;
+/* ---------- Global Reset ---------- */
+* {
+  box-sizing: border-box;
 }
 
-/* ------- mobile helpers for inner pages ------- */
-.page-container {
-  padding: 12px;
-  max-width: 1200px;
-  margin: 0 auto;
+html {
+  scroll-behavior: smooth;
 }
 
-/* make data tables scroll horizontally on small screens instead of squishing */
-.responsive-table {
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-}
-.responsive-table table {
-  min-width: 720px; /* keeps columns readable; scrolls on small screens */
+body, #root, .App {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background-color: #f9fafb; /* Tailwind gray-50 */
 }
 
-/* clamp long preview lines (fallback if Tailwind line-clamp plugin not enabled) */
-.line-clamp-2 {
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+/* ---------- Buttons, Inputs, Links ---------- */
+button,
+a,
+input,
+textarea {
+  transition:
+    color 0.3s ease,
+    background-color 0.3s ease,
+    border-color 0.3s ease,
+    opacity 0.3s ease,
+    transform 0.2s ease;
+}
+
+/* ---------- Responsive Layout Helpers ---------- */
+
+/* Prevent horizontal scroll on narrow screens */
+html, body {
+  overflow-x: hidden;
+}
+
+/* Ensure main sections stack properly on small devices */
+section,
+.main-container,
+.page-content,
+.dashboard,
+.card-grid {
+  width: 100%;
+  max-width: 100vw;
+  padding-left: 1rem;
+  padding-right: 1rem;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* ---------- Tables (Admin Dashboard) ---------- */
+
+/* Make admin tables horizontally scrollable on mobile */
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+table thead {
+  position: sticky;
+  top: 0;
+  background-color: #f9fafb;
+  z-index: 1;
+}
+
+table th,
+table td {
+  white-space: nowrap;
+  text-align: left;
+  padding: 0.5rem 0.75rem;
+}
+
+@media (max-width: 768px) {
+  table {
+    display: block;
+    overflow-x: auto;
+  }
+
+  table th,
+  table td {
+    white-space: normal;
+    word-break: break-word;
+  }
+
+  .grid {
+    display: block !important;
+  }
+
+  .stats-grid,
+  .card-grid,
+  .content-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .text-sm {
+    font-size: 0.9rem;
+  }
+
+  .text-xs {
+    font-size: 0.8rem;
+  }
+
+  h1, h2, h3 {
+    text-align: center;
+  }
+}
+
+/* ---------- Modal (Admin Details) ---------- */
+.modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 1rem;
+}
+
+.modal-content {
+  background: white;
+  border-radius: 0.5rem;
+  width: 100%;
+  max-width: 640px;
+  max-height: 85vh;
+  overflow-y: auto;
+  padding: 1rem 1.5rem;
 }
