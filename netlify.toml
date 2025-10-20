@@ -1,9 +1,9 @@
 [build]
 # Build the SPA that lives in /frontend
-command = "npm --prefix frontend ci && npm --prefix frontend run build"
-publish = "frontend/dist"   # <-- final static files
+command = "cd frontend && npm i --legacy-peer-deps && npm run build"
+publish = "frontend/dist"
 
 [functions]
-# Keep using the functions that live at repo-root/netlify/functions
+# Keep functions at repo-root/netlify/functions
 directory = "netlify/functions"
 node_bundler = "esbuild"
