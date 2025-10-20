@@ -1,10 +1,9 @@
 [build]
-  base = "frontend"           # cd into frontend before running command
-  command = "npm ci && npm run build"
-  publish = "dist"            # dist inside /frontend
-  functions = "../netlify/functions"  # functions folder at repo root
+  base = "frontend"
+  command = "npm install --legacy-peer-deps && npm run build"
+  publish = "dist"
+  functions = "../netlify/functions"
 
-# Single-page app routing
 [[redirects]]
   from = "/*"
   to = "/index.html"
