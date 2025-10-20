@@ -8,12 +8,13 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 export default defineConfig({
-  root: __dirname,                          // project root is /frontend
+  base: "./",                                     // ensure relative asset paths in Netlify
+  root: __dirname,                                // project root is /frontend
   build: {
-    outDir: resolve(__dirname, "dist")      // output to /frontend/dist
+    outDir: resolve(__dirname, "dist"),           // output to /frontend/dist
   },
   css: {
-    postcss: resolve(__dirname, "postcss.config.js") // use the config we just set
+    postcss: resolve(__dirname, "postcss.config.js"),
   },
-  plugins: [react()]
+  plugins: [react()],
 });
