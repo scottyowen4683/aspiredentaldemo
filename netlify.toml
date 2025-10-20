@@ -1,15 +1,15 @@
-# netlify.toml  — single-app at repo root
+# netlify.toml — Vite app in ./frontend, functions in ./netlify/functions
 
 [build]
-  command = "npm ci && npm run build"
-  publish = "dist"
+  command   = "npm --prefix frontend ci && npm --prefix frontend run build"
+  publish   = "frontend/dist"
   functions = "netlify/functions"
 
 [functions]
   node_bundler = "esbuild"
 
-# SPA routing (so /admin etc. work)
+# SPA routing (so /admin etc work on refresh)
 [[redirects]]
   from = "/*"
-  to = "/index.html"
+  to   = "/index.html"
   status = 200
