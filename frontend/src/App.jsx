@@ -1,6 +1,5 @@
-// src/App.jsx
 import React from "react";
-import { Routes, Route, Outlet, useNavigate, Link } from "react-router-dom";
+import { Routes, Route, Outlet, useNavigate, Link, useLocation } from "react-router-dom";
 import AudienceModal from "./components/AudienceModal.jsx";
 
 import Government from "./pages/government.jsx";
@@ -11,20 +10,25 @@ const ASPIRE_LOGO =
 
 /* ---------- Shared layout (header + container) ---------- */
 function Layout() {
+  const { pathname } = useLocation();
+  const showLogo = pathname === "/"; // only show logo on the landing page
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 flex flex-col">
       <AudienceModal />
 
       {/* Header */}
-      <header className="w-full py-4 sm:py-6 shadow-sm bg-white/70 backdrop-blur-md">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between">
-          <Link to="/" className="flex items-center gap-2">
-            <img
-              src={ASPIRE_LOGO}
-              alt="Aspire Executive Solutions"
-              className="h-8 sm:h-10 w-auto"
-            />
-          </Link>
+      <header className="sticky top-0 z-50 h-16 bg-white/90 backdrop-blur border-b border-slate-200">
+        <div className="h-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between">
+          {showLogo && (
+            <Link to="/" className="flex items-center gap-2">
+              <img
+                src={ASPIRE_LOGO}
+                alt="Aspire Executive Solutions"
+                className="h-8 sm:h-10 w-auto"
+              />
+            </Link>
+          )}
 
           <button
             onClick={() => {
@@ -39,8 +43,8 @@ function Layout() {
       </header>
 
       {/* Main content */}
-      <main className="flex-grow flex items-center justify-center px-4 sm:px-6 py-10 sm:py-16">
-        <div className="w-full max-w-5xl">
+      <main className="flex-grow px-4 sm:px-6 lg:px-8 pt-6 sm:pt-10 pb-20">
+        <div className="w-full max-w-7xl mx-auto">
           <Outlet />
         </div>
       </main>
