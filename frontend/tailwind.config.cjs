@@ -1,4 +1,4 @@
-// frontend/tailwind.config.js
+// frontend/tailwind.config.cjs
 const path = require("path");
 
 module.exports = {
@@ -7,5 +7,5 @@ module.exports = {
     path.resolve(__dirname, "src/**/*.{js,jsx,ts,tsx}")
   ],
   theme: { extend: {} },
-  plugins: []
+  plugins: [],
 };
