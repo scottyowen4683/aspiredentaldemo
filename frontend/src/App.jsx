@@ -1,11 +1,10 @@
-import React, { useState } from "react";
+import React from "react";
 import {
   Routes,
   Route,
   Outlet,
   useNavigate,
   Link,
-  useLocation,
 } from "react-router-dom";
 import AudienceModal from "./components/AudienceModal.jsx";
 import Government from "./pages/government.jsx";
@@ -14,31 +13,11 @@ import Business from "./pages/business.jsx";
 const ASPIRE_LOGO =
   "https://raw.githubusercontent.com/scottyowen4683/Aspirereception/refs/heads/feature/ai-receptionist/frontend/aspire.png";
 
-/* ---------- Header: full-width, 2 rows ---------- */
+/* ---------- SINGLE, CONSISTENT HEADER (all pages) ---------- */
 function Header() {
-  const { pathname } = useLocation();
-  const onLanding = pathname === "/";
-  const showSectionNav = !onLanding;
-  const [open, setOpen] = useState(false);
-
-  const sectionLinks = [
-    { href: "#how", label: "How it works" },
-    { href: "#automations", label: "Smart Automations" },
-    { href: "#why", label: "Why Aspire" },
-    { href: "#capabilities", label: "Capabilities" },
-    { href: "#advanced", label: "Advanced" },
-    { href: "#demo", label: "Demo" },
-    { href: "#roi", label: "ROI" },
-    { href: "#pricing", label: "Pricing" },
-    { href: "#privacy", label: "Privacy" },
-    { href: "#faq", label: "FAQ" },
-    { href: "#contact", label: "Contact" },
-  ];
-
   return (
-    <header className="sticky top-0 z-50 bg-white shadow-sm">
-      {/* Row 1 - Brand bar */}
-      <div className="h-14 md:h-16 border-b border-slate-200 flex items-center justify-between px-4 sm:px-6 lg:px-10">
+    <header className="sticky top-0 z-50 bg-white border-b border-slate-200 shadow-sm">
+      <div className="h-14 md:h-16 w-full px-4 sm:px-6 lg:px-10 flex items-center justify-between">
         <Link to="/" className="flex items-center gap-2 shrink-0">
           <img
             src={ASPIRE_LOGO}
@@ -47,94 +26,16 @@ function Header() {
           />
         </Link>
 
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => {
-              localStorage.removeItem("audience");
-              window.location.reload();
-            }}
-            className="hidden sm:inline text-sm text-slate-600 hover:text-blue-600"
-          >
-            Switch audience
-          </button>
-
-          {showSectionNav && (
-            <button
-              aria-label="Open menu"
-              onClick={() => setOpen((v) => !v)}
-              className="inline-flex md:hidden items-center justify-center rounded-md p-2 ring-1 ring-slate-300 text-slate-700"
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                className="h-5 w-5"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-              >
-                <path d="M4 7h16M4 12h16M4 17h16" />
-              </svg>
-            </button>
-          )}
-        </div>
+        <button
+          onClick={() => {
+            localStorage.removeItem("audience");
+            window.location.reload();
+          }}
+          className="text-sm text-slate-600 hover:text-blue-600"
+        >
+          Switch audience
+        </button>
       </div>
-
-      {/* Row 2 - Section nav */}
-      {showSectionNav && (
-        <>
-          {/* Desktop */}
-          <div className="hidden md:block border-b border-slate-200 bg-white">
-            <nav className="py-3 px-4 sm:px-6 lg:px-10">
-              <ul className="flex flex-wrap items-center gap-x-8 gap-y-2 text-[0.98rem] text-slate-800">
-                {sectionLinks.map((l) => (
-                  <li key={l.href}>
-                    <a
-                      href={l.href}
-                      className="whitespace-nowrap hover:text-blue-700"
-                    >
-                      {l.label}
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            </nav>
-          </div>
-
-          {/* Mobile drawer */}
-          <div
-            className={`md:hidden border-b border-slate-200 bg-white overflow-hidden transition-[max-height] duration-300 ${
-              open ? "max-h-96" : "max-h-0"
-            }`}
-          >
-            <div className="px-4 sm:px-6">
-              <nav className="py-3">
-                <ul className="grid grid-cols-2 gap-3 text-slate-800">
-                  {sectionLinks.map((l) => (
-                    <li key={l.href}>
-                      <a
-                        href={l.href}
-                        className="block w-full rounded-md px-3 py-2 hover:bg-slate-100"
-                        onClick={() => setOpen(false)}
-                      >
-                        {l.label}
-                      </a>
-                    </li>
-                  ))}
-                </ul>
-                <button
-                  onClick={() => {
-                    localStorage.removeItem("audience");
-                    window.location.reload();
-                  }}
-                  className="mt-3 inline-block w-full rounded-md px-3 py-2 text-left text-slate-600 ring-1 ring-slate-300 hover:bg-slate-100"
-                >
-                  Switch audience
-                </button>
-              </nav>
-            </div>
-          </div>
-        </>
-      )}
     </header>
   );
 }
@@ -145,6 +46,7 @@ function Layout() {
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 flex flex-col">
       <AudienceModal />
       <Header />
+      {/* Content below the single header */}
       <main className="flex-grow pt-6 md:pt-10 pb-20 px-4 sm:px-6 lg:px-10">
         <Outlet />
       </main>
@@ -157,11 +59,14 @@ function Landing() {
   const navigate = useNavigate();
   return (
     <div className="text-center">
+      {/* Keep the big centered logo only on the landing hero if you like it;
+          remove this <img> if you want *only* the top-left header logo. */}
       <img
         src={ASPIRE_LOGO}
         alt="Aspire Executive Solutions"
         className="h-12 sm:h-14 w-auto mx-auto mb-6"
       />
+
       <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-slate-900 leading-tight">
         Welcome to Aspire Executive Solutions
       </h1>
