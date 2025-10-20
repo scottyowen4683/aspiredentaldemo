@@ -1,8 +1,12 @@
 [build]
+  # "base" means Netlify will run commands inside this folder.
   base = "frontend"
-  publish = "frontend/dist"
   command = "npm install --no-audit --no-fund && npm run build"
 
+  # "publish" is relative to the base directory above.
+  publish = "dist"
+
 [functions]
+  # Path is relative to repository root, so include "frontend/"
   directory = "frontend/netlify/functions"
   node_bundler = "esbuild"
