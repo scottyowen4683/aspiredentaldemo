@@ -1,11 +1,15 @@
-// eval-runner.js  (Web API handler)
-// VERSION: 2025-10-20 14:10
+// Scores calls in Supabase using OpenAI (auto-triggered by webhook)
+export default async (req, res) => {
+  // allow browser GET health-check
+  if (req.method === "GET") {
+    return res.status(200).json({ ok: true, hint: "POST { callId } to run eval" });
+  }
+  if (req.method !== "POST") {
+    return res.status(405).json({ ok: false, error: "Method Not Allowed" });
+  }
 
-export default async (request, context) => {
   try {
-    const body = await request.json().catch(() => ({}));
-    const callId = body?.callId;
-
+    // ---- ENV fallbacks (keep names, add the missing one) ----
     const SB_URL =
       process.env.SUPABASE_URL ||
       process.env.VITE_SUPABASE_URL ||
@@ -13,129 +17,150 @@ export default async (request, context) => {
       process.env.SUPABASE_URL_PUBLIC;
 
     const SB_SERVICE =
+      process.env.SUPABASE_SERVICE_ROLE_KEY || // ✅ added
       process.env.SUPABASE_SERVICE_ROLE ||
       process.env.SUPABASE_SERVICE_KEY ||
       process.env.SUPABASE_SERVICE ||
       process.env.SERVICE_ROLE_KEY ||
+      process.env.VITE_SUPABASE_SERVICE_ROLE_KEY ||
       process.env.VITE_SUPABASE_SERVICE_ROLE ||
       process.env.VITE_SUPABASE_SERVICE_KEY;
 
     if (!SB_URL || !SB_SERVICE) {
-      return json({ ok: false, error: "Missing Supabase envs" }, 500);
+      return res.status(500).json({ ok: false, error: "Missing Supabase envs" });
     }
-    if (!callId) return json({ ok: false, error: "Missing callId" }, 400);
 
-    // 1) Pull the latest full transcript for this call
-    const transcript = await fetchOne(
-      `${SB_URL}/rest/v1/session_artifacts?select=transcript_full&session_id=eq.${encodeURIComponent(
-        callId
-      )}&order=updated_at.desc&limit=1`,
-      SB_SERVICE
-    ).then((r) => (r?.[0]?.transcript_full || "").trim());
+    const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+    const EVAL_MODEL = process.env.EVAL_MODEL || "gpt-4o-mini";
 
-    // 2) If no transcript yet, soft exit (webhook will re-trigger later)
-    if (!transcript) return json({ ok: true, skipped: "no transcript yet" });
+    const body = await readJson(req);
+    const callId = body?.callId;
+    if (!callId) {
+      return res.status(400).json({ ok: false, error: "callId required" });
+    }
 
-    // 3) Evaluate using your chosen model (uses EVAL_MODEL if set)
-    const model =
-      process.env.EVAL_MODEL ||
-      process.env.OPENAI_MODEL ||
-      "gpt-4o-mini";
+    // fetch transcript_full cheaply
+    const transcript = await selectOne(
+      SB_URL,
+      SB_SERVICE,
+      "session_artifacts",
+      { key: "session_id", val: callId, fields: "transcript_full", order: "updated_at.desc" }
+    );
 
-    const openaiKey = process.env.OPENAI_API_KEY || process.env.OPENAI_APIKEY;
-    if (!openaiKey) return json({ ok: false, error: "Missing OPENAI_API_KEY" }, 500);
+    // build short prompt (respect EVAL_MAX_CHARS)
+    const maxChars = parseInt(process.env.EVAL_MAX_CHARS || "4000", 10);
+    const text = (transcript?.transcript_full || "").slice(0, maxChars);
 
-    const rubric = `Score the call 0-100 with short summary and 2-4 suggestions.
-Return JSON: { "overall_score": number, "summary": string, "suggestions": [{ "criterion": string, "tip": string, "impact": "low|med|high" }] }`;
+    // if no transcript yet, write a placeholder eval record and exit
+    if (!text) {
+      await upsert(SB_URL, SB_SERVICE, "eval_runs", [{
+        session_id: callId,
+        status: "no-transcript",
+        overall_score: null,
+        summary: null,
+        suggestions: null
+      }]);
+      return res.status(200).json({ ok: true, info: "no transcript" });
+    }
 
-    const aiRes = await fetch("https://api.openai.com/v1/chat/completions", {
+    // call OpenAI
+    const prompt = [
+      { role: "system", content: "You are a rigorous QA evaluator for voice support calls." },
+      {
+        role: "user",
+        content:
+`Evaluate the following transcript against these criteria:
+1) Greeting, identification, and tone
+2) Correct triage and qualification
+3) Accuracy and policy compliance
+4) Clear next steps and closure
+5) Professionalism and brevity
+Return JSON:
+{
+  "overall_score": 0-100 integer,
+  "summary": "2-3 sentences",
+  "suggestions": [{"criterion":"...", "tip":"...", "impact":"low|med|high"}]
+}
+
+Transcript:
+${text}`
+      }
+    ];
+
+    const r = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${openaiKey}`,
-        "content-type": "application/json",
+        "authorization": `Bearer ${OPENAI_API_KEY}`,
+        "content-type": "application/json"
       },
       body: JSON.stringify({
-        model,
-        messages: [
-          { role: "system", content: "You are a strict QA evaluator for customer service calls." },
-          { role: "user", content: `${rubric}\n\nTranscript:\n${transcript}` },
-        ],
+        model: EVAL_MODEL,
+        messages: prompt,
         temperature: 0.2,
-        response_format: { type: "json_object" },
-      }),
+        response_format: { type: "json_object" }
+      })
     });
 
-    if (!aiRes.ok) {
-      const errText = await aiRes.text();
-      throw new Error(`OpenAI error: ${errText}`);
-    }
-    const comp = await aiRes.json();
-    const parsed = safeJson(comp?.choices?.[0]?.message?.content);
+    const j = await r.json();
+    const content = j?.choices?.[0]?.message?.content || "{}";
+    let out;
+    try { out = JSON.parse(content); } catch { out = {}; }
 
-    // 4) Persist score + suggestions on "calls"
-    const score = clampInt(parsed?.overall_score, 0, 100);
-    const patch = {
-      score,
-      rubric_json: parsed || null,
-      needs_eval: false,
-      evaluated_at: new Date().toISOString(),
+    const row = {
+      session_id: callId,
+      status: "completed",
+      overall_score: clampInt(out.overall_score, 0, 100),
+      summary: out.summary || null,
+      suggestions: Array.isArray(out.suggestions) ? out.suggestions : null
     };
 
-    await supabasePatch(SB_URL, SB_SERVICE, "calls", "id", callId, patch);
+    await upsert(SB_URL, SB_SERVICE, "eval_runs", [row]);
 
-    console.log("eval-runner OK", { callId, score, model });
-    return json({ ok: true, callId, score, model });
+    // also flip needs_eval=false on calls
+    await upsert(SB_URL, SB_SERVICE, "calls", [{ id: callId, needs_eval: false }]);
+
+    return res.status(200).json({ ok: true, scored: row.overall_score ?? null });
   } catch (e) {
-    console.error("eval-runner error", e);
-    return json({ ok: false, error: e?.message || "unknown" }, 200);
+    return res.status(200).json({ ok: false, error: e?.message || "unknown" });
   }
 };
 
-// ---------- helpers ----------
-function json(obj, status = 200) {
-  return new Response(JSON.stringify(obj), {
-    status,
-    headers: { "content-type": "application/json" },
-  });
-}
-
-function safeJson(s) {
-  try {
-    return typeof s === "string" ? JSON.parse(s) : s || null;
-  } catch {
-    return null;
-  }
-}
-
+// --- helpers ---
 function clampInt(n, lo, hi) {
-  const x = Math.round(Number(n || 0));
+  const x = parseInt(n, 10);
+  if (Number.isNaN(x)) return null;
   return Math.max(lo, Math.min(hi, x));
 }
 
-async function fetchOne(url, serviceKey) {
-  const r = await fetch(url, {
-    headers: {
-      apikey: serviceKey,
-      Authorization: `Bearer ${serviceKey}`,
-    },
-  });
-  if (!r.ok) throw new Error(`Supabase fetch failed: ${await r.text()}`);
-  return r.json();
+async function readJson(req) {
+  const chunks = [];
+  for await (const c of req) chunks.push(c);
+  const raw = Buffer.concat(chunks).toString("utf8");
+  try { return JSON.parse(raw); } catch { return {}; }
 }
 
-async function supabasePatch(url, serviceKey, table, keyCol, keyVal, patch) {
-  const r = await fetch(`${url}/rest/v1/${table}?${keyCol}=eq.${encodeURIComponent(keyVal)}`, {
-    method: "PATCH",
-    headers: {
-      apikey: serviceKey,
-      Authorization: `Bearer ${serviceKey}`,
-      "Content-Type": "application/json",
-      Prefer: "return=representation",
-    },
-    body: JSON.stringify(patch),
+async function selectOne(url, key, table, { key: col, val, fields, order }) {
+  const q = new URL(`${url}/rest/v1/${table}`);
+  q.searchParams.set("select", fields);
+  q.searchParams.set(col, `eq.${val}`);
+  if (order) q.searchParams.set("order", order);
+  const r = await fetch(q.toString(), {
+    headers: { apikey: key, Authorization: `Bearer ${key}` }
   });
-  if (!r.ok) {
-    const text = await r.text();
-    throw new Error(`Supabase patch failed: ${text}`);
-  }
+  const a = await r.json();
+  return a?.[0] || null;
+}
+
+async function upsert(url, key, table, rows) {
+  const r = await fetch(`${url}/rest/v1/${table}`, {
+    method: "POST",
+    headers: {
+      apikey: key,
+      Authorization: `Bearer ${key}`,
+      "content-type": "application/json",
+      Prefer: "resolution=merge-duplicates"
+    },
+    body: JSON.stringify(rows)
+  });
+  if (!r.ok) throw new Error(await r.text());
 }
