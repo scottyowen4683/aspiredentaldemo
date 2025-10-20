@@ -5,6 +5,18 @@
 const VAPI_BASE_URL = "https://api.vapi.ai";
 
 export const handler = async (event) => {
+  // ✅ Allow browser GET for quick health-check
+  if (event.httpMethod === "GET") {
+    return {
+      statusCode: 200,
+      body: JSON.stringify({
+        ok: true,
+        hint: "POST { to, assistantId } to place a call via Vapi"
+      }),
+    };
+  }
+
+  // Restrict all other methods to POST
   if (event.httpMethod !== "POST") {
     return { statusCode: 405, body: "Method Not Allowed" };
   }
@@ -23,7 +35,8 @@ export const handler = async (event) => {
     // --- Load environment values ---
     const VAPI_API_KEY = process.env.VAPI_API_KEY;
     const VAPI_PHONE_NUMBER_ID = process.env.VAPI_PHONE_NUMBER_ID;
-    const FROM_NUMBER = process.env.VITE_VAPI_FROM_NUMBER;
+    const FROM_NUMBER =
+      process.env.VITE_VAPI_FROM_NUMBER || process.env.VAPI_FROM_NUMBER;
     const WEBHOOK_URL =
       process.env.VAPI_WEBHOOK_URL ||
       "https://aspireexecutive.ai/.netlify/functions/vapi-webhook";
