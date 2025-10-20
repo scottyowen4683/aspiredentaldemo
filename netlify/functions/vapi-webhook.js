@@ -1,42 +1,139 @@
-export default async (request) => {
-  // Parse once; keep it cheap
-  const body = await request.json().catch(() => ({}));
+// Minimal VAPI webhook -> Supabase writer
+// Stores: started/ended, costs, log/recording URLs,
+// small transcript preview (cheap), and marks needs_eval=true
+// so eval-runner can score later.
 
-  // Pluck only what we need (no big prompts)
-  const msg = body?.message || {};
-  const endedReason = msg?.endedReason || msg?.status || '';
-  const call = msg?.artifact?.call || msg?.call || {};
-  const callId = call?.id || request.headers.get('x-call-id') || '';
-  const startedAt = msg?.startedAt || call?.createdAt || '';
-  const endedAt = msg?.endedAt || '';
-  const cost = (msg?.cost ?? call?.cost ?? 0);
+export default async (req, res) => {
+  try {
+    const body = await readJson(req);
 
-  // Tiny summary (~200 chars)
-  const summary = [
-    endedReason && `ended:${endedReason}`,
-    callId && `callId:${callId}`,
-    startedAt && `start:${startedAt}`,
-    endedAt && `end:${endedAt}`,
-    (cost !== undefined) && `cost:${cost}`
-  ].filter(Boolean).join(' | ');
+    // ---- ENV fallbacks (NO RENAMES NEEDED) ----
+    const SB_URL =
+      process.env.SUPABASE_URL ||
+      process.env.VITE_SUPABASE_URL ||
+      process.env.SUPABASEPROJECTURL ||
+      process.env.SUPABASE_URL_PUBLIC;
 
-  // Do a super-light eval locally (no LLM calls)
-  const evalResult = simpleEval({ endedReason, cost });
+    const SB_SERVICE =
+      process.env.SUPABASE_SERVICE_ROLE ||
+      process.env.SUPABASE_SERVICE_KEY ||
+      process.env.SUPABASE_SERVICE ||
+      process.env.SERVICE_ROLE_KEY ||
+      process.env.VITE_SUPABASE_SERVICE_ROLE ||
+      process.env.VITE_SUPABASE_SERVICE_KEY;
 
-  // OPTIONAL: If you want DB logging later, insert one row here.
-  // Keep off for now to avoid extra costs.
+    if (!SB_URL || !SB_SERVICE) {
+      return res.status(500).json({ ok: false, error: 'Missing Supabase envs' });
+    }
 
-  // Respond fast
-  return Response.json({ ok: true, summary, eval: evalResult });
+    const { message = {} } = body || {};
+    const { type, status, endedReason, analysis, artifact, call, startedAt, endedAt, costs } = normalizeVapi(message);
+
+    // Upsert minimal record early
+    if (call?.id) {
+      // compute cheap preview (no LLM): try artifact.transcript or stitch brief text
+      const preview = derivePreview(artifact);
+
+      const payload = {
+        id: call.id,
+        started_at: call.startedAt || startedAt || new Date().toISOString(),
+        ended_at: call.endedAt || endedAt || null,
+        assistant: call.assistantName || artifact?.assistant?.name || null,
+        customer_number: call.customerNumber || artifact?.customer?.number || null,
+        status: status || type || null,
+        ended_reason: endedReason || null,
+        aht_seconds: call.ahtSeconds || null,
+        cost_total: costs?.total ?? null,
+        recording_url: artifact?.recordingUrl || artifact?.recording?.mono?.combinedUrl || null,
+        log_url: artifact?.logUrl || null,
+        transcript_preview: preview,
+        // mark for later scoring only when the call ends
+        needs_eval: type === 'end-of-call-report' || status === 'ended'
+      };
+
+      await supabaseUpsert(SB_URL, SB_SERVICE, 'calls', payload);
+    }
+
+    return res.status(200).json({ ok: true });
+  } catch (e) {
+    return res.status(200).json({ ok: false, error: e?.message || 'unknown' });
+  }
 };
 
-// Zero-cost heuristic (tweak anytime)
-function simpleEval({ endedReason = '', cost = 0 }) {
-  const normalized = endedReason.toLowerCase();
-  const success =
-    normalized.includes('assistant-ended-call') ||
-    normalized.includes('completed') ||
-    normalized.includes('voicemail');
-  const score = success ? 1 : 0;
-  return { score, reason: endedReason || 'unknown', cost };
+// ---------- helpers ----------
+
+async function readJson(req) {
+  const chunks = [];
+  for await (const c of req) chunks.push(c);
+  const raw = Buffer.concat(chunks).toString('utf8');
+  try { return JSON.parse(raw); } catch { return {}; }
+}
+
+function normalizeVapi(message) {
+  const type = message?.type;
+  const status = message?.status;
+  const endedReason = message?.endedReason;
+
+  const art = message?.artifact || {};
+  const callObj = art?.call || message?.call || {};
+
+  // Costs (total at top-level if present)
+  const costBlock = art?.costBreakdown || message?.costBreakdown || message?.costs?.find?.(() => false) || {};
+  const costs = {
+    total: (art?.cost ?? message?.cost ?? art?.costs?.total ?? message?.costs?.total) ?? null
+  };
+
+  // Timestamps
+  const startedAt = art?.startedAt || message?.startedAt || callObj?.startedAt;
+  const endedAt = art?.endedAt || message?.endedAt || callObj?.endedAt;
+
+  // Shape a consistent 'call'
+  const call = {
+    id: callObj?.id || message?.call?.id,
+    startedAt,
+    endedAt,
+    ahtSeconds: art?.durationSeconds || message?.durationSeconds,
+    assistantName: art?.assistant?.name || message?.assistant?.name,
+    customerNumber: art?.customer?.number || message?.customer?.number
+  };
+
+  return { type, status, endedReason, artifact: massageArtifact(art), call, startedAt, endedAt, costs };
+}
+
+function massageArtifact(a = {}) {
+  // bubble common fields (works with the payload you pasted)
+  return {
+    assistant: a.assistant || {},
+    customer: a.customer || {},
+    recordingUrl: a.recordingUrl || a?.recording?.mono?.combinedUrl || null,
+    logUrl: a.logUrl || null,
+    transcript: a.transcript || ''
+  };
+}
+
+// cheap, bounded preview (no model calls; <= 700 chars)
+function derivePreview(artifact) {
+  const t = (artifact?.transcript || '').trim();
+  if (t) return t.slice(0, 700);
+
+  // If no transcript provided, make a tiny “system summary” from last few messages if present
+  // (your payload had very long system prompts; we avoid those)
+  return '';
+}
+
+async function supabaseUpsert(url, serviceKey, table, row) {
+  const r = await fetch(`${url}/rest/v1/${table}`, {
+    method: 'POST',
+    headers: {
+      apikey: serviceKey,
+      Authorization: `Bearer ${serviceKey}`,
+      'Content-Type': 'application/json',
+      Prefer: 'resolution=merge-duplicates'
+    },
+    body: JSON.stringify([row])
+  });
+  if (!r.ok) {
+    const text = await r.text();
+    throw new Error(`Supabase upsert failed: ${text}`);
+  }
 }
