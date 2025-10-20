@@ -27,66 +27,77 @@ function scoreToneLabel(score) {
 export default function Admin() {
   const [sinceDays] = useState(30);
   const [rows, setRows] = useState([]);
+  const [assistantFilter, setAssistantFilter] = useState("all");
+  const [stats, setStats] = useState({ total: 0, containment: 0, aht: 0 });
+
   const [topQs, setTopQs] = useState([]);
   const [detail, setDetail] = useState(null);
   const [detailTab, setDetailTab] = useState("transcript");
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailTranscript, setDetailTranscript] = useState("");
   const [detailEval, setDetailEval] = useState(null);
-  const [assistantFilter, setAssistantFilter] = useState("all");
-  const [stats, setStats] = useState({ total: 0, containment: 0, aht: 0 });
 
+  // ---- load grid -----------------------------------------------------------
   useEffect(() => {
     async function load() {
       const sinceISO = new Date(Date.now() - sinceDays * 24 * 3600 * 1000).toISOString();
-      let query = supabase
-        .from("admin_sessions_recent")
+
+      const { data, error } = await supabase
+        .from("calls_dashboard")
         .select("*")
         .gte("started_at", sinceISO)
         .order("started_at", { ascending: false })
         .limit(200);
-      const { data: recent, error } = await query;
+
       if (error) {
-        console.error("admin_sessions_recent error", error);
+        console.error("calls_dashboard error", error);
+        setRows([]);
+        setStats({ total: 0, containment: 0, aht: 0 });
         return;
       }
-      const total = recent.length;
-      const resolved = recent.filter((r) => r.outcome === "resolved").length;
-      const containment = total ? Math.round((resolved / total) * 100) : 0;
-      const aht = total && recent.some((r) => r.aht_seconds != null)
-        ? Math.round(recent.reduce((acc, r) => acc + (r.aht_seconds || 0), 0) / total)
-        : 0;
-      const graded = recent.map((r) => {
-        const score =
-          typeof r.overall_score === "number"
-            ? Math.max(0, Math.min(100, Math.round(r.overall_score)))
-            : r.outcome === "resolved"
-            ? 100
-            : 0;
-        const { tone, label } = scoreToneLabel(score);
-        return { ...r, score, scoreTone: tone, scoreLabel: label };
+
+      // enrich with score tone/label
+      const enriched = (data || []).map((r) => {
+        const { tone, label } = scoreToneLabel(typeof r.score === "number" ? r.score : undefined);
+        return { ...r, scoreTone: tone, scoreLabel: label };
       });
-      setRows(graded);
+      setRows(enriched);
+
+      // KPIs
+      const total = enriched.length;
+      const aht =
+        total && enriched.some((r) => typeof r.aht_seconds === "number")
+          ? Math.round(
+              enriched.reduce((acc, r) => acc + (r.aht_seconds || 0), 0) / total
+            )
+          : 0;
+
+      // containment proxy: percent of ended calls with score >= 70
+      const ended = enriched.filter((r) => r.ended_at != null);
+      const good = ended.filter((r) => (r.score || 0) >= 70);
+      const containment = ended.length ? Math.round((good.length / ended.length) * 100) : 0;
+
       setStats({ total, containment, aht });
-      const { data: qdata } = await supabase
+
+      // optional "Top Questions" if you keep your existing view
+      const tq = await supabase
         .from("top_questions_30d")
         .select("*")
         .order("times", { ascending: false })
         .limit(12);
-      if (qdata) setTopQs(qdata);
+      if (!tq.error && tq.data) setTopQs(tq.data);
     }
     load();
   }, [sinceDays]);
 
+  // assistant list from data
   const assistantOptions = useMemo(() => {
-    const uniq = Array.from(new Set(rows.map((r) => r.assistant_id).filter(Boolean)));
+    const uniq = Array.from(new Set(rows.map((r) => r.assistant).filter(Boolean)));
     return uniq;
   }, [rows]);
 
   const filteredRows = useMemo(() => {
-    return assistantFilter === "all"
-      ? rows
-      : rows.filter((r) => r.assistant_id === assistantFilter);
+    return assistantFilter === "all" ? rows : rows.filter((r) => r.assistant === assistantFilter);
   }, [rows, assistantFilter]);
 
   async function refreshTopQs() {
@@ -99,40 +110,36 @@ export default function Admin() {
     if (data) setTopQs(data);
   }
 
+  // ---- detail modal --------------------------------------------------------
   async function openDetails(row) {
     setDetail({
       id: row.id,
-      provider_session_id: row.provider_session_id,
-      assistant_name: row.assistant_name,
-      assistant_id: row.assistant_id,
       started_at: row.started_at,
+      ended_at: row.ended_at,
       aht_seconds: row.aht_seconds,
-      outcome: row.outcome,
+      assistant: row.assistant || "Assistant",
       score: row.score,
-      scoreLabel: row.scoreLabel,
       scoreTone: row.scoreTone,
-      summary: row.summary || "",
+      scoreLabel: row.scoreLabel,
     });
     setDetailLoading(true);
     setDetailTab("transcript");
     setDetailTranscript("");
     setDetailEval(null);
     try {
-      const { data: art } = await supabase
-        .from("session_artifacts")
-        .select("transcript_full")
-        .eq("session_id", row.provider_session_id)
-        .order("updated_at", { ascending: false })
-        .limit(1)
+      const { data: tx } = await supabase
+        .from("transcripts")
+        .select("full_transcript")
+        .eq("call_id", row.id)
         .maybeSingle();
-      if (art?.transcript_full) setDetailTranscript(art.transcript_full);
-      const { data: evals } = await supabase
-        .from("eval_runs")
-        .select("overall_score, summary, suggestions, status, completed_at")
-        .eq("session_id", row.provider_session_id)
-        .order("completed_at", { ascending: false })
-        .limit(1);
-      if (evals && evals[0]) setDetailEval(evals[0]);
+      if (tx?.full_transcript) setDetailTranscript(tx.full_transcript);
+
+      const { data: callRow } = await supabase
+        .from("calls")
+        .select("rubric_json")
+        .eq("id", row.id)
+        .maybeSingle();
+      if (callRow?.rubric_json) setDetailEval(callRow.rubric_json);
     } catch (e) {
       console.error("detail load error", e);
     } finally {
@@ -140,23 +147,56 @@ export default function Admin() {
     }
   }
 
-  async function deleteSession(sessionId) {
-    if (!window.confirm("Delete this session and its artifacts/evals?")) return;
-    await supabase.from("sessions").delete().eq("provider_session_id", sessionId);
-    setRows((r) => r.filter((x) => x.provider_session_id !== sessionId));
+  async function deleteCall(callId) {
+    if (!window.confirm("Delete this call and its transcript?")) return;
+    await supabase.from("calls").delete().eq("id", callId);
+    setRows((r) => r.filter((x) => x.id !== callId));
     setDetail(null);
   }
 
+  // optional: let an admin trigger scoring again
+  async function reScore(callId) {
+    try {
+      const url = `/.netlify/functions/eval-runner?callId=${encodeURIComponent(callId)}`;
+      await fetch(url).catch(() => {});
+      // soft refresh of the one row
+      const { data } = await supabase.from("calls").select("score, rubric_json, transcript_preview").eq("id", callId).maybeSingle();
+      if (data) {
+        setRows((prev) =>
+          prev.map((r) =>
+            r.id === callId
+              ? {
+                  ...r,
+                  score: data.score,
+                  transcript_preview: data.transcript_preview,
+                  ...scoreToneLabelFields(data.score),
+                }
+              : r
+          )
+        );
+        setDetailEval(data.rubric_json || null);
+      }
+    } catch (e) {
+      console.error("reScore error", e);
+    }
+  }
+
+  function scoreToneLabelFields(score) {
+    const { tone, label } = scoreToneLabel(typeof score === "number" ? score : undefined);
+    return { scoreTone: tone, scoreLabel: label };
+  }
+
+  // table cell styles
   const td = "px-3 py-3 align-top border-b border-gray-100 text-sm";
   const th = "px-3 py-2 text-xs font-semibold uppercase tracking-wide text-gray-500 border-b";
 
   return (
-    <div className="p-3 sm:p-6 bg-gray-50 min-h-screen">
+    <div className="page-container bg-gray-50 min-h-screen">
       <h1 className="text-lg sm:text-xl font-bold mb-4 sm:mb-6 text-center sm:text-left">
         Aspire AI — Admin Dashboard
       </h1>
 
-      {/* Stats grid */}
+      {/* Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 mb-6">
         <div className="bg-white rounded-lg shadow p-3 sm:p-5 text-center sm:text-left">
           <div className="text-gray-500 text-xs sm:text-sm">Total Sessions (30 days)</div>
@@ -178,90 +218,93 @@ export default function Admin() {
             className="border rounded px-2 py-1 w-full text-sm"
           >
             <option value="all">All</option>
-            {assistantOptions.map((id) => (
-              <option key={id} value={id}>{id}</option>
+            {assistantOptions.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
             ))}
           </select>
         </div>
       </div>
 
-      {/* Content grid */}
+      {/* Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-        {/* Sessions table (scrollable on small screens) */}
-        <div className="lg:col-span-3 bg-white rounded-lg shadow overflow-hidden overflow-x-auto">
-          <table className="w-full min-w-[600px] sm:min-w-0">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className={th}>Started</th>
-                <th className={th}>Assistant</th>
-                <th className={th}>Outcome</th>
-                <th className={th}>AHT (s)</th>
-                <th className={th}>Score</th>
-                <th className={th}>Transcript</th>
-                <th className={th}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredRows.map((r) => (
-                <tr key={r.provider_session_id} className="hover:bg-gray-50">
-                  <td className={td}>{new Date(r.started_at).toLocaleString()}</td>
-                  <td className={td}>
-                    <div className="text-sm text-gray-800">{r.assistant_name || "Assistant"}</div>
-                    <div className="text-xs text-gray-500 truncate">{r.assistant_id || "—"}</div>
-                  </td>
-                  <td className={td}>
-                    <Badge tone={r.outcome === "resolved" ? "green" : r.outcome ? "yellow" : "gray"}>
-                      {r.outcome || "in-progress"}
-                    </Badge>
-                  </td>
-                  <td className={td}>{r.aht_seconds ?? "—"}</td>
-                  <td className={td}>
-                    <Badge tone={r.scoreTone}>{r.scoreLabel}</Badge>
-                  </td>
-                  <td className={td}>
-                    {r.transcript_preview ? (
-                      <div className="text-xs text-gray-700">
-                        <div className="line-clamp-2">{r.transcript_preview}</div>
+        {/* Sessions table */}
+        <div className="lg:col-span-3 bg-white rounded-lg shadow overflow-hidden">
+          <div className="responsive-table">
+            <table className="w-full">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className={th}>Started</th>
+                  <th className={th}>Assistant</th>
+                  <th className={th}>AHT (s)</th>
+                  <th className={th}>Score</th>
+                  <th className={th}>Transcript</th>
+                  <th className={th}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredRows.map((r) => (
+                  <tr key={r.id} className="hover:bg-gray-50">
+                    <td className={td}>{new Date(r.started_at).toLocaleString()}</td>
+                    <td className={td}>
+                      <div className="text-sm text-gray-800">{r.assistant || "Assistant"}</div>
+                    </td>
+                    <td className={td}>{typeof r.aht_seconds === "number" ? r.aht_seconds : "—"}</td>
+                    <td className={td}>
+                      <Badge tone={r.scoreTone}>{r.scoreLabel}</Badge>
+                    </td>
+                    <td className={td}>
+                      {r.transcript_preview ? (
+                        <div className="text-xs text-gray-700">
+                          <div className="line-clamp-2">{r.transcript_preview}</div>
+                          <button
+                            className="mt-1 text-blue-600 hover:underline text-xs"
+                            onClick={() => openDetails(r)}
+                          >
+                            View
+                          </button>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-gray-400">—</span>
+                      )}
+                    </td>
+                    <td className={td}>
+                      <div className="flex items-center gap-3">
                         <button
-                          className="mt-1 text-blue-600 hover:underline text-xs"
-                          onClick={() => openDetails(r)}
+                          className="text-xs text-blue-600 hover:underline"
+                          onClick={() => reScore(r.id)}
+                          title="Re-run evaluation"
                         >
-                          View
+                          Score now
+                        </button>
+                        <button
+                          className="text-xs text-red-600 hover:underline"
+                          onClick={() => deleteCall(r.id)}
+                        >
+                          Delete
                         </button>
                       </div>
-                    ) : (
-                      <span className="text-xs text-gray-400">—</span>
-                    )}
-                  </td>
-                  <td className={td}>
-                    <button
-                      className="text-xs text-red-600 hover:underline"
-                      onClick={() => deleteSession(r.provider_session_id)}
-                    >
-                      Delete
-                    </button>
-                  </td>
-                </tr>
-              ))}
-              {!filteredRows.length && (
-                <tr>
-                  <td className="px-3 py-8 text-center text-gray-500 text-sm" colSpan={7}>
-                    No sessions in the last {sinceDays} days.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+                    </td>
+                  </tr>
+                ))}
+                {!filteredRows.length && (
+                  <tr>
+                    <td className="px-3 py-8 text-center text-gray-500 text-sm" colSpan={6}>
+                      No sessions in the last {sinceDays} days.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
 
         {/* Top Questions */}
         <div className="bg-white rounded-lg shadow p-5">
           <div className="flex items-center justify-between mb-3">
             <h2 className="font-semibold text-sm sm:text-base">Top Questions (30 days)</h2>
-            <button
-              className="text-xs text-blue-600 hover:underline"
-              onClick={refreshTopQs}
-            >
+            <button className="text-xs text-blue-600 hover:underline" onClick={refreshTopQs}>
               refresh
             </button>
           </div>
@@ -277,23 +320,21 @@ export default function Admin() {
         </div>
       </div>
 
-      {/* Modal stays full-width on mobile */}
+      {/* Modal */}
       {detail && (
         <div className="fixed inset-0 bg-black/40 z-50 grid place-items-center p-2 sm:p-6 overflow-auto">
           <div className="bg-white w-full max-w-4xl rounded-lg shadow-lg overflow-hidden">
             <div className="px-4 sm:px-5 py-3 border-b flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
               <div>
-                <h3 className="font-semibold text-sm sm:text-base">Session Details</h3>
+                <h3 className="font-semibold text-sm sm:text-base">Call Details</h3>
                 <div className="text-xs text-gray-500">
-                  {new Date(detail.started_at).toLocaleString()} • {detail.assistant_name || "Assistant"} • AHT {detail.aht_seconds ?? "—"}s
+                  {new Date(detail.started_at).toLocaleString()} • {detail.assistant} • AHT{" "}
+                  {detail.aht_seconds ?? "—"}s
                 </div>
               </div>
               <div className="flex items-center gap-2">
                 <Badge tone={detail.scoreTone}>{detail.scoreLabel}</Badge>
-                <button
-                  className="text-xs sm:text-sm text-gray-500 hover:text-gray-700"
-                  onClick={() => setDetail(null)}
-                >
+                <button className="text-xs sm:text-sm text-gray-500 hover:text-gray-700" onClick={() => setDetail(null)}>
                   Close
                 </button>
               </div>
@@ -301,13 +342,17 @@ export default function Admin() {
 
             <div className="px-4 sm:px-5 pt-3 flex gap-2 border-b text-xs sm:text-sm">
               <button
-                className={`px-2 sm:px-3 py-2 ${detailTab === "transcript" ? "border-b-2 border-blue-600 text-blue-700 font-medium" : "text-gray-600"}`}
+                className={`px-2 sm:px-3 py-2 ${
+                  detailTab === "transcript" ? "border-b-2 border-blue-600 text-blue-700 font-medium" : "text-gray-600"
+                }`}
                 onClick={() => setDetailTab("transcript")}
               >
                 Transcript
               </button>
               <button
-                className={`px-2 sm:px-3 py-2 ${detailTab === "eval" ? "border-b-2 border-blue-600 text-blue-700 font-medium" : "text-gray-600"}`}
+                className={`px-2 sm:px-3 py-2 ${
+                  detailTab === "eval" ? "border-b-2 border-blue-600 text-blue-700 font-medium" : "text-gray-600"
+                }`}
                 onClick={() => setDetailTab("eval")}
               >
                 Evaluation
@@ -328,30 +373,18 @@ export default function Admin() {
                   {!detailEval && <div className="text-gray-500">No evaluation found.</div>}
                   {detailEval && (
                     <>
-                      <div>
-                        <div className="font-medium">Overall Score</div>
-                        <Badge tone={scoreToneLabel(detailEval.overall_score).tone}>
-                          {scoreToneLabel(detailEval.overall_score).label}
-                        </Badge>
-                      </div>
-                      {detailEval.summary && (
+                      <div className="font-medium">Breakdown</div>
+                      <ul className="list-disc pl-4 space-y-1">
+                        {Object.entries(detailEval.breakdown || {}).map(([k, v]) => (
+                          <li key={k} className="text-sm">
+                            <span className="capitalize">{k}</span>: <strong>{v}</strong>
+                          </li>
+                        ))}
+                      </ul>
+                      {detailEval.notes && (
                         <div>
-                          <div className="font-medium mb-1">Summary</div>
-                          <p>{detailEval.summary}</p>
-                        </div>
-                      )}
-                      {Array.isArray(detailEval.suggestions) && detailEval.suggestions.length > 0 && (
-                        <div>
-                          <div className="font-medium mb-1">Suggestions</div>
-                          <ul className="list-disc pl-4 space-y-1">
-                            {detailEval.suggestions.map((s, i) => (
-                              <li key={i}>
-                                <strong>{s.criterion ? `${s.criterion}: ` : ""}</strong>
-                                {s.tip || JSON.stringify(s)}
-                                {s.impact && <span className="ml-1 text-gray-500 text-xs">({s.impact})</span>}
-                              </li>
-                            ))}
-                          </ul>
+                          <div className="font-medium mb-1">Notes</div>
+                          <p>{detailEval.notes}</p>
                         </div>
                       )}
                     </>
@@ -361,15 +394,15 @@ export default function Admin() {
             </div>
 
             <div className="px-4 sm:px-5 py-3 border-t flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-xs sm:text-sm">
-              <div className="text-gray-500">
-                Assistant: {detail.assistant_id || "—"}
+              <div className="text-gray-500">ID: {detail.id}</div>
+              <div className="flex items-center gap-4">
+                <button className="text-blue-600 hover:underline" onClick={() => reScore(detail.id)}>
+                  Score now
+                </button>
+                <button className="text-red-600 hover:underline" onClick={() => deleteCall(detail.id)}>
+                  Delete Call
+                </button>
               </div>
-              <button
-                className="text-red-600 hover:underline"
-                onClick={() => deleteSession(detail.provider_session_id)}
-              >
-                Delete Session
-              </button>
             </div>
           </div>
         </div>
