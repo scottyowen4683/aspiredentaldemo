@@ -25,7 +25,8 @@ export const handler = async (event) => {
     const transcript = tx?.full_transcript || "";
     if (!transcript) throw new Error("No transcript found");
 
-    // 2) Use GPT-4o-mini to score the call
+    // 2) Use OpenAI (model defined via EVAL_MODEL)
+    const model = process.env.EVAL_MODEL || "gpt-4o-mini";
     const rubricPrompt = `
 You are an evaluation model for Aspire Executive Solutions.
 Score the service call transcript 0–100 across these five criteria (equal weight):
@@ -60,7 +61,7 @@ ${transcript.slice(-5000)}
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        model: "gpt-4o-mini",
+        model,
         temperature: 0,
         max_tokens: 250,
         messages: [
@@ -90,7 +91,7 @@ ${transcript.slice(-5000)}
       })
       .eq("id", callId);
 
-    return { statusCode: 200, body: JSON.stringify({ ok: true, score }) };
+    return { statusCode: 200, body: JSON.stringify({ ok: true, model, score }) };
   } catch (err) {
     console.error("eval-runner error", err);
     return { statusCode: 500, body: JSON.stringify({ error: String(err) }) };
