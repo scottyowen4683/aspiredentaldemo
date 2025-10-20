@@ -1,13 +1,8 @@
+# No base. Build the frontend by pointing the command into /frontend.
 [build]
-  base = "frontend"
-  command = "npm install --no-audit --no-fund && npm run build"
-  publish = "dist"
+command = "npm --prefix frontend ci && npm --prefix frontend run build"
+publish = "frontend/dist"
 
 [functions]
-  directory = "netlify/functions"
-  node_bundler = "esbuild"
-
-[[redirects]]
-  from = "/*"
-  to = "/index.html"
-  status = 200
+directory = "netlify/functions"
+node_bundler = "esbuild"
