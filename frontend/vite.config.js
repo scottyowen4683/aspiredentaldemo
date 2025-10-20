@@ -8,13 +8,15 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 export default defineConfig({
-  base: "./",                                     // ensure relative asset paths in Netlify
-  root: __dirname,                                // project root is /frontend
+  base: "./",                                // ✅ ensures relative asset paths on Netlify
+  root: __dirname,                           // project root is /frontend
   build: {
-    outDir: resolve(__dirname, "dist"),           // output to /frontend/dist
+    outDir: resolve(__dirname, "dist"),      // output to /frontend/dist
+    emptyOutDir: true,
   },
   css: {
-    postcss: resolve(__dirname, "postcss.config.js"),
+    // Vite auto-detects postcss.config.cjs at root, but we point explicitly to be safe
+    postcss: resolve(__dirname, "postcss.config.cjs"),
   },
   plugins: [react()],
 });
