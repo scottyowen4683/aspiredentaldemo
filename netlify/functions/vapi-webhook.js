@@ -1,5 +1,5 @@
 // netlify/functions/vapi-webhook.js
-// Vapi → Supabase webhook (handles message.* envelope you posted)
+// Logs sessions + a LIGHT transcript slice, then evaluates ONLY that slice to control cost.
 
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY =
@@ -8,6 +8,9 @@ const SUPABASE_SERVICE_ROLE_KEY =
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const EVAL_MODEL = process.env.EVAL_MODEL || "gpt-4o-mini";
 const EVAL_DEFAULT_RUBRIC_ID = process.env.EVAL_DEFAULT_RUBRIC_ID;
+
+// Max characters we’ll send to OpenAI (default 1800 ~ ~500-700 tokens)
+const EVAL_MAX_CHARS = Number(process.env.EVAL_MAX_CHARS || 1800);
 
 function nowISO() { return new Date().toISOString(); }
 
@@ -35,23 +38,43 @@ async function fetchRubricJSON(rubricId) {
   return rows?.[0]?.rubric_json || null;
 }
 
-function buildTranscriptFromMessage(msg) {
-  // 1) Preferred: conversation array [{role, content}]
-  if (Array.isArray(msg?.conversation) && msg.conversation.length) {
-    return msg.conversation
-      .map((c) => `${c.role || "unknown"}: ${typeof c.content === "string" ? c.content : ""}`.trim())
-      .filter(Boolean)
-      .join("\n");
+/**
+ * Build a LIGHT conversation string:
+ * - only user/assistant turns
+ * - strip system/prompts
+ * - cap to EVAL_MAX_CHARS (keep the last turns which are most relevant)
+ */
+function lightConversation(msg) {
+  let lines = [];
+
+  // Preferred: message.conversation [{role, content}]
+  if (Array.isArray(msg?.conversation)) {
+    for (const c of msg.conversation) {
+      const role = (c.role || "").toLowerCase();
+      if (role === "user" || role === "assistant") {
+        const content = typeof c.content === "string" ? c.content : "";
+        if (content) lines.push(`${role}: ${content}`);
+      }
+    }
   }
-  // 2) Fallback: artifact.messages [{role, message}]
-  if (Array.isArray(msg?.artifact?.messages) && msg.artifact.messages.length) {
-    return msg.artifact.messages
-      .map((m) => `${m.role || "unknown"}: ${typeof m.message === "string" ? m.message : ""}`.trim())
-      .filter(Boolean)
-      .join("\n");
+
+  // Fallback: artifact.messages [{role, message}]
+  if (!lines.length && Array.isArray(msg?.artifact?.messages)) {
+    for (const m of msg.artifact.messages) {
+      const role = (m.role || "").toLowerCase();
+      if (role === "user" || role === "assistant") {
+        const content = typeof m.message === "string" ? m.message : "";
+        if (content) lines.push(`${role}: ${content}`);
+      }
+    }
   }
-  // 3) Nothing useful
-  return "";
+
+  let convo = lines.join("\n");
+  // keep the last EVAL_MAX_CHARS characters (usually the most decision-relevant)
+  if (convo.length > EVAL_MAX_CHARS) {
+    convo = convo.slice(-EVAL_MAX_CHARS);
+  }
+  return convo;
 }
 
 function extractTopQuestions(transcript) {
@@ -63,10 +86,13 @@ function extractTopQuestions(transcript) {
 }
 
 async function callOpenAIForEval({ transcript, rubric }) {
-  const system = `You are an evaluation engine. Score a customer-service phone call using this rubric JSON: ${JSON.stringify(
+  if (!transcript) return { overall_score: 0, summary: "", suggestions: [] };
+
+  const system = `You are an evaluation engine. Score a customer-service call using this rubric JSON: ${JSON.stringify(
     rubric
   )}.
-Return strict JSON: {"overall_score":0-100,"summary":"...","suggestions":[{"criterion":"...","tip":"...","impact":"high|medium|low"}]}.`;
+Return strict JSON: {"overall_score":0-100,"summary":"2-4 sentences","suggestions":[{"criterion":"Intro","tip":"...","impact":"high|medium|low"}]}.`;
+
   const res = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, "Content-Type": "application/json" },
@@ -77,44 +103,34 @@ Return strict JSON: {"overall_score":0-100,"summary":"...","suggestions":[{"crit
       response_format: { type: "json_object" },
     }),
   });
-  if (!res.ok) {
-    const t = await res.text();
-    throw new Error(`OpenAI error: ${t}`);
-  }
+  if (!res.ok) throw new Error(`OpenAI error: ${await res.text()}`);
   const data = await res.json();
-  const raw = data?.choices?.[0]?.message?.content || "{}";
   let parsed = {};
-  try { parsed = JSON.parse(raw); } catch {}
+  try { parsed = JSON.parse(data?.choices?.[0]?.message?.content || "{}"); } catch {}
   const score = Math.max(0, Math.min(100, Math.round(Number(parsed.overall_score) || 0)));
   return {
     overall_score: score,
-    summary: typeof parsed.summary === "string" ? parsed.summary.slice(0, 1500) : "",
-    suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions.slice(0, 10) : [],
+    summary: typeof parsed.summary === "string" ? parsed.summary.slice(0, 1000) : "",
+    suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions.slice(0, 8) : [],
   };
 }
 
 export const handler = async (event) => {
   if (event.httpMethod !== "POST") return { statusCode: 405, body: "Method Not Allowed" };
 
+  // Vapi payload envelope is { message: { ... } }
   let payload = {};
-  try { payload = JSON.parse(event.body || "{}"); } catch (e) {
-    console.error("Invalid JSON", e);
+  try { payload = JSON.parse(event.body || "{}"); } catch {
     return { statusCode: 400, body: "Invalid JSON" };
   }
-
-  // Your payloads are wrapped at { message: { ... } }
   const msg = payload?.message || {};
+
   const callHeaderId = event.headers?.["x-call-id"] || event.headers?.["X-Call-Id"];
   const provider_session_id =
-    callHeaderId ||
-    msg?.call?.id ||
-    msg?.id ||
-    `session-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    callHeaderId || msg?.call?.id || msg?.id || `session-${Date.now()}`;
 
-  const assistant_id =
-    msg?.call?.assistantId || msg?.assistant?.id || null;
-  const assistant_name =
-    msg?.assistant?.name || null;
+  const assistant_id = msg?.call?.assistantId || msg?.assistant?.id || null;
+  const assistant_name = msg?.assistant?.name || null;
 
   const eventType = String(msg?.type || "").toLowerCase();
   const status = String(msg?.status || "").toLowerCase();
@@ -130,7 +146,10 @@ export const handler = async (event) => {
           assistant_id,
           assistant_name,
           started_at: msg?.call?.createdAt || nowISO(),
-          metadata: { phone: msg?.call?.customer?.number || null, provider: msg?.call?.phoneCallProvider || null },
+          metadata: {
+            phone: msg?.call?.customer?.number || null,
+            provider: msg?.call?.phoneCallProvider || null,
+          },
           last_event: eventType || status || "unknown",
         },
       ]),
@@ -141,16 +160,16 @@ export const handler = async (event) => {
       });
     });
 
-    // 2) store transcript snippet if any
-    const transcript_full = buildTranscriptFromMessage(msg);
-    if (transcript_full) {
+    // 2) store LIGHT transcript slice (cost control)
+    const convo = lightConversation(msg);
+    if (convo) {
       await sfetch("/session_artifacts", {
         method: "POST",
         body: JSON.stringify([
           {
             session_id: provider_session_id,
-            transcript_full,
-            transcript_preview: transcript_full.slice(0, 280),
+            transcript_full: convo,                      // this is the light slice
+            transcript_preview: convo.slice(0, 280),
             updated_at: nowISO(),
           },
         ]),
@@ -187,19 +206,15 @@ export const handler = async (event) => {
       }),
     });
 
-    // re-read last transcript if we didn't get one in this event
-    let finalTranscript = transcript_full;
-    if (!finalTranscript) {
-      const arts = await sfetch(
-        `/session_artifacts?session_id=eq.${provider_session_id}&select=transcript_full&order=updated_at.desc&limit=1`
-      );
-      finalTranscript = arts?.[0]?.transcript_full || "";
-    }
+    // 5) evaluation on the LIGHT slice only
+    const latest = await sfetch(
+      `/session_artifacts?session_id=eq.${provider_session_id}&select=transcript_full&order=updated_at.desc&limit=1`
+    );
+    const evalInput = latest?.[0]?.transcript_full || "";
 
-    // 5) evaluation
     const rubric = EVAL_DEFAULT_RUBRIC_ID ? await fetchRubricJSON(EVAL_DEFAULT_RUBRIC_ID) : null;
-    if (OPENAI_API_KEY && rubric && finalTranscript) {
-      const evalRes = await callOpenAIForEval({ transcript: finalTranscript, rubric });
+    if (OPENAI_API_KEY && rubric && evalInput) {
+      const evalRes = await callOpenAIForEval({ transcript: evalInput, rubric });
       await sfetch("/eval_runs", {
         method: "POST",
         body: JSON.stringify([
@@ -216,17 +231,17 @@ export const handler = async (event) => {
           },
         ]),
       });
-    }
 
-    // 6) top questions
-    const qs = extractTopQuestions(finalTranscript);
-    if (qs.length) {
-      await sfetch("/session_questions", {
-        method: "POST",
-        body: JSON.stringify(
-          qs.map((q) => ({ session_id: provider_session_id, question: q.slice(0, 500), asked_at: nowISO() }))
-        ),
-      });
+      // Top questions (from light transcript)
+      const qs = extractTopQuestions(evalInput);
+      if (qs.length) {
+        await sfetch("/session_questions", {
+          method: "POST",
+          body: JSON.stringify(
+            qs.map((q) => ({ session_id: provider_session_id, question: q.slice(0, 500), asked_at: nowISO() }))
+          ),
+        });
+      }
     }
 
     return { statusCode: 200, body: JSON.stringify({ ok: true, finalized: true }) };
