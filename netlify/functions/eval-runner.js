@@ -1,103 +1,108 @@
-// netlify/functions/eval-runner.js
-// Pingable function to (re)run evaluation for a given session_id.
-// Usage: GET /.netlify/functions/eval-runner?id=<provider_session_id>
+/**
+ * netlify/functions/eval-runner.js
+ *
+ * Evaluates short transcripts or summaries against your rubric
+ * and stores the result in Supabase.
+ */
 
-const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
-const SUPABASE_SERVICE_ROLE_KEY =
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_SERVICE_ROLE_KEY;
+import { createClient } from "@supabase/supabase-js";
+import fetch from "node-fetch";
 
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const EVAL_MODEL = process.env.EVAL_MODEL || "gpt-4o-mini";
-const EVAL_DEFAULT_RUBRIC_ID = process.env.EVAL_DEFAULT_RUBRIC_ID;
-const EVAL_MAX_CHARS = Number(process.env.EVAL_MAX_CHARS || 1800);
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
+);
 
-function nowISO() { return new Date().toISOString(); }
-
-async function sfetch(path, init = {}) {
-  const res = await fetch(`${SUPABASE_URL}/rest/v1${path}`, {
-    ...init,
-    headers: {
-      apikey: SUPABASE_SERVICE_ROLE_KEY,
-      Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-      "Content-Type": "application/json",
-      Prefer: "return=representation",
-      ...(init.headers || {}),
-    },
-  });
-  if (!res.ok) throw new Error(`Supabase ${res.status}: ${await res.text()}`);
-  return res.json();
-}
-
-async function fetchRubricJSON(rubricId) {
-  const rows = await sfetch(`/eval_rubrics?id=eq.${rubricId}&select=rubric_json&limit=1`);
-  return rows?.[0]?.rubric_json || null;
-}
-
-async function callOpenAIForEval({ transcript, rubric }) {
-  const system = `Evaluate this phone-call snippet with rubric: ${JSON.stringify(rubric)}.
-Return JSON {overall_score, summary, suggestions:[{criterion,tip,impact}]}.`;
-  const res = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: EVAL_MODEL,
-      temperature: 0.2,
-      messages: [{ role: "system", content: system }, { role: "user", content: transcript.slice(-EVAL_MAX_CHARS) }],
-      response_format: { type: "json_object" },
-    }),
-  });
-  if (!res.ok) throw new Error(`OpenAI error: ${await res.text()}`);
-  const data = await res.json();
-  let parsed = {};
-  try { parsed = JSON.parse(data?.choices?.[0]?.message?.content || "{}"); } catch {}
-  const score = Math.max(0, Math.min(100, Math.round(Number(parsed.overall_score) || 0)));
-  return {
-    overall_score: score,
-    summary: typeof parsed.summary === "string" ? parsed.summary.slice(0, 1000) : "",
-    suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions.slice(0, 8) : [],
-  };
-}
+const MODEL = process.env.EVAL_MODEL || "gpt-4o-mini";
+const RUBRIC_ID = process.env.EVAL_DEFAULT_RUBRIC_ID;
+const CHAR_LIMIT = Number(process.env.EVAL_MAX_CHARS || 1800);
 
 export const handler = async (event) => {
+  if (event.httpMethod !== "POST") {
+    // Simple health check so Netlify lists this function
+    return {
+      statusCode: 200,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ok: true, msg: "eval-runner alive" }),
+    };
+  }
+
   try {
-    const id = new URLSearchParams(event.queryStringParameters || {}).get("id");
-    if (!id) {
-      return { statusCode: 400, body: "Missing id query param (?id=...)" };
-    }
+    const body = JSON.parse(event.body || "{}");
+    const transcript = String(body.transcript || "").trim();
 
-    const arts = await sfetch(
-      `/session_artifacts?session_id=eq.${id}&select=transcript_full&order=updated_at.desc&limit=1`
-    );
-    const transcript = arts?.[0]?.transcript_full || "";
     if (!transcript) {
-      return { statusCode: 404, body: "No transcript for that session" };
+      return {
+        statusCode: 400,
+        body: JSON.stringify({ ok: false, error: "Missing transcript" }),
+      };
     }
 
-    const rubric = EVAL_DEFAULT_RUBRIC_ID ? await fetchRubricJSON(EVAL_DEFAULT_RUBRIC_ID) : null;
-    if (!OPENAI_API_KEY || !rubric) {
-      return { statusCode: 200, body: JSON.stringify({ ok: false, reason: "Missing OPENAI key or rubric" }) };
-    }
+    // Limit size to save costs
+    const text = transcript.slice(-CHAR_LIMIT);
 
-    const evalRes = await callOpenAIForEval({ transcript, rubric });
-    const saved = await sfetch("/eval_runs", {
+    const prompt = `
+You are an evaluation assistant using rubric ${RUBRIC_ID}.
+Rate the call 0–3 (0=poor, 3=excellent) on:
+1. Introduction and tone
+2. Ability to understand caller intent
+3. Helpfulness and next steps
+4. Professional clarity
+
+Return ONLY valid JSON:
+{"score": <0-3>, "label": "<short label>", "notes": "<≤25 words>"}
+
+Transcript:
+${text}
+`;
+
+    // ---- OpenAI call ----
+    const r = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
-      body: JSON.stringify([
-        {
-          session_id: id,
-          rubric_id: EVAL_DEFAULT_RUBRIC_ID,
-          model: EVAL_MODEL,
-          overall_score: evalRes.overall_score,
-          summary: evalRes.summary,
-          suggestions: evalRes.suggestions,
-          status: "completed",
-          started_at: nowISO(),
-          completed_at: nowISO(),
-        },
-      ]),
+      headers: {
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        messages: [{ role: "user", content: prompt }],
+        temperature: 0,
+        max_tokens: 120,
+        response_format: { type: "json_object" },
+      }),
     });
 
-    return { statusCode: 200, body: JSON.stringify({ ok: true, saved }) };
-  } catch (e) {
-    return { statusCode: 500, body: `eval-runner error: ${e.message}` };
+    const data = await r.json();
+    let parsed = {};
+    try {
+      parsed = JSON.parse(data.choices?.[0]?.message?.content || "{}");
+    } catch {
+      parsed = { score: 0, label: "parse-error", notes: "Invalid model output" };
+    }
+
+    // ---- Store in Supabase ----
+    const { error } = await supabase.from("eval_runs").insert({
+      rubric_id: RUBRIC_ID,
+      model_used: MODEL,
+      score: parsed.score ?? 0,
+      label: parsed.label ?? "unrated",
+      notes: parsed.notes ?? "",
+      transcript_excerpt: text,
+      created_at: new Date().toISOString(),
+    });
+
+    if (error) throw error;
+
+    return {
+      statusCode: 200,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ok: true, ...parsed }),
+    };
+  } catch (err) {
+    console.error("Eval error:", err);
+    return {
+      statusCode: 500,
+      body: JSON.stringify({ ok: false, error: String(err.message || err) }),
+    };
   }
 };
