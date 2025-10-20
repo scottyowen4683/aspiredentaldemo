@@ -1,9 +1,9 @@
 [build]
-  base = "frontend"
   command = "npm install --legacy-peer-deps && npm run build"
   publish = "dist"
-  functions = "../netlify/functions"
+  functions = "netlify/functions"
 
+# SPA routing
 [[redirects]]
   from = "/*"
   to = "/index.html"
