@@ -1,5 +1,3 @@
-# netlify.toml (root)
-
 [build]
   command   = "npm install --legacy-peer-deps && npm run build"
   publish   = "dist"
@@ -8,7 +6,6 @@
 [functions]
   node_bundler = "esbuild"
 
-# SPA routing (so /admin etc. work on refresh)
 [[redirects]]
   from = "/*"
   to   = "/index.html"
