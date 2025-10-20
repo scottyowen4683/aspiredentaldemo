@@ -9,3 +9,27 @@ html { scroll-behavior: smooth; }
 button, a, input, textarea {
   transition: color 0.3s ease, background-color 0.3s ease, border-color 0.3s ease, opacity 0.3s ease, transform 0.2s ease;
 }
+
+/* ------- mobile helpers for inner pages ------- */
+.page-container {
+  padding: 12px;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+/* make data tables scroll horizontally on small screens instead of squishing */
+.responsive-table {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.responsive-table table {
+  min-width: 720px; /* keeps columns readable; scrolls on small screens */
+}
+
+/* clamp long preview lines (fallback if Tailwind line-clamp plugin not enabled) */
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
