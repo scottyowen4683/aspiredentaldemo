@@ -1,21 +1,18 @@
-// /netlify/functions/vapi-webhook.js
-// Receives Vapi webhook events, saves session + transcript to Supabase,
-// runs LLM scoring against your rubric, persists eval + derived "top questions".
+// netlify/functions/vapi-webhook.js
+// Vapi → Supabase webhook (handles message.* envelope you posted)
 
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY =
   process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_SERVICE_ROLE_KEY;
 
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const EVAL_MODEL = process.env.EVAL_MODEL || "gpt-4o-mini";
-const EVAL_DEFAULT_RUBRIC_ID = process.env.EVAL_DEFAULT_RUBRIC_ID; // <- set this in env after seeding
+const EVAL_DEFAULT_RUBRIC_ID = process.env.EVAL_DEFAULT_RUBRIC_ID;
 
-// Simple signature bypass flag (optional)
-const DISABLE_SIGNATURE_CHECK = `${process.env.DISABLE_SIGNATURE_CHECK}` === "true";
+function nowISO() { return new Date().toISOString(); }
 
-async function supabaseFetch(path, init = {}) {
-  const url = `${SUPABASE_URL}/rest/v1${path}`;
-  const res = await fetch(url, {
+async function sfetch(path, init = {}) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1${path}`, {
     ...init,
     headers: {
       apikey: SUPABASE_SERVICE_ROLE_KEY,
@@ -27,258 +24,214 @@ async function supabaseFetch(path, init = {}) {
   });
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`Supabase error: ${res.status} ${text}`);
+    console.error("Supabase error:", res.status, text);
+    throw new Error(`Supabase ${res.status}: ${text}`);
   }
   return res.json();
 }
 
 async function fetchRubricJSON(rubricId) {
-  const rows = await supabaseFetch(`/eval_rubrics?id=eq.${rubricId}&select=rubric_json&limit=1`);
+  const rows = await sfetch(`/eval_rubrics?id=eq.${rubricId}&select=rubric_json&limit=1`);
   return rows?.[0]?.rubric_json || null;
 }
 
-function nowISO() {
-  return new Date().toISOString();
-}
-
-/**
- * Attempt to normalize transcript from a variety of payloads.
- * Supports:
- *  - { transcript: "full text" }
- *  - { messages: [{role, content}, ...] }
- *  - { artifacts: { transcript: "..." } }
- */
-function extractTranscript(payload) {
-  if (payload?.transcript) return String(payload.transcript);
-
-  if (Array.isArray(payload?.messages)) {
-    return payload.messages
-      .map((m) => {
-        if (typeof m?.content === "string") return `${m.role || "unknown"}: ${m.content}`;
-        if (Array.isArray(m?.content))
-          return `${m.role || "unknown"}: ${m.content.map((c) => c?.text || "").join(" ")}`;
-        return "";
-      })
+function buildTranscriptFromMessage(msg) {
+  // 1) Preferred: conversation array [{role, content}]
+  if (Array.isArray(msg?.conversation) && msg.conversation.length) {
+    return msg.conversation
+      .map((c) => `${c.role || "unknown"}: ${typeof c.content === "string" ? c.content : ""}`.trim())
       .filter(Boolean)
       .join("\n");
   }
-
-  if (payload?.artifacts?.transcript) return String(payload.artifacts.transcript);
-
+  // 2) Fallback: artifact.messages [{role, message}]
+  if (Array.isArray(msg?.artifact?.messages) && msg.artifact.messages.length) {
+    return msg.artifact.messages
+      .map((m) => `${m.role || "unknown"}: ${typeof m.message === "string" ? m.message : ""}`.trim())
+      .filter(Boolean)
+      .join("\n");
+  }
+  // 3) Nothing useful
   return "";
 }
 
-async function callOpenAIForEval({ transcript, rubric }) {
-  const system = `You are an evaluation engine. Score a customer service phone call transcript.
-Return strict JSON with:
-{
-  "overall_score": <0-100>,
-  "summary": "<2-3 sentence summary>",
-  "suggestions": [
-    {"criterion":"Intro", "tip":"...", "impact":"high|medium|low"},
-    {"criterion":"Question Handling", "tip":"...", "impact":"..."},
-    {"criterion":"Sentiment & Empathy", "tip":"...", "impact":"..."}
-  ]
+function extractTopQuestions(transcript) {
+  return (transcript || "")
+    .split(/\n+/)
+    .map((l) => l.trim())
+    .filter((l) => l.endsWith("?"))
+    .slice(0, 25);
 }
-Use this rubric (JSON) as the scoring guidance:
-${JSON.stringify(rubric)}`;
 
-  const user = `Transcript:\n${transcript}`;
-
+async function callOpenAIForEval({ transcript, rubric }) {
+  const system = `You are an evaluation engine. Score a customer-service phone call using this rubric JSON: ${JSON.stringify(
+    rubric
+  )}.
+Return strict JSON: {"overall_score":0-100,"summary":"...","suggestions":[{"criterion":"...","tip":"...","impact":"high|medium|low"}]}.`;
   const res = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${OPENAI_API_KEY}`,
-      "Content-Type": "application/json",
-    },
+    headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, "Content-Type": "application/json" },
     body: JSON.stringify({
       model: EVAL_MODEL,
       temperature: 0.2,
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: user },
-      ],
+      messages: [{ role: "system", content: system }, { role: "user", content: transcript }],
       response_format: { type: "json_object" },
     }),
   });
-
   if (!res.ok) {
     const t = await res.text();
     throw new Error(`OpenAI error: ${t}`);
   }
   const data = await res.json();
-  const content = data?.choices?.[0]?.message?.content || "{}";
+  const raw = data?.choices?.[0]?.message?.content || "{}";
   let parsed = {};
-  try {
-    parsed = JSON.parse(content);
-  } catch (_) {}
-
-  // sanitise
-  const overall = Math.max(0, Math.min(100, Math.round(Number(parsed.overall_score) || 0)));
-  const suggestions = Array.isArray(parsed.suggestions) ? parsed.suggestions.slice(0, 10) : [];
-  const summary = typeof parsed.summary === "string" ? parsed.summary.slice(0, 1500) : "";
-
-  return { overall_score: overall, summary, suggestions };
-}
-
-function extractTopQuestions(transcript) {
-  // naive extraction: take lines that look like user/customer questions (end with '?')
-  // Later you can replace with an LLM extractor. Good enough to start.
-  return (transcript || "")
-    .split(/\n+/)
-    .map((l) => l.trim())
-    .filter((l) => /\?$/.test(l))
-    .slice(0, 25);
+  try { parsed = JSON.parse(raw); } catch {}
+  const score = Math.max(0, Math.min(100, Math.round(Number(parsed.overall_score) || 0)));
+  return {
+    overall_score: score,
+    summary: typeof parsed.summary === "string" ? parsed.summary.slice(0, 1500) : "",
+    suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions.slice(0, 10) : [],
+  };
 }
 
 export const handler = async (event) => {
-  if (event.httpMethod !== "POST") {
-    return { statusCode: 405, body: "Method Not Allowed" };
+  if (event.httpMethod !== "POST") return { statusCode: 405, body: "Method Not Allowed" };
+
+  let payload = {};
+  try { payload = JSON.parse(event.body || "{}"); } catch (e) {
+    console.error("Invalid JSON", e);
+    return { statusCode: 400, body: "Invalid JSON" };
   }
 
-  // NOTE: add signature verification against Vapi headers here if you wish.
-  if (!DISABLE_SIGNATURE_CHECK) {
-    // Skipping detailed signature checks for simplicity at your request.
-  }
-
-  const payload = JSON.parse(event.body || "{}");
-
-  // Vapi payloads vary. We'll capture the important bits if present.
+  // Your payloads are wrapped at { message: { ... } }
+  const msg = payload?.message || {};
+  const callHeaderId = event.headers?.["x-call-id"] || event.headers?.["X-Call-Id"];
   const provider_session_id =
-    payload?.callId || payload?.id || payload?.session_id || crypto.randomUUID();
+    callHeaderId ||
+    msg?.call?.id ||
+    msg?.id ||
+    `session-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
   const assistant_id =
-    payload?.assistantId || payload?.assistant_id || payload?.assistant?.id || null;
+    msg?.call?.assistantId || msg?.assistant?.id || null;
   const assistant_name =
-    payload?.assistantName || payload?.assistant_name || payload?.assistant?.name || null;
-  const eventType = payload?.type || payload?.event || "unknown";
+    msg?.assistant?.name || null;
 
-  // Start or upsert a session row on first event
+  const eventType = String(msg?.type || "").toLowerCase();
+  const status = String(msg?.status || "").toLowerCase();
+  const endedAt = msg?.endedAt;
+
   try {
-    if (eventType === "call.started" || eventType === "session.started" || eventType === "call.initiated") {
-      const started_at = nowISO();
-      await supabaseFetch("/sessions", {
-        method: "POST",
-        body: JSON.stringify([
-          {
-            provider_session_id,
-            assistant_id,
-            assistant_name,
-            started_at,
-            metadata: payload?.metadata || null,
-            last_event: eventType,
-          },
-        ]),
+    // 1) upsert session on ANY event
+    await sfetch("/sessions", {
+      method: "POST",
+      body: JSON.stringify([
+        {
+          provider_session_id,
+          assistant_id,
+          assistant_name,
+          started_at: msg?.call?.createdAt || nowISO(),
+          metadata: { phone: msg?.call?.customer?.number || null, provider: msg?.call?.phoneCallProvider || null },
+          last_event: eventType || status || "unknown",
+        },
+      ]),
+    }).catch(async () => {
+      await sfetch(`/sessions?provider_session_id=eq.${provider_session_id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ last_event: eventType || status || "unknown" }),
       });
+    });
 
-      return { statusCode: 200, body: JSON.stringify({ ok: true }) };
-    }
-
-    // On update / transcript delivery, store artifacts
-    if (eventType === "call.updated" || eventType === "session.updated" || payload?.transcript || payload?.messages) {
-      const transcript_full = extractTranscript(payload);
-      const transcript_preview = transcript_full?.slice(0, 280);
-
-      // Upsert artifact
-      await supabaseFetch("/session_artifacts", {
+    // 2) store transcript snippet if any
+    const transcript_full = buildTranscriptFromMessage(msg);
+    if (transcript_full) {
+      await sfetch("/session_artifacts", {
         method: "POST",
         body: JSON.stringify([
           {
             session_id: provider_session_id,
             transcript_full,
-            transcript_preview,
+            transcript_preview: transcript_full.slice(0, 280),
             updated_at: nowISO(),
           },
         ]),
       });
-
-      // Keep session row warm
-      await supabaseFetch(`/sessions?provider_session_id=eq.${provider_session_id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ last_event: eventType }),
-      });
-
-      return { statusCode: 200, body: JSON.stringify({ ok: true }) };
     }
 
-    // On end / completed — compute metrics, evaluate, and store derivations
-    if (eventType === "call.ended" || eventType === "session.ended" || eventType === "call.completed") {
-      const ended_at = nowISO();
+    // 3) detect END
+    const isEnd =
+      status === "completed" ||
+      status === "ended" ||
+      eventType === "end-of-call-report";
 
-      // Attempt to fetch transcript we previously saved
-      const arts = await supabaseFetch(
-        `/session_artifacts?session_id=eq.${provider_session_id}&select=transcript_full&limit=1`
+    if (!isEnd) {
+      return { statusCode: 200, body: JSON.stringify({ ok: true, type: eventType || status || "update" }) };
+    }
+
+    // 4) finalize session
+    let aht_seconds = null;
+    try {
+      const srow = await sfetch(
+        `/sessions?provider_session_id=eq.${provider_session_id}&select=started_at&limit=1`
       );
-      const transcript_full = arts?.[0]?.transcript_full || extractTranscript(payload);
+      const started = srow?.[0]?.started_at ? new Date(srow[0].started_at).getTime() : null;
+      if (started) aht_seconds = Math.max(0, Math.round((Date.now() - started) / 1000));
+    } catch {}
 
-      // Calculate AHT if we have a start time
-      let aht_seconds = null;
-      try {
-        // fetch the session row to find started_at
-        const sess = await supabaseFetch(
-          `/sessions?provider_session_id=eq.${provider_session_id}&select=started_at,assistant_id,assistant_name&limit=1`
-        );
-        const started_at = sess?.[0]?.started_at ? new Date(sess[0].started_at) : null;
-        if (started_at) {
-          aht_seconds = Math.max(0, Math.round((Date.now() - started_at.getTime()) / 1000));
-        }
-      } catch (_) {}
+    await sfetch(`/sessions?provider_session_id=eq.${provider_session_id}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        ended_at: endedAt || nowISO(),
+        aht_seconds,
+        outcome: status || "resolved",
+        last_event: eventType || "completed",
+      }),
+    });
 
-      // Store end + AHT
-      await supabaseFetch(`/sessions?provider_session_id=eq.${provider_session_id}`, {
-        method: "PATCH",
-        body: JSON.stringify({
-          ended_at,
-          aht_seconds,
-          outcome: payload?.outcome || "resolved",
-          last_event: eventType,
-        }),
-      });
-
-      // Evaluate using rubric
-      const rubric = EVAL_DEFAULT_RUBRIC_ID ? await fetchRubricJSON(EVAL_DEFAULT_RUBRIC_ID) : null;
-      if (OPENAI_API_KEY && rubric && transcript_full) {
-        const evalRes = await callOpenAIForEval({ transcript, rubric: rubric, transcript: transcript_full });
-
-        await supabaseFetch("/eval_runs", {
-          method: "POST",
-          body: JSON.stringify([
-            {
-              session_id: provider_session_id,
-              rubric_id: EVAL_DEFAULT_RUBRIC_ID,
-              model: EVAL_MODEL,
-              overall_score: evalRes.overall_score,
-              summary: evalRes.summary,
-              suggestions: evalRes.suggestions,
-              status: "completed",
-              started_at: nowISO(),
-              completed_at: nowISO(),
-            },
-          ]),
-        });
-      }
-
-      // Derive top-questions
-      const qs = extractTopQuestions(transcript_full).slice(0, 25);
-      if (qs.length) {
-        await supabaseFetch("/session_questions", {
-          method: "POST",
-          body: JSON.stringify(
-            qs.map((q) => ({
-              session_id: provider_session_id,
-              question: q.substring(0, 500),
-              asked_at: nowISO(),
-            }))
-          ),
-        });
-      }
-
-      return { statusCode: 200, body: JSON.stringify({ ok: true }) };
+    // re-read last transcript if we didn't get one in this event
+    let finalTranscript = transcript_full;
+    if (!finalTranscript) {
+      const arts = await sfetch(
+        `/session_artifacts?session_id=eq.${provider_session_id}&select=transcript_full&order=updated_at.desc&limit=1`
+      );
+      finalTranscript = arts?.[0]?.transcript_full || "";
     }
 
-    // Ignore other events
-    return { statusCode: 200, body: JSON.stringify({ ok: true, ignored: eventType }) };
+    // 5) evaluation
+    const rubric = EVAL_DEFAULT_RUBRIC_ID ? await fetchRubricJSON(EVAL_DEFAULT_RUBRIC_ID) : null;
+    if (OPENAI_API_KEY && rubric && finalTranscript) {
+      const evalRes = await callOpenAIForEval({ transcript: finalTranscript, rubric });
+      await sfetch("/eval_runs", {
+        method: "POST",
+        body: JSON.stringify([
+          {
+            session_id: provider_session_id,
+            rubric_id: EVAL_DEFAULT_RUBRIC_ID,
+            model: EVAL_MODEL,
+            overall_score: evalRes.overall_score,
+            summary: evalRes.summary,
+            suggestions: evalRes.suggestions,
+            status: "completed",
+            started_at: nowISO(),
+            completed_at: nowISO(),
+          },
+        ]),
+      });
+    }
+
+    // 6) top questions
+    const qs = extractTopQuestions(finalTranscript);
+    if (qs.length) {
+      await sfetch("/session_questions", {
+        method: "POST",
+        body: JSON.stringify(
+          qs.map((q) => ({ session_id: provider_session_id, question: q.slice(0, 500), asked_at: nowISO() }))
+        ),
+      });
+    }
+
+    return { statusCode: 200, body: JSON.stringify({ ok: true, finalized: true }) };
   } catch (e) {
-    console.error("Webhook error", e);
+    console.error("Webhook error:", e);
     return { statusCode: 500, body: JSON.stringify({ message: e.message }) };
   }
 };
