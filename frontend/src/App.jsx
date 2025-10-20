@@ -1,161 +1,41 @@
-import React, { useState } from "react";
-import {
-  Routes,
-  Route,
-  Outlet,
-  useNavigate,
-  Link,
-  useLocation,
-} from "react-router-dom";
+// frontend/src/App.jsx
+import React from "react";
+import { Routes, Route, Outlet, useNavigate, Link } from "react-router-dom";
 import AudienceModal from "./components/AudienceModal.jsx";
 
+// ✅ lowercase imports to match pages/government.jsx & pages/business.jsx
 import Government from "./pages/government.jsx";
 import Business from "./pages/business.jsx";
 
 const ASPIRE_LOGO =
   "https://raw.githubusercontent.com/scottyowen4683/Aspirereception/refs/heads/feature/ai-receptionist/frontend/aspire.png";
 
-/* ---------- Header: 2 rows (brand bar + section nav) ---------- */
-function Header() {
-  const { pathname } = useLocation();
-  const onLanding = pathname === "/";
-  const showSectionNav = !onLanding;
-  const [open, setOpen] = useState(false);
-
-  const sectionLinks = [
-    { href: "#how", label: "How it works" },
-    { href: "#automations", label: "Smart Automations" },
-    { href: "#why", label: "Why Aspire" },
-    { href: "#capabilities", label: "Capabilities" },
-    { href: "#advanced", label: "Advanced" },
-    { href: "#demo", label: "Demo" },
-    { href: "#roi", label: "ROI" },
-    { href: "#pricing", label: "Pricing" },
-    { href: "#privacy", label: "Privacy" },
-    { href: "#faq", label: "FAQ" },
-    { href: "#contact", label: "Contact" },
-  ];
-
-  return (
-    <header className="sticky top-0 z-50 bg-white shadow-sm">
-      {/* Row 1: compact brand bar */}
-      <div className="h-14 md:h-16 border-b border-slate-200">
-        <div className="h-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between">
-          <Link to="/" className="flex items-center gap-2 shrink-0">
-            <img
-              src={ASPIRE_LOGO}
-              alt="Aspire Executive Solutions"
-              className="h-7 md:h-8 w-auto"
-            />
-          </Link>
-
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => {
-                localStorage.removeItem("audience");
-                window.location.reload();
-              }}
-              className="hidden sm:inline text-sm text-slate-600 hover:text-blue-600"
-            >
-              Switch audience
-            </button>
-
-            {/* Hamburger only when section nav exists */}
-            {showSectionNav && (
-              <button
-                aria-label="Open menu"
-                onClick={() => setOpen((v) => !v)}
-                className="inline-flex md:hidden items-center justify-center rounded-md p-2 ring-1 ring-slate-300 text-slate-700"
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  className="h-5 w-5"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                >
-                  <path d="M4 7h16M4 12h16M4 17h16" />
-                </svg>
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Row 2: roomy section nav (desktop); collapsible on mobile */}
-      {showSectionNav && (
-        <>
-          {/* Desktop / tablet */}
-          <div className="hidden md:block border-b border-slate-200 bg-white">
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-              <nav className="py-3">
-                <ul className="flex flex-wrap items-center gap-x-6 gap-y-2 text-[0.95rem] text-slate-800">
-                  {sectionLinks.map((l) => (
-                    <li key={l.href}>
-                      <a
-                        href={l.href}
-                        className="whitespace-nowrap hover:text-blue-700"
-                      >
-                        {l.label}
-                      </a>
-                    </li>
-                  ))}
-                </ul>
-              </nav>
-            </div>
-          </div>
-
-          {/* Mobile drawer */}
-          <div
-            className={`md:hidden border-b border-slate-200 bg-white overflow-hidden transition-[max-height] duration-300 ${
-              open ? "max-h-96" : "max-h-0"
-            }`}
-          >
-            <div className="px-4">
-              <nav className="py-3">
-                <ul className="grid grid-cols-2 gap-3 text-slate-800">
-                  {sectionLinks.map((l) => (
-                    <li key={l.href}>
-                      <a
-                        href={l.href}
-                        className="block w-full rounded-md px-3 py-2 hover:bg-slate-100"
-                        onClick={() => setOpen(false)}
-                      >
-                        {l.label}
-                      </a>
-                    </li>
-                  ))}
-                </ul>
-                <button
-                  onClick={() => {
-                    localStorage.removeItem("audience");
-                    window.location.reload();
-                  }}
-                  className="mt-3 inline-block w-full rounded-md px-3 py-2 text-left text-slate-600 ring-1 ring-slate-300 hover:bg-slate-100"
-                >
-                  Switch audience
-                </button>
-              </nav>
-            </div>
-          </div>
-        </>
-      )}
-    </header>
-  );
-}
-
-/* ---------- Shared Layout ---------- */
+/* ---------- Shared layout (header + container) ---------- */
 function Layout() {
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 flex flex-col">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
       <AudienceModal />
-      <Header />
-      {/* Content sits clearly below the 2-row header */}
-      <main className="flex-grow px-4 sm:px-6 lg:px-8 pt-6 md:pt-8 pb-20">
-        <div className="w-full max-w-7xl mx-auto">
-          <Outlet />
+
+      <header className="w-full py-6">
+        <div className="container mx-auto px-6 flex items-center justify-between">
+          <Link to="/" className="flex items-center gap-2">
+            <img src={ASPIRE_LOGO} alt="Aspire Executive Solutions" className="h-10 w-auto" />
+          </Link>
+
+          <button
+            onClick={() => {
+              localStorage.removeItem("audience");
+              window.location.reload();
+            }}
+            className="text-sm text-slate-600 hover:text-blue-600"
+          >
+            Switch audience
+          </button>
         </div>
+      </header>
+
+      <main className="container mx-auto px-6 pt-10 pb-20 grid place-items-center">
+        <Outlet />
       </main>
     </div>
   );
@@ -165,43 +45,38 @@ function Layout() {
 function Landing() {
   const navigate = useNavigate();
   return (
-    <div className="text-center">
-      <img
-        src={ASPIRE_LOGO}
-        alt="Aspire Executive Solutions"
-        className="h-12 sm:h-14 w-auto mx-auto mb-6"
-      />
-      <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-slate-900 leading-tight">
+    <div className="max-w-3xl text-center">
+      <img src={ASPIRE_LOGO} alt="Aspire Executive Solutions" className="h-14 w-auto mx-auto mb-6" />
+      <h1 className="text-3xl md:text-4xl font-bold text-slate-900">
         Welcome to Aspire Executive Solutions
       </h1>
-      <p className="mt-3 text-base sm:text-lg text-slate-700">
-        So we can best help, are you here for{" "}
-        <strong>Government</strong> or <strong>Business</strong> solutions?
+      <p className="mt-3 text-lg text-slate-700">
+        So we can best help, are you here for <strong>Government</strong> or <strong>Business</strong> solutions?
       </p>
 
       <div className="mt-8 flex flex-col sm:flex-row gap-4 justify-center">
         <button
           onClick={() => navigate("/government")}
-          className="rounded-xl bg-blue-600 text-white px-6 py-3 text-sm sm:text-base font-medium hover:bg-blue-700 transition"
+          className="rounded-xl bg-blue-600 text-white px-6 py-3 hover:bg-blue-700"
         >
           Government Solutions
         </button>
         <button
           onClick={() => navigate("/business")}
-          className="rounded-xl border border-slate-300 px-6 py-3 text-sm sm:text-base text-slate-800 hover:bg-white transition"
+          className="rounded-xl border border-slate-300 px-6 py-3 text-slate-800 hover:bg-white"
         >
           Business Solutions
         </button>
       </div>
 
-      <p className="mt-4 text-xs sm:text-sm text-slate-500">
+      <p className="mt-4 text-sm text-slate-500">
         You can change this choice anytime using “Switch audience” (top right).
       </p>
     </div>
   );
 }
 
-/* ---------- Routes ---------- */
+/* ---------- App with lowercase pages ---------- */
 export default function App() {
   return (
     <Routes>
