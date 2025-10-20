@@ -1,14 +1,14 @@
-# netlify.toml — Vite app in ./frontend, functions in ./netlify/functions
+# root/netlify.toml
 
 [build]
-  command   = "npm --prefix frontend ci && npm --prefix frontend run build"
+  command   = "npm --prefix frontend install --legacy-peer-deps && npm --prefix frontend run build"
   publish   = "frontend/dist"
   functions = "netlify/functions"
 
 [functions]
   node_bundler = "esbuild"
 
-# SPA routing (so /admin etc work on refresh)
+# SPA routing so /admin works on refresh
 [[redirects]]
   from = "/*"
   to   = "/index.html"
