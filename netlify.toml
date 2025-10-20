@@ -1,9 +1,10 @@
 [build]
-  base = "frontend"
-  command = "npm install --legacy-peer-deps && npm run build"
-  publish = "dist"
-  functions = "../netlify/functions"
+  # Build from repo ROOT, not /frontend
+  command = "npm install --legacy-peer-deps && npx vite build --config frontend/vite.config.js"
+  publish = "frontend/dist"
+  functions = "netlify/functions"
 
+# SPA routing
 [[redirects]]
   from = "/*"
   to = "/index.html"
