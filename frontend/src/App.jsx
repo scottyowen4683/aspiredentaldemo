@@ -1,9 +1,8 @@
-// frontend/src/App.jsx
+// src/App.jsx
 import React from "react";
 import { Routes, Route, Outlet, useNavigate, Link } from "react-router-dom";
 import AudienceModal from "./components/AudienceModal.jsx";
 
-// ✅ lowercase imports to match pages/government.jsx & pages/business.jsx
 import Government from "./pages/government.jsx";
 import Business from "./pages/business.jsx";
 
@@ -13,13 +12,18 @@ const ASPIRE_LOGO =
 /* ---------- Shared layout (header + container) ---------- */
 function Layout() {
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 flex flex-col">
       <AudienceModal />
 
-      <header className="w-full py-6">
-        <div className="container mx-auto px-6 flex items-center justify-between">
+      {/* Header */}
+      <header className="w-full py-4 sm:py-6 shadow-sm bg-white/70 backdrop-blur-md">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between">
           <Link to="/" className="flex items-center gap-2">
-            <img src={ASPIRE_LOGO} alt="Aspire Executive Solutions" className="h-10 w-auto" />
+            <img
+              src={ASPIRE_LOGO}
+              alt="Aspire Executive Solutions"
+              className="h-8 sm:h-10 w-auto"
+            />
           </Link>
 
           <button
@@ -27,15 +31,18 @@ function Layout() {
               localStorage.removeItem("audience");
               window.location.reload();
             }}
-            className="text-sm text-slate-600 hover:text-blue-600"
+            className="text-xs sm:text-sm text-slate-600 hover:text-blue-600"
           >
             Switch audience
           </button>
         </div>
       </header>
 
-      <main className="container mx-auto px-6 pt-10 pb-20 grid place-items-center">
-        <Outlet />
+      {/* Main content */}
+      <main className="flex-grow flex items-center justify-center px-4 sm:px-6 py-10 sm:py-16">
+        <div className="w-full max-w-5xl">
+          <Outlet />
+        </div>
       </main>
     </div>
   );
@@ -45,38 +52,43 @@ function Layout() {
 function Landing() {
   const navigate = useNavigate();
   return (
-    <div className="max-w-3xl text-center">
-      <img src={ASPIRE_LOGO} alt="Aspire Executive Solutions" className="h-14 w-auto mx-auto mb-6" />
-      <h1 className="text-3xl md:text-4xl font-bold text-slate-900">
+    <div className="text-center px-4">
+      <img
+        src={ASPIRE_LOGO}
+        alt="Aspire Executive Solutions"
+        className="h-12 sm:h-14 w-auto mx-auto mb-6"
+      />
+      <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-slate-900 leading-tight">
         Welcome to Aspire Executive Solutions
       </h1>
-      <p className="mt-3 text-lg text-slate-700">
-        So we can best help, are you here for <strong>Government</strong> or <strong>Business</strong> solutions?
+      <p className="mt-3 text-base sm:text-lg text-slate-700">
+        So we can best help, are you here for{" "}
+        <strong>Government</strong> or <strong>Business</strong> solutions?
       </p>
 
       <div className="mt-8 flex flex-col sm:flex-row gap-4 justify-center">
         <button
           onClick={() => navigate("/government")}
-          className="rounded-xl bg-blue-600 text-white px-6 py-3 hover:bg-blue-700"
+          className="rounded-xl bg-blue-600 text-white px-6 py-3 text-sm sm:text-base font-medium hover:bg-blue-700 transition"
         >
           Government Solutions
         </button>
         <button
           onClick={() => navigate("/business")}
-          className="rounded-xl border border-slate-300 px-6 py-3 text-slate-800 hover:bg-white"
+          className="rounded-xl border border-slate-300 px-6 py-3 text-sm sm:text-base text-slate-800 hover:bg-white transition"
         >
           Business Solutions
         </button>
       </div>
 
-      <p className="mt-4 text-sm text-slate-500">
+      <p className="mt-4 text-xs sm:text-sm text-slate-500">
         You can change this choice anytime using “Switch audience” (top right).
       </p>
     </div>
   );
 }
 
-/* ---------- App with lowercase pages ---------- */
+/* ---------- Routes ---------- */
 export default function App() {
   return (
     <Routes>
