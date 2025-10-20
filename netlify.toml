@@ -1,9 +1,0 @@
-[build]
-  command = "npm install --legacy-peer-deps && npx vite build --config frontend/vite.config.js"
-  publish = "frontend/dist"
-  functions = "netlify/functions"
-
-[[redirects]]
-  from = "/*"
-  to = "/index.html"
-  status = 200
