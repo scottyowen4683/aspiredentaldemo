@@ -56,6 +56,18 @@ export default async (req, res) => {
 
     return res.status(200).json({ ok: true });
   } catch (e) {
+    // ---- Auto-trigger eval-runner if needed ----
+if (payload?.needs_eval && call?.id) {
+  const base = process.env.URL || process.env.DEPLOY_PRIME_URL || "";
+  const evalUrl = `${base}/.netlify/functions/eval-runner`;
+
+  fetch(evalUrl, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ callId: call.id })
+  }).catch((e) => console.error("eval trigger failed", e));
+}
+
     return res.status(200).json({ ok: false, error: e?.message || 'unknown' });
   }
 };
