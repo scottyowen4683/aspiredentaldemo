@@ -1,8 +1,9 @@
-# No base. Build the frontend by pointing the command into /frontend.
 [build]
+# Build the SPA that lives in /frontend
 command = "npm --prefix frontend ci && npm --prefix frontend run build"
-publish = "frontend/dist"
+publish = "frontend/dist"   # <-- final static files
 
 [functions]
+# Keep using the functions that live at repo-root/netlify/functions
 directory = "netlify/functions"
 node_bundler = "esbuild"
