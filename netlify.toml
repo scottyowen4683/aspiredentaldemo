@@ -1,10 +1,8 @@
 [build]
-  # Build from repo ROOT, not /frontend
-  command = "npm install --legacy-peer-deps && npx vite build --config frontend/vite.config.js"
+  command = "npm install --legacy-peer-deps && npx vite build --config frontend/vite.config.js --root frontend"
   publish = "frontend/dist"
   functions = "netlify/functions"
 
-# SPA routing
 [[redirects]]
   from = "/*"
   to = "/index.html"
