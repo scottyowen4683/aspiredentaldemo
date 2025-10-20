@@ -1,14 +1,14 @@
-# root/netlify.toml
+# netlify.toml (root)
 
 [build]
-  command   = "npm --prefix frontend install --legacy-peer-deps && npm --prefix frontend run build"
-  publish   = "frontend/dist"
+  command   = "npm install --legacy-peer-deps && npm run build"
+  publish   = "dist"
   functions = "netlify/functions"
 
 [functions]
   node_bundler = "esbuild"
 
-# SPA routing so /admin works on refresh
+# SPA routing (so /admin etc. work on refresh)
 [[redirects]]
   from = "/*"
   to   = "/index.html"
