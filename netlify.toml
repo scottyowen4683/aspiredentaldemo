@@ -1,9 +1,8 @@
 [build]
-# Build the SPA that lives in /frontend
-command = "cd frontend && npm i --legacy-peer-deps && npm run build"
-publish = "frontend/dist"
+# Navigate into your React app folder
+command = "cd frontend/frontend && npm install --legacy-peer-deps && npm run build"
+publish = "frontend/frontend/dist"
 
 [functions]
-# Keep functions at repo-root/netlify/functions
 directory = "netlify/functions"
 node_bundler = "esbuild"
