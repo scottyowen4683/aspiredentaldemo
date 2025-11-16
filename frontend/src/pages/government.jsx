@@ -33,9 +33,9 @@ const LOCAL_BUY_LOGO =
   "https://raw.githubusercontent.com/scottyowen4683/Aspirereception/refs/heads/feature/ai-receptionist/frontend/src/localbuy.png";
 
 // Editable bits
-const DEMO_NUMBER = "+61 7 4357 2749"; // replace with live demo AI number
+const DEMO_NUMBER = "+61 468 039 529"; // replace with live demo AI number
 const BOOKING_URL =
-  "https://calendly.com/scott-owen-aspire/ai-receptionist-demo";
+  "https://calendly.com/scott-owen-aspire/ai-demo";
 
 export default function Government() {
   const [formData, setFormData] = useState({
@@ -385,7 +385,7 @@ export default function Government() {
         <div className="container mx-auto px-6 max-w-6xl grid md:grid-cols-2 gap-10 items-center">
           <div>
             <h2 className="text-3xl font-bold text-slate-900 mb-3">
-              Talk to our Virtual Council Chat Bot
+              Talk to our Virtual Chat Bot
             </h2>
             <p className="text-slate-700">
               Aspire includes a fully customisable web chat bot tailored to your services and workflows.
