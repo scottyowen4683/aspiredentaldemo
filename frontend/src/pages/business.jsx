@@ -35,9 +35,9 @@ const ASPIRE_LOGO =
   "https://raw.githubusercontent.com/scottyowen4683/Aspirereception/refs/heads/feature/ai-receptionist/frontend/aspire.png";
 
 // Editable bits
-const DEMO_NUMBER = "+61 7 4357 2749";
+const DEMO_NUMBER = "+61 468 039 529";
 const BOOKING_URL =
-  "https://calendly.com/scott-owen-aspire/ai-receptionist-demo";
+  "https://calendly.com/scott-owen-aspire/ai-demo";
 
 export default function Business() {
   const [formData, setFormData] = useState({
