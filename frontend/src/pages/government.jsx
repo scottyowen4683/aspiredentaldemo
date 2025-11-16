@@ -33,7 +33,7 @@ const LOCAL_BUY_LOGO =
   "https://raw.githubusercontent.com/scottyowen4683/Aspirereception/refs/heads/feature/ai-receptionist/frontend/src/localbuy.png";
 
 // Editable bits
-const DEMO_NUMBER = "+61 7 3132 2220"; // replace with live demo AI number
+const DEMO_NUMBER = "+61 489 087 448"; // replace with live demo AI number
 const BOOKING_URL =
   "https://calendly.com/scott-owen-aspire/ai-demo";
 
