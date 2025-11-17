@@ -178,7 +178,7 @@ export default function Business() {
           </p>
           <div className="flex gap-4 justify-center flex-wrap">
             <a href={BOOKING_URL} className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 text-lg rounded-md">
-              Book a 15-Minute Demo
+              Book a Demo
             </a>
             <a
               href={`tel:${DEMO_NUMBER.replace(/\s/g, "")}`}
@@ -352,9 +352,9 @@ export default function Business() {
         <div className="container mx-auto px-6 max-w-6xl text-white">
           <div className="rounded-2xl border border-white/30 p-6 md:p-8">
             <div className="grid md:grid-cols-3 gap-6 items-center">
-              <ROIStat value="+20%" label="more new enquiries captured" />
+              <ROIStat value="+40%" label="more new enquiries captured" />
               <ROIStat value="100%" label="of after-hours calls answered" />
-              <ROIStat value="50%" label="less time on repetitive tasks" />
+              <ROIStat value="80%" label="less time on repetitive tasks" />
             </div>
             <p className="mt-4 text-blue-100 text-sm">
               Results depend on volume and configuration. We review performance monthly and tune your workflows.
