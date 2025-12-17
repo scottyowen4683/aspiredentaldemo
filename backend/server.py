@@ -18,11 +18,39 @@ from emails import (
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
 
-# --- DB setup ---
-mongo_url = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
-db_name = os.environ.get("DB_NAME", "app_db")
-client = AsyncIOMotorClient(mongo_url)
-db = client[db_name]
+# --------------------------------------------------------------------------------------
+# MongoDB (CONTACT FORM ONLY; OPTIONAL)
+# - Mongo must NEVER be a hard dependency for the service to boot.
+# - Vapi tool endpoints depend on this service being up, so Mongo outages/pauses
+#   must not break calls or structured emails.
+# --------------------------------------------------------------------------------------
+MONGO_URL = os.environ.get("MONGO_URL")  # leave unset to disable Mongo entirely
+DB_NAME = os.environ.get("DB_NAME", "app_db")
+
+mongo_client: Optional[AsyncIOMotorClient] = None
+mongo_db = None  # only used for contact form persistence
+
+
+async def init_mongo():
+    global mongo_client, mongo_db
+
+    if not MONGO_URL:
+        logging.info("Mongo not configured (MONGO_URL not set). Contact form submissions will not be stored.")
+        mongo_client = None
+        mongo_db = None
+        return
+
+    try:
+        mongo_client = AsyncIOMotorClient(MONGO_URL, serverSelectionTimeoutMS=3000)
+        # Force a real connection attempt so we can fail fast but NOT crash the app
+        await mongo_client.admin.command("ping")
+        mongo_db = mongo_client[DB_NAME]
+        logging.info("Mongo connected (contact form storage enabled).")
+    except Exception as e:
+        logging.warning(f"Mongo unavailable; continuing without it. Contact form storage disabled. Error: {repr(e)}")
+        mongo_client = None
+        mongo_db = None
+
 
 # --- App / Router ---
 app = FastAPI()
@@ -53,6 +81,26 @@ class ContactResponse(BaseModel):
     id: str
 
 
+# --- Startup / Shutdown ---
+@app.on_event("startup")
+async def on_startup():
+    # logging.basicConfig is already called below, but harmless if duplicated.
+    # Keep it here so startup logs are consistent even if file structure changes.
+    logging.basicConfig(level=logging.INFO)
+    await init_mongo()
+
+
+@app.on_event("shutdown")
+async def shutdown_db_client():
+    global mongo_client
+    try:
+        if mongo_client is not None:
+            mongo_client.close()
+            mongo_client = None
+    except Exception:
+        pass
+
+
 # --- Health/info ---
 @api_router.get("/")
 async def root():
@@ -64,11 +112,19 @@ async def root():
 async def create_contact_submission(
     input: ContactSubmissionCreate, background_tasks: BackgroundTasks
 ):
-    try:
-        contact_obj = ContactSubmission(**input.dict())
-        await db.contact_submissions.insert_one(contact_obj.dict())
+    contact_obj = ContactSubmission(**input.dict())
 
-        # send email in background
+    # 1) Best-effort DB persistence (Mongo optional)
+    try:
+        if mongo_db is not None:
+            await mongo_db.contact_submissions.insert_one(contact_obj.dict())
+        else:
+            logging.info("Mongo not available; skipping contact_submissions DB insert.")
+    except Exception:
+        logging.exception("Mongo insert failed; continuing without DB persistence for contact submission.")
+
+    # 2) Always attempt to send the notification email in the background
+    try:
         background_tasks.add_task(
             send_contact_notification,
             contact_obj.name,
@@ -76,26 +132,15 @@ async def create_contact_submission(
             contact_obj.phone or "",
             contact_obj.message,
         )
+    except Exception:
+        logging.exception("Failed to queue contact notification background task.")
 
-        return ContactResponse(
-            status="success",
-            message="Thank you for contacting us. We'll get back to you within 24 hours.",
-            id=contact_obj.id,
-        )
-
-    except EmailDeliveryError as e:
-        logging.error(f"Email delivery failed (background): {str(e)}")
-        # still return success to avoid UX leak; submission was stored
-        return ContactResponse(
-            status="success",
-            message="Thank you for contacting us. We'll get back to you within 24 hours.",
-            id=contact_obj.id,
-        )
-    except Exception as e:
-        logging.exception("Error processing contact submission")
-        raise HTTPException(
-            status_code=500, detail="An error occurred processing your request"
-        )
+    # 3) Always return success (avoid UX leak / keep site smooth)
+    return ContactResponse(
+        status="success",
+        message="Thank you for contacting us. We'll get back to you within 24 hours.",
+        id=contact_obj.id,
+    )
 
 
 # --- DEBUG: show env seen by the running app ---
@@ -104,7 +149,6 @@ def debug_env():
     def mask(v: Optional[str]):
         if not v:
             return None
-    #     return v[:4] + "..." + v[-4:] if len(v) > 8 else v
         return v[:4] + "..." + v[-4:] if len(v) > 8 else v
 
     return {
@@ -115,46 +159,53 @@ def debug_env():
         "BREVO_API_KEY_preview": mask(
             os.getenv("BREVO_API_KEY") or os.getenv("BREVO_PASSWORD")
         ),
+        # Helpful for sanity-checking whether Mongo is wired
+        "MONGO_URL_set": bool(os.getenv("MONGO_URL")),
+        "DB_NAME": os.getenv("DB_NAME", "app_db"),
     }
 
 
 # --- DEBUG: send email synchronously so errors surface in the response ---
 @api_router.post("/contact/debug", response_model=ContactResponse)
 async def create_contact_submission_debug(input: ContactSubmissionCreate):
-    try:
-        contact_obj = ContactSubmission(**input.dict())
-        await db.contact_submissions.insert_one(contact_obj.dict())
+    contact_obj = ContactSubmission(**input.dict())
 
-        # send synchronously (no BackgroundTasks) so we SEE Brevo errors
+    # Best-effort DB persistence (Mongo optional)
+    try:
+        if mongo_db is not None:
+            await mongo_db.contact_submissions.insert_one(contact_obj.dict())
+        else:
+            logging.info("Mongo not available; skipping contact_submissions DB insert (debug).")
+    except Exception:
+        logging.exception("Mongo insert failed (debug); continuing without DB persistence.")
+
+    # Send synchronously so you SEE Brevo errors
+    try:
         send_contact_notification(
             contact_obj.name,
             contact_obj.email,
             contact_obj.phone or "",
             contact_obj.message,
         )
-
         return ContactResponse(
             status="success",
             message="Email sent (debug route).",
             id=contact_obj.id,
         )
-
     except EmailDeliveryError as e:
-        # bubble up so you see it in the response body
-        raise HTTPException(
-            status_code=502, detail=f"Email delivery failed: {str(e)}"
-        )
+        raise HTTPException(status_code=502, detail=f"Email delivery failed: {str(e)}")
     except Exception as e:
         logging.exception("Debug route failed")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# --- NEW: Vapi structured email endpoint ---
+# --- Vapi structured email endpoint ---
 @api_router.post("/vapi/send-structured-email")
 async def vapi_send_structured_email(request: Request):
     """
     Webhook endpoint for the Vapi custom tool `send_structured_email`.
     Vapi will POST a JSON body here with the fields defined in the tool schema.
+    NOTE: This endpoint must remain independent of Mongo.
     """
     try:
         payload = await request.json()
@@ -179,9 +230,7 @@ async def vapi_send_structured_email(request: Request):
     try:
         send_council_request_email(payload)
     except EmailDeliveryError as e:
-        raise HTTPException(
-            status_code=502, detail=f"Email delivery failed: {str(e)}"
-        )
+        raise HTTPException(status_code=502, detail=f"Email delivery failed: {str(e)}")
     except Exception as e:
         logging.exception("Error processing Vapi structured email")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -201,8 +250,3 @@ app.add_middleware(
 )
 
 logging.basicConfig(level=logging.INFO)
-
-
-@app.on_event("shutdown")
-async def shutdown_db_client():
-    client.close()
