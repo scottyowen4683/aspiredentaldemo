@@ -101,7 +101,9 @@ async def root():
 
 
 @api_router.post("/contact", response_model=ContactResponse)
-async def create_contact_submission(input: ContactSubmissionCreate, background_tasks: BackgroundTasks):
+async def create_contact_submission(
+    input: ContactSubmissionCreate, background_tasks: BackgroundTasks
+):
     contact_obj = ContactSubmission(**input.model_dump())
 
     # 1) Best-effort DB persistence (Mongo optional)
@@ -120,7 +122,8 @@ async def create_contact_submission(input: ContactSubmissionCreate, background_t
                 contact_obj.name,
                 contact_obj.email,
                 contact_obj.phone or "",
-                (f"Organisation: {contact_obj.org}\n\n" if contact_obj.org else "") + contact_obj.message,
+                (f"Organisation: {contact_obj.org}\n\n" if contact_obj.org else "")
+                + contact_obj.message,
             )
         except Exception:
             logging.exception("Contact email send failed.")
@@ -143,9 +146,10 @@ def debug_env():
 
     return {
         "BREVO_API_KEY_set": bool(os.getenv("BREVO_API_KEY")),
+        "BREVO_PASSWORD_set": bool(os.getenv("BREVO_PASSWORD")),
         "SENDER_EMAIL": os.getenv("SENDER_EMAIL"),
         "RECIPIENT_EMAIL": os.getenv("RECIPIENT_EMAIL"),
-        "BREVO_API_KEY_preview": mask(os.getenv("BREVO_API_KEY")),
+        "BREVO_API_KEY_preview": mask(os.getenv("BREVO_API_KEY") or os.getenv("BREVO_PASSWORD")),
         "MONGO_URL_set": bool(os.getenv("MONGO_URL")),
         "DB_NAME": os.getenv("DB_NAME", "app_db"),
     }
@@ -168,7 +172,8 @@ async def create_contact_submission_debug(input: ContactSubmissionCreate):
             contact_obj.name,
             contact_obj.email,
             contact_obj.phone or "",
-            (f"Organisation: {contact_obj.org}\n\n" if contact_obj.org else "") + contact_obj.message,
+            (f"Organisation: {contact_obj.org}\n\n" if contact_obj.org else "")
+            + contact_obj.message,
         )
         return ContactResponse(status="success", message="Email sent (debug).", id=contact_obj.id)
     except EmailDeliveryError as e:
@@ -178,17 +183,36 @@ async def create_contact_submission_debug(input: ContactSubmissionCreate):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# --------------------------------------------------------------------------------------
+# Vapi structured email endpoint (tolerant normalisation)
+# - Vapi payloads are not guaranteed to match exact field names every time.
+# - We normalise common variants and require only meaningful content.
+# --------------------------------------------------------------------------------------
 @api_router.post("/vapi/send-structured-email")
 async def vapi_send_structured_email(request: Request):
     try:
-        payload = await request.json()
+        raw = await request.json()
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON body")
 
-    required = ["subject", "request_type", "resident_name", "resident_phone", "address", "details"]
-    missing = [k for k in required if not payload.get(k)]
-    if missing:
-        raise HTTPException(status_code=400, detail=f"Missing required fields: {', '.join(missing)}")
+    # Normalise inbound payload
+    payload = {
+        "to": raw.get("to"),
+        "subject": raw.get("subject") or "New Council Request",
+        "request_type": raw.get("request_type") or raw.get("type") or "General enquiry",
+        "resident_name": raw.get("resident_name") or raw.get("name") or "Unknown",
+        "resident_phone": raw.get("resident_phone") or raw.get("phone") or "Not provided",
+        "resident_email": raw.get("resident_email") or raw.get("email") or None,
+        "address": raw.get("address") or raw.get("location") or "Not provided",
+        "preferred_contact_method": raw.get("preferred_contact_method") or raw.get("preferred_contact") or None,
+        "urgency": raw.get("urgency") or "Normal",
+        "details": raw.get("details") or raw.get("message") or raw.get("notes") or None,
+        "extra_metadata": raw.get("extra_metadata") or raw,
+    }
+
+    # Minimum viable requirement: we need actual content to send
+    if not payload.get("details"):
+        raise HTTPException(status_code=400, detail="Missing required content: details/message/notes")
 
     try:
         send_council_request_email(payload)
