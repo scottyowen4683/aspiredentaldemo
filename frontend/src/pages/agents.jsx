@@ -43,7 +43,7 @@ export default function Agents() {
             <ValueCard
               icon={<Gauge className="h-4 w-4" />}
               title="High throughput"
-              text="Designed to scale — including handling high-volume periods (up to ~100 calls per minute, deployment-dependent)."
+              text="Designed to scale — including handling high-volume periods (up to ~1000 calls per minute, deployment-dependent)."
             />
             <ValueCard
               icon={<LineChart className="h-4 w-4" />}
