@@ -1,5 +1,4 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { useLocation } from "react-router-dom";
 
 const GREETING =
   "Hello, I'm your demo chat bot, you can ask me anything about Aspire AI";
@@ -7,21 +6,14 @@ const GREETING =
 export default function VapiWidget({
   assistantId,
   brandUrl = "https://aspireexecutivesolutions.com.au",
-  brandText = "Aspire Executive Solutions",
 }) {
-  const { pathname } = useLocation();
-
-  // Widget open state
   const [open, setOpen] = useState(false);
-
-  // Chat state
   const [busy, setBusy] = useState(false);
   const [input, setInput] = useState("");
 
-  // "Fresh every visit": do not store this anywhere persistent
+  // Fresh every visit: keep in memory only
   const [chatId, setChatId] = useState(null);
 
-  // Messages start with greeting
   const [messages, setMessages] = useState(() => [
     { role: "assistant", text: GREETING },
   ]);
@@ -32,24 +24,12 @@ export default function VapiWidget({
     return Boolean(assistantId) && input.trim().length > 0 && !busy;
   }, [assistantId, input, busy]);
 
-  // Scroll to bottom on new messages
   useEffect(() => {
     if (!open) return;
     const el = scrollRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
   }, [messages, open]);
-
-  // Optional: keep chat context while navigating pages in the same visit.
-  // If you want a fresh chat per page route, uncomment below.
-  /*
-  useEffect(() => {
-    setChatId(null);
-    setMessages([{ role: "assistant", text: GREETING }]);
-    setBusy(false);
-    setInput("");
-  }, [pathname]);
-  */
 
   function resetChat() {
     setChatId(null);
@@ -60,7 +40,21 @@ export default function VapiWidget({
 
   async function send() {
     const text = input.trim();
-    if (!canSend) return;
+    if (!text || busy) return;
+
+    if (!assistantId) {
+      setMessages((prev) => [
+        ...prev,
+        { role: "user", text },
+        {
+          role: "assistant",
+          text:
+            "Error: assistantId is missing. Check Netlify build env vars: VITE_VAPI_ASSISTANT_ID_BUSINESS and VITE_VAPI_ASSISTANT_ID_GOV, then redeploy.",
+        },
+      ]);
+      setInput("");
+      return;
+    }
 
     setMessages((prev) => [...prev, { role: "user", text }]);
     setInput("");
@@ -77,10 +71,22 @@ export default function VapiWidget({
         }),
       });
 
-      const data = await res.json();
+      const raw = await res.text();
+      let data = {};
+      try {
+        data = raw ? JSON.parse(raw) : {};
+      } catch {
+        data = { raw };
+      }
 
       if (!res.ok) {
-        throw new Error(data?.error || "Chat request failed");
+        const msg =
+          data?.error ||
+          data?.message ||
+          (typeof data?.raw === "string" && data.raw.trim()
+            ? data.raw
+            : `Request failed (${res.status})`);
+        throw new Error(msg);
       }
 
       if (data?.id) setChatId(data.id);
@@ -92,15 +98,13 @@ export default function VapiWidget({
 
       setMessages((prev) => [...prev, { role: "assistant", text: reply }]);
     } catch (err) {
-  console.error(err);
-  setMessages((prev) => [
-    ...prev,
-    { role: "assistant", text: `Error: ${err?.message || "Unknown error"}` },
-  ]);
-} finally {
-  setBusy(false);
-}
-
+      console.error(err);
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", text: `Error: ${err?.message || "Unknown error"}` },
+      ]);
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -141,7 +145,6 @@ export default function VapiWidget({
                 type="button"
                 onClick={resetChat}
                 className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-white/80 transition hover:bg-white/10 hover:text-white"
-                aria-label="Reset chat"
               >
                 Reset
               </button>
@@ -149,7 +152,6 @@ export default function VapiWidget({
                 type="button"
                 onClick={() => setOpen(false)}
                 className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-white/80 transition hover:bg-white/10 hover:text-white"
-                aria-label="Close chat"
               >
                 Close
               </button>
@@ -167,7 +169,9 @@ export default function VapiWidget({
                 return (
                   <div
                     key={i}
-                    className={`flex ${isUser ? "justify-end" : "justify-start"}`}
+                    className={`flex ${
+                      isUser ? "justify-end" : "justify-start"
+                    }`}
                   >
                     <div
                       className={[
@@ -195,7 +199,7 @@ export default function VapiWidget({
                   if (e.key === "Enter") send();
                 }}
                 placeholder="Type your message..."
-                className="h-11 flex-1 rounded-2xl border border-white/10 bg-white/5 px-4 text-sm text-white placeholder:text-white/40 outline-none ring-0 transition focus:border-white/20"
+                className="h-11 flex-1 rounded-2xl border border-white/10 bg-white/5 px-4 text-sm text-white placeholder:text-white/40 outline-none transition focus:border-white/20"
               />
               <button
                 type="button"
@@ -211,19 +215,17 @@ export default function VapiWidget({
                 Send
               </button>
             </div>
-            <div className="mt-2 flex items-center justify-between px-1 text-[11px] text-white/50">
-              <span>
-                Powered by{" "}
-                <a
-                  href={brandUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-white/70 underline decoration-white/30 underline-offset-2 hover:text-white"
-                >
-                  {brandText}
-                </a>
-              </span>
-              <span className="text-white/40">{pathname}</span>
+
+            <div className="mt-2 px-1 text-[11px] text-white/50">
+              Powered by{" "}
+              <a
+                href={brandUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="text-white/70 underline decoration-white/30 underline-offset-2 hover:text-white"
+              >
+                Aspire Executive Solutions
+              </a>
             </div>
           </div>
         </div>
