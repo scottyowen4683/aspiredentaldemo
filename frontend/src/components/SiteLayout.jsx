@@ -51,12 +51,16 @@ export default function SiteLayout() {
       <header className="sticky top-0 z-50 border-b border-white/10 bg-[#0A1020]/70 backdrop-blur-xl">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
           <Link to="/" className="flex items-center gap-3">
-            <img
-              src={logoSrc}
-              alt="Aspire"
-              className="h-9 w-auto"
-              onError={() => setLogoSrc("/aspire.png")} // fallback if aspire1.png not in /public
-            />
+            {/* ✅ Add a subtle badge behind the logo so it doesn’t clash */}
+            <div className="rounded-xl border border-white/10 bg-white/5 p-2">
+              <img
+                src={logoSrc}
+                alt="Aspire"
+                className="h-7 w-auto"
+                onError={() => setLogoSrc("/aspire.png")} // fallback if aspire1.png not in /public
+              />
+            </div>
+
             <div className="leading-tight">
               <div className="text-sm font-semibold tracking-wide">Aspire</div>
               <div className="text-xs text-white/60">
@@ -127,7 +131,8 @@ export default function SiteLayout() {
                 Premium-grade AI agents for Government & Business.
               </div>
               <div className="mt-2 text-white/55">
-                Security posture includes alignment to Essential Eight (Maturity Level 2) principles.
+                Security posture includes alignment to Essential Eight (Maturity
+                Level 2) principles.
               </div>
               <div className="mt-3 text-white/55">
                 Aspire Executive Solutions Pty Ltd — All rights reserved.
