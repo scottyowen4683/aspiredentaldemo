@@ -149,6 +149,7 @@ def debug_env():
 
     return {
         "BREVO_API_KEY_set": bool(os.getenv("BREVO_API_KEY")),
+        "BREVO_PASSWORD_set": bool(os.getenv("BREVO_PASSWORD")),
         "SENDER_EMAIL": os.getenv("SENDER_EMAIL"),
         "RECIPIENT_EMAIL": os.getenv("RECIPIENT_EMAIL"),
         "BREVO_API_KEY_preview": mask(os.getenv("BREVO_API_KEY")),
@@ -157,13 +158,39 @@ def debug_env():
     }
 
 
+@api_router.post("/contact/debug", response_model=ContactResponse)
+async def create_contact_submission_debug(input: ContactSubmissionCreate):
+    contact_obj = ContactSubmission(**input.model_dump())
+
+    # DB optional
+    try:
+        if mongo_db is not None:
+            await mongo_db.contact_submissions.insert_one(contact_obj.model_dump())
+    except Exception:
+        logging.exception("Mongo insert failed (debug).")
+
+    # Email sync so you can see errors
+    try:
+        send_contact_notification(
+            contact_obj.name,
+            contact_obj.email,
+            contact_obj.phone or "",
+            (f"Organisation: {contact_obj.org}\n\n" if contact_obj.org else "") + contact_obj.message,
+        )
+        return ContactResponse(status="success", message="Email sent (debug).", id=contact_obj.id)
+    except EmailDeliveryError as e:
+        raise HTTPException(status_code=502, detail=f"Email delivery failed: {str(e)}")
+    except Exception as e:
+        logging.exception("Debug route failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # -----------------------------
-# Vapi helpers
+# Vapi payload unwrapping helpers
 # -----------------------------
 def _try_json_loads(val: Any) -> Any:
     if isinstance(val, str):
         s = val.strip()
-        # Sometimes arguments is a JSON string
         if (s.startswith("{") and s.endswith("}")) or (s.startswith("[") and s.endswith("]")):
             try:
                 return json.loads(s)
@@ -180,7 +207,7 @@ def _deep_find_arguments(obj: Any) -> Optional[Dict[str, Any]]:
     obj = _try_json_loads(obj)
 
     if isinstance(obj, dict):
-        # Direct shape (already the args)
+        # Direct args (already the correct shape)
         if any(k in obj for k in ("to", "subject", "request_type", "resident_name", "resident_phone", "address", "details")):
             return obj
 
@@ -190,22 +217,22 @@ def _deep_find_arguments(obj: Any) -> Optional[Dict[str, Any]]:
             if isinstance(args, dict):
                 return args
 
-        # Vapi wrapper: {"message": {...}}
+        # Common wrapper: {"message": {...}}
         if "message" in obj:
             found = _deep_find_arguments(obj.get("message"))
             if found:
                 return found
 
-        # Vapi wrappers: toolCalls / toolCallList / tool_calls
+        # Vapi wrappers: toolCalls/toolCallList/tool_calls
         for key in ("toolCalls", "toolCallList", "tool_calls"):
             tc = obj.get(key)
-            if isinstance(tc, list) and tc:
+            if isinstance(tc, list):
                 for item in tc:
                     found = _deep_find_arguments(item)
                     if found:
                         return found
 
-        # Vapi wrapper: {"function": {"arguments": ...}}
+        # Wrapper: {"function": {"arguments": ...}}
         if "function" in obj and isinstance(obj["function"], dict):
             found = _deep_find_arguments(obj["function"])
             if found:
@@ -226,18 +253,32 @@ def _deep_find_arguments(obj: Any) -> Optional[Dict[str, Any]]:
     return None
 
 
+async def _read_json_or_empty(request: Request) -> Dict[str, Any]:
+    """
+    Swagger sometimes sends an empty body. Treat empty/invalid JSON as {} for debug endpoints.
+    """
+    raw_bytes = await request.body()
+    if not raw_bytes or not raw_bytes.strip():
+        return {}
+    try:
+        return json.loads(raw_bytes.decode("utf-8"))
+    except Exception:
+        # If it's not valid JSON, still return something useful
+        return {"_raw": raw_bytes.decode("utf-8", errors="replace")}
+
+
 # -----------------------------
-# Vapi debug endpoint (browser friendly)
+# Vapi debug echo
 # -----------------------------
 @api_router.post("/vapi/debug/echo")
 async def vapi_debug_echo(request: Request):
-    raw = await request.json()
-    args = _deep_find_arguments(raw)
-    return {"raw": raw, "extracted_args": args}
+    raw = await _read_json_or_empty(request)
+    extracted = _deep_find_arguments(raw)
+    return {"raw": raw, "extracted_args": extracted}
 
 
 # -----------------------------
-# Vapi tool endpoint (SYNC SEND + CLEAR ERRORS)
+# Vapi tool endpoint (SYNC EMAIL so Vapi only "succeeds" when it actually sent)
 # -----------------------------
 @api_router.post("/vapi/send-structured-email")
 async def vapi_send_structured_email(request: Request):
@@ -251,17 +292,20 @@ async def vapi_send_structured_email(request: Request):
     required = ["to", "subject", "request_type", "resident_name", "resident_phone", "address", "details"]
     missing = [k for k in required if not payload.get(k)]
     if missing:
-        logging.warning(f"Vapi missing fields={missing} extracted={payload} raw={raw}")
+        logging.warning(f"Vapi missing fields={missing} extracted={payload}")
         raise HTTPException(status_code=400, detail=f"Missing required fields: {', '.join(missing)}")
 
-    reference_id = f"REQ-{uuid.uuid4().hex[:10].upper()}"
-    payload_with_ref = dict(payload)
-    payload_with_ref["reference_id"] = reference_id
+    # Optional defaults
+    payload.setdefault("urgency", "Normal")
+    payload.setdefault("preferred_contact_method", None)
+    payload.setdefault("resident_email", None)
+    payload.setdefault("extra_metadata", {})
 
-    # IMPORTANT:
-    # Send synchronously for Vapi so Vapi only sees "success" when email actually sent.
+    reference_id = f"REQ-{uuid.uuid4().hex[:10].upper()}"
+    payload["reference_id"] = reference_id
+
     try:
-        send_council_request_email(payload_with_ref)
+        send_council_request_email(payload)
     except EmailDeliveryError as e:
         logging.exception("EmailDeliveryError in Vapi endpoint")
         raise HTTPException(status_code=502, detail=f"Email delivery failed: {str(e)}")
