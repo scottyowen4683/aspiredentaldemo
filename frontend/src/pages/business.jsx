@@ -20,7 +20,6 @@ const API = `${BACKEND_URL}/api`;
 const DEMO_NUMBER = "+61 7 4357 2749";
 const BOOKING_URL = "https://calendly.com/scott-owen-aspire/ai-receptionist-demo";
 
-// env fallback (prevents “wrong var name” issues)
 const BIZ_ASSISTANT_ID =
   import.meta.env.VITE_VAPI_ASSISTANT_ID_BIZ ||
   import.meta.env.VITE_VAPI_ASSISTANT_ID_BUSINESS;
@@ -62,7 +61,6 @@ export default function Business() {
 
   return (
     <div className="space-y-16">
-      {/* HERO */}
       <section className="relative overflow-hidden rounded-3xl border border-white/10 bg-white/5 p-10 md:p-14">
         <div className="absolute -top-24 -right-24 h-72 w-72 rounded-full bg-blue-600/20 blur-3xl" />
         <div className="absolute -bottom-24 -left-24 h-72 w-72 rounded-full bg-cyan-400/10 blur-3xl" />
@@ -100,10 +98,10 @@ export default function Business() {
             </a>
 
             <Link
-              to="/ai-receptionist"
+              to="/demo"
               className="inline-flex items-center gap-2 rounded-2xl border border-white/15 bg-white/5 px-5 py-3 text-sm font-semibold text-white/90 hover:bg-white/10"
             >
-              Voice demo page <ArrowRight className="h-4 w-4" />
+              View live demos <ArrowRight className="h-4 w-4" />
             </Link>
           </div>
 
@@ -127,7 +125,6 @@ export default function Business() {
         </div>
       </section>
 
-      {/* OUTBOUND (kept) */}
       <section className="rounded-3xl border border-white/10 bg-white/5 p-8 md:p-10">
         <OutboundCTA
           variant="business"
@@ -136,7 +133,6 @@ export default function Business() {
         />
       </section>
 
-      {/* WHAT IT DOES */}
       <section className="grid gap-6 md:grid-cols-2">
         <FeatureTile
           title="Capture missed calls automatically"
@@ -156,7 +152,6 @@ export default function Business() {
         />
       </section>
 
-      {/* CONTACT */}
       <section
         id="contact"
         className="rounded-3xl border border-white/10 bg-gradient-to-br from-white/10 to-white/5 p-10 md:p-14"
@@ -223,13 +218,10 @@ export default function Business() {
         </div>
       </section>
 
-      {/* Mount once */}
       <VapiWidget assistantId={BIZ_ASSISTANT_ID} />
     </div>
   );
 }
-
-/* small UI */
 
 function ValueCard({ icon, title, text }) {
   return (
