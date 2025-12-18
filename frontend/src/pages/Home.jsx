@@ -1,326 +1,255 @@
-import React, { useState } from "react";
+import React from "react";
 import { Link } from "react-router-dom";
-import axios from "axios";
-import { toast } from "sonner";
-import {
-  ArrowRight,
-  ShieldCheck,
-  Building2,
-  Briefcase,
-  PhoneCall,
-  MessageSquare,
-  Zap,
-  CheckCircle2,
-} from "lucide-react";
 
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL;
-const API = `${BACKEND_URL}/api`;
+const DEMO_URL = "https://calendly.com/scott-owen-aspire/ai-demo";
+
+function Pill({ children }) {
+  return (
+    <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/75">
+      {children}
+    </div>
+  );
+}
+
+function Card({ title, desc, bullets, to }) {
+  return (
+    <div className="group relative overflow-hidden rounded-3xl border border-white/10 bg-white/[0.03] p-7 shadow-[0_0_0_1px_rgba(255,255,255,0.02)]">
+      <div className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-500 group-hover:opacity-100">
+        <div className="absolute -top-24 right-0 h-72 w-72 rounded-full bg-gradient-to-br from-white/10 via-indigo-500/10 to-cyan-400/10 blur-3xl" />
+      </div>
+
+      <div className="relative">
+        <div className="text-sm text-white/60">Explore</div>
+        <h3 className="mt-2 text-2xl font-semibold tracking-tight text-white">
+          {title}
+        </h3>
+        <p className="mt-3 text-sm leading-relaxed text-white/70">{desc}</p>
+
+        <ul className="mt-5 space-y-2 text-sm text-white/70">
+          {bullets.map((b) => (
+            <li key={b} className="flex items-start gap-2">
+              <span className="mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full bg-white/60" />
+              <span>{b}</span>
+            </li>
+          ))}
+        </ul>
+
+        <div className="mt-6 flex items-center gap-3">
+          <Link
+            to={to}
+            className="inline-flex items-center justify-center rounded-2xl bg-white px-4 py-2 text-sm font-semibold text-black hover:bg-white/90"
+          >
+            View {title}
+          </Link>
+
+          <a
+            href={DEMO_URL}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center justify-center rounded-2xl border border-white/15 bg-white/5 px-4 py-2 text-sm font-semibold text-white hover:bg-white/10"
+          >
+            Book a live demo
+          </a>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function Home() {
-  const [formData, setFormData] = useState({
-    name: "",
-    email: "",
-    phone: "",
-    message: "",
-  });
-  const [isSubmitting, setIsSubmitting] = useState(false);
-
-  const handleChange = (e) =>
-    setFormData({ ...formData, [e.target.name]: e.target.value });
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setIsSubmitting(true);
-    try {
-      const res = await axios.post(`${API}/contact`, formData);
-      if (res.data.status === "success") {
-        toast.success("Message sent", {
-          description: "We’ll get back to you within 24 hours.",
-        });
-        setFormData({ name: "", email: "", phone: "", message: "" });
-      } else {
-        toast.error("Error", { description: "Unexpected server response." });
-      }
-    } catch (err) {
-      console.error(err);
-      toast.error("Error", {
-        description: "Failed to send. Please try again shortly.",
-      });
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
   return (
-    <div className="space-y-20">
+    <div className="space-y-14">
       {/* HERO */}
-      <section className="relative overflow-hidden rounded-3xl border border-white/10 bg-white/5 p-10 md:p-14">
-        <div className="absolute -top-28 -right-28 h-80 w-80 rounded-full bg-blue-500/20 blur-3xl" />
-        <div className="absolute -bottom-28 -left-28 h-80 w-80 rounded-full bg-cyan-400/10 blur-3xl" />
+      <section className="relative overflow-hidden rounded-[32px] border border-white/10 bg-gradient-to-br from-[#0B1632] via-[#071022] to-[#070A12] p-10 md:p-14">
+        {/* Lighter, premium glow (less “too dark”) */}
+        <div className="pointer-events-none absolute inset-0">
+          <div className="absolute -top-40 left-10 h-[520px] w-[520px] rounded-full bg-gradient-to-br from-indigo-500/18 via-cyan-400/10 to-white/0 blur-3xl" />
+          <div className="absolute -bottom-40 right-0 h-[560px] w-[560px] rounded-full bg-gradient-to-br from-blue-500/14 via-white/6 to-white/0 blur-3xl" />
+        </div>
 
-        <div className="relative">
-          <p className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-4 py-2 text-xs text-white/70">
-            <ShieldCheck className="h-4 w-4" />
-            ASPIRE™ Enterprise AI Framework • Essential Eight (ML2) aligned principles
-          </p>
+        <div className="relative max-w-3xl">
+          <Pill>ASPIRE™ Enterprise AI Framework</Pill>
+          <span className="mx-2 text-white/35">•</span>
+          <Pill>Essential Eight (ML2) aligned principles</Pill>
 
-          <h1 className="mt-6 text-4xl md:text-6xl font-semibold tracking-tight">
-            Premium AI agents for organisations that
-            <span className="text-white/70"> can’t afford guesswork.</span>
+          <h1 className="mt-6 text-4xl font-semibold tracking-tight text-white md:text-6xl">
+            When AI speaks on your behalf, it carries your reputation.
           </h1>
 
-          <p className="mt-5 max-w-3xl text-base md:text-lg text-white/70 leading-relaxed">
-            Aspire builds voice + chat agents that reduce contact centre load, handle
-            routine enquiries, capture intent, and escalate cleanly — all governed under
-            a framework designed for real operations.
+          <p className="mt-5 text-base leading-relaxed text-white/70 md:text-lg">
+            Aspire designs premium voice and chat agents for Government and
+            Business — built to reduce contact centre load, capture intent, and
+            escalate cleanly under a framework designed for real operations.
           </p>
 
-          <div className="mt-8 flex flex-wrap gap-3">
+          <div className="mt-7 flex flex-col gap-3 sm:flex-row sm:items-center">
             <a
-              href="/#contact"
-              className="inline-flex items-center gap-2 rounded-2xl bg-white px-5 py-3 text-sm font-semibold text-black hover:bg-white/90"
+              href={DEMO_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center justify-center rounded-2xl bg-white px-5 py-3 text-sm font-semibold text-black hover:bg-white/90"
             >
-              Request a demo <ArrowRight className="h-4 w-4" />
+              Book a live demo
             </a>
 
-            <Link
-              to="/framework"
-              className="inline-flex items-center gap-2 rounded-2xl border border-white/15 bg-white/5 px-5 py-3 text-sm font-semibold text-white/90 hover:bg-white/10"
-            >
-              Explore the framework <ArrowRight className="h-4 w-4" />
-            </Link>
-
-            <Link
-              to="/agents"
-              className="inline-flex items-center gap-2 rounded-2xl border border-white/15 bg-white/5 px-5 py-3 text-sm font-semibold text-white/90 hover:bg-white/10"
-            >
-              View capabilities <ArrowRight className="h-4 w-4" />
-            </Link>
-          </div>
-
-          <div className="mt-10 grid gap-4 md:grid-cols-3">
-            <Pill
-              icon={<PhoneCall className="h-4 w-4" />}
-              title="Voice Agents"
-              text="Inbound + outbound calling with confident, human delivery."
-            />
-            <Pill
-              icon={<MessageSquare className="h-4 w-4" />}
-              title="Chat Agents"
-              text="Web chat that’s grounded, controlled, and measurable."
-            />
-            <Pill
-              icon={<Zap className="h-4 w-4" />}
-              title="Workflow Automation"
-              text="Structured routing, summaries, and auditable actions."
-            />
-          </div>
-        </div>
-      </section>
-
-      {/* CHOOSE YOUR PATH (premium split, not “side-by-side silly”) */}
-      <section className="grid gap-6 md:grid-cols-2">
-        <PathCard
-          icon={<Building2 className="h-5 w-5" />}
-          title="Government"
-          subtitle="Public-facing service delivery, after-hours coverage, controlled responses and escalation."
-          to="/government"
-          cta="Explore Government"
-        />
-        <PathCard
-          icon={<Briefcase className="h-5 w-5" />}
-          title="Business"
-          subtitle="Stop missing calls, capture enquiries, and automate follow-up with premium voice + chat."
-          to="/business"
-          cta="Explore Business"
-        />
-      </section>
-
-      {/* FRAMEWORK (premium differentiator) */}
-      <section className="rounded-3xl border border-white/10 bg-gradient-to-br from-white/10 to-white/5 p-10 md:p-14">
-        <h2 className="text-3xl md:text-4xl font-semibold tracking-tight">
-          ASPIRE™ Enterprise AI Framework
-        </h2>
-
-        <p className="mt-4 max-w-3xl text-white/70 leading-relaxed">
-          The framework is the product. It’s what turns “AI capability” into a dependable,
-          governable service — with clear boundaries, escalation, and continuous optimisation.
-        </p>
-
-        <div className="mt-8 grid gap-6 md:grid-cols-3">
-          <Mini
-            title="Governance-first"
-            text="Consent, privacy posture, escalation pathways, and auditability built in."
-          />
-          <Mini
-            title="Knowledge precision"
-            text="Controlled sources and structured answers to reduce hallucinations."
-          />
-          <Mini
-            title="Continuous optimisation"
-            text="Measured outcomes, iteration cycles, and performance improvement."
-          />
-        </div>
-
-        <div className="mt-8 flex flex-wrap gap-3">
-          <Link
-            to="/framework"
-            className="inline-flex items-center gap-2 rounded-2xl bg-white px-5 py-3 text-sm font-semibold text-black hover:bg-white/90"
-          >
-            See the framework <ArrowRight className="h-4 w-4" />
-          </Link>
-          <Link
-            to="/agents"
-            className="inline-flex items-center gap-2 rounded-2xl border border-white/15 bg-white/5 px-5 py-3 text-sm font-semibold text-white/90 hover:bg-white/10"
-          >
-            Capabilities <ArrowRight className="h-4 w-4" />
-          </Link>
-        </div>
-      </section>
-
-      {/* TRUST / SECURITY WEIGHT (tasteful) */}
-      <section className="grid gap-6 md:grid-cols-2">
-        <InfoCard
-          title="Security posture"
-          text="Designed with a security posture aligned to Essential Eight principles (Maturity Level 2). Built for environments where reputational and operational risk matters."
-        />
-        <InfoCard
-          title="Premium experience"
-          text="Short, confident language. Controlled outputs. Clear next steps. This isn’t a gadget — it’s an operational capability."
-        />
-      </section>
-
-      {/* CONTACT */}
-      <section
-        id="contact"
-        className="rounded-3xl border border-white/10 bg-white/5 p-10 md:p-14"
-      >
-        <div className="grid gap-10 md:grid-cols-2 md:items-start">
-          <div>
-            <h2 className="text-3xl md:text-4xl font-semibold tracking-tight">
-              Talk to Aspire
-            </h2>
-            <p className="mt-4 text-white/70 leading-relaxed">
-              Tell us what you want the agent to handle (calls, chat, after-hours,
-              workflows). We’ll come back with a clear recommendation and next steps.
-            </p>
-
-            <div className="mt-6 space-y-3">
-              <Bullet text="Government and business deployments." />
-              <Bullet text="Framework-led governance and escalation." />
-              <Bullet text="Premium build quality — end to end." />
+            <div className="flex flex-wrap items-center gap-2">
+              <Link
+                to="/government"
+                className="inline-flex items-center justify-center rounded-2xl border border-white/15 bg-white/5 px-5 py-3 text-sm font-semibold text-white hover:bg-white/10"
+              >
+                Government
+              </Link>
+              <Link
+                to="/business"
+                className="inline-flex items-center justify-center rounded-2xl border border-white/15 bg-white/5 px-5 py-3 text-sm font-semibold text-white hover:bg-white/10"
+              >
+                Business
+              </Link>
+              <Link
+                to="/framework"
+                className="inline-flex items-center justify-center rounded-2xl border border-white/10 bg-white/[0.03] px-5 py-3 text-sm font-semibold text-white/85 hover:bg-white/10"
+              >
+                Explore the framework
+              </Link>
             </div>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <input
-              name="name"
-              placeholder="Your name"
-              value={formData.name}
-              onChange={handleChange}
-              required
-              className="w-full rounded-2xl border border-white/15 bg-white/5 px-4 py-3 text-sm text-white placeholder:text-white/40 outline-none focus:border-white/30"
-            />
-            <input
-              name="email"
-              type="email"
-              placeholder="Email"
-              value={formData.email}
-              onChange={handleChange}
-              required
-              className="w-full rounded-2xl border border-white/15 bg-white/5 px-4 py-3 text-sm text-white placeholder:text-white/40 outline-none focus:border-white/30"
-            />
-            <input
-              name="phone"
-              type="tel"
-              placeholder="Phone (optional)"
-              value={formData.phone}
-              onChange={handleChange}
-              className="w-full rounded-2xl border border-white/15 bg-white/5 px-4 py-3 text-sm text-white placeholder:text-white/40 outline-none focus:border-white/30"
-            />
-            <textarea
-              name="message"
-              placeholder="What do you want the agent to handle?"
-              value={formData.message}
-              onChange={handleChange}
-              required
-              rows={5}
-              className="w-full rounded-2xl border border-white/15 bg-white/5 px-4 py-3 text-sm text-white placeholder:text-white/40 outline-none focus:border-white/30"
-            />
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className="w-full rounded-2xl bg-white px-5 py-3 text-sm font-semibold text-black hover:bg-white/90 disabled:opacity-60"
-            >
-              {isSubmitting ? "Sending..." : "Send"}
-            </button>
-          </form>
+          <div className="mt-7 grid gap-3 sm:grid-cols-3">
+            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+              <div className="text-sm font-semibold text-white">Voice + Chat</div>
+              <div className="mt-1 text-sm text-white/65">
+                Consistent answers with controlled escalation.
+              </div>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+              <div className="text-sm font-semibold text-white">Intent Capture</div>
+              <div className="mt-1 text-sm text-white/65">
+                Captures purpose, context, and next steps.
+              </div>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+              <div className="text-sm font-semibold text-white">Governed Delivery</div>
+              <div className="mt-1 text-sm text-white/65">
+                Designed for accountability — not “AI theatre”.
+              </div>
+            </div>
+          </div>
         </div>
       </section>
-    </div>
-  );
-}
 
-/* UI */
+      {/* TRUST WEDGE (CEO-built) */}
+      <section className="grid gap-10 md:grid-cols-2 md:items-start">
+        <div>
+          <div className="text-sm text-white/60">Why Aspire exists</div>
+          <h2 className="mt-2 text-3xl font-semibold tracking-tight text-white">
+            Built by a CEO — not another AI vendor.
+          </h2>
+          <p className="mt-4 text-base leading-relaxed text-white/70">
+            Aspire was created by someone who has run complex organisations,
+            managed public scrutiny, dealt with service failures, and carried
+            accountability when things go wrong.
+          </p>
+          <p className="mt-4 text-base leading-relaxed text-white/70">
+            This platform wasn’t designed in a lab or a sales deck. It was
+            shaped by operational reality — governance, escalation, workforce
+            dynamics, after-hours demand, and reputational consequence.
+          </p>
+          <p className="mt-4 text-base leading-relaxed text-white/70">
+            That’s why Aspire doesn’t just answer questions. It captures intent,
+            applies controls, and escalates cleanly under the ASPIRE™ Enterprise
+            AI Framework.
+          </p>
 
-function Pill({ icon, title, text }) {
-  return (
-    <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
-      <div className="flex items-center gap-2 text-white/80">
-        {icon}
-        <p className="text-sm font-semibold">{title}</p>
-      </div>
-      <p className="mt-2 text-sm text-white/65">{text}</p>
-    </div>
-  );
-}
-
-function PathCard({ icon, title, subtitle, to, cta }) {
-  return (
-    <Link
-      to={to}
-      className="group rounded-3xl border border-white/10 bg-white/5 p-10 hover:bg-white/10 transition-colors"
-    >
-      <div className="flex items-center gap-3 text-white/80">
-        <div className="rounded-2xl border border-white/15 bg-white/5 p-3">
-          {icon}
+          <div className="mt-6">
+            <Link
+              to="/framework"
+              className="inline-flex items-center justify-center rounded-2xl border border-white/15 bg-white/5 px-5 py-3 text-sm font-semibold text-white hover:bg-white/10"
+            >
+              See how the framework works
+            </Link>
+          </div>
         </div>
-        <p className="text-sm font-semibold tracking-wide">{title}</p>
-      </div>
 
-      <p className="mt-5 text-2xl font-semibold tracking-tight">{title}</p>
-      <p className="mt-3 text-sm text-white/70 leading-relaxed">{subtitle}</p>
+        <div className="grid gap-4">
+          <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-7">
+            <div className="text-sm font-semibold text-white">
+              Designed for consequence
+            </div>
+            <div className="mt-2 text-sm leading-relaxed text-white/70">
+              Built for environments where an incorrect answer becomes a service
+              failure, a reputational issue, or a governance problem.
+            </div>
+          </div>
 
-      <div className="mt-8 inline-flex items-center gap-2 rounded-2xl bg-white px-5 py-3 text-sm font-semibold text-black group-hover:bg-white/90">
-        {cta} <ArrowRight className="h-4 w-4" />
-      </div>
-    </Link>
-  );
-}
+          <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-7">
+            <div className="text-sm font-semibold text-white">
+              Escalation is a feature
+            </div>
+            <div className="mt-2 text-sm leading-relaxed text-white/70">
+              Aspire is designed to recognise limits, route to humans cleanly,
+              and preserve context — not “keep talking until it sounds right”.
+            </div>
+          </div>
 
-function Mini({ title, text }) {
-  return (
-    <div className="rounded-2xl border border-white/10 bg-black/20 p-6">
-      <p className="text-sm font-semibold text-white/85">{title}</p>
-      <p className="mt-2 text-sm text-white/65">{text}</p>
-    </div>
-  );
-}
+          <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-7">
+            <div className="text-sm font-semibold text-white">
+              Control over novelty
+            </div>
+            <div className="mt-2 text-sm leading-relaxed text-white/70">
+              Premium AI isn’t about features. It’s about governance, repeatable
+              quality, and defensibility.
+            </div>
+          </div>
+        </div>
+      </section>
 
-function InfoCard({ title, text }) {
-  return (
-    <div className="rounded-3xl border border-white/10 bg-white/5 p-10">
-      <p className="text-lg font-semibold">{title}</p>
-      <p className="mt-3 text-sm text-white/70 leading-relaxed">{text}</p>
-    </div>
-  );
-}
+      {/* SPLIT PATHS */}
+      <section className="grid gap-6 md:grid-cols-2">
+        <Card
+          title="Government"
+          desc="Designed for public-facing enquiries, structured responses, and controlled handover — aligned to Australian expectations."
+          bullets={[
+            "Voice + chat agents for contact centres and after-hours",
+            "Escalation pathways and controlled responses",
+            "Governance-first delivery under the ASPIRE™ framework",
+          ]}
+          to="/government"
+        />
 
-function Bullet({ text }) {
-  return (
-    <div className="flex items-start gap-2 text-sm text-white/75">
-      <CheckCircle2 className="mt-0.5 h-4 w-4 text-white/70" />
-      <span>{text}</span>
+        <Card
+          title="Business"
+          desc="A premium customer experience that reduces load, captures intent, and protects brand tone — without guesswork."
+          bullets={[
+            "Inbound voice and web chat built for conversion and service",
+            "Outbound callbacks (consent-first) where appropriate",
+            "Designed for clean handover and reporting",
+          ]}
+          to="/business"
+        />
+      </section>
+
+      {/* FINAL CTA */}
+      <section className="rounded-3xl border border-white/10 bg-white/[0.03] p-8 md:p-10">
+        <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
+          <div>
+            <div className="text-sm text-white/60">Ready to see it live?</div>
+            <div className="mt-2 text-2xl font-semibold tracking-tight text-white">
+              Demo the experience. Not the pitch.
+            </div>
+            <div className="mt-2 text-sm text-white/70">
+              Book a live walkthrough and see how Aspire handles voice, chat, and escalation under governance.
+            </div>
+          </div>
+          <a
+            href={DEMO_URL}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center justify-center rounded-2xl bg-white px-5 py-3 text-sm font-semibold text-black hover:bg-white/90"
+          >
+            Book a live demo
+          </a>
+        </div>
+      </section>
     </div>
   );
 }
