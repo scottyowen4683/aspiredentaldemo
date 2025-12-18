@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, BackgroundTasks, Request
+from fastapi import FastAPI, APIRouter, HTTPException, BackgroundTasks, Request, Body
 from fastapi.responses import JSONResponse
 from starlette.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, EmailStr
@@ -223,7 +223,7 @@ def _deep_find_arguments(obj: Any) -> Optional[Dict[str, Any]]:
             if found:
                 return found
 
-        # Vapi wrappers: toolCalls/toolCallList/tool_calls
+        # Vapi wrappers
         for key in ("toolCalls", "toolCallList", "tool_calls"):
             tc = obj.get(key)
             if isinstance(tc, list):
@@ -253,32 +253,18 @@ def _deep_find_arguments(obj: Any) -> Optional[Dict[str, Any]]:
     return None
 
 
-async def _read_json_or_empty(request: Request) -> Dict[str, Any]:
-    """
-    Swagger sometimes sends an empty body. Treat empty/invalid JSON as {} for debug endpoints.
-    """
-    raw_bytes = await request.body()
-    if not raw_bytes or not raw_bytes.strip():
-        return {}
-    try:
-        return json.loads(raw_bytes.decode("utf-8"))
-    except Exception:
-        # If it's not valid JSON, still return something useful
-        return {"_raw": raw_bytes.decode("utf-8", errors="replace")}
-
-
 # -----------------------------
 # Vapi debug echo
+# IMPORTANT: define Body() so Swagger shows a request body box.
 # -----------------------------
 @api_router.post("/vapi/debug/echo")
-async def vapi_debug_echo(request: Request):
-    raw = await _read_json_or_empty(request)
-    extracted = _deep_find_arguments(raw)
-    return {"raw": raw, "extracted_args": extracted}
+async def vapi_debug_echo(payload: Dict[str, Any] = Body(default_factory=dict)):
+    extracted = _deep_find_arguments(payload)
+    return {"raw": payload, "extracted_args": extracted}
 
 
 # -----------------------------
-# Vapi tool endpoint (SYNC EMAIL so Vapi only "succeeds" when it actually sent)
+# Vapi tool endpoint (only return 200 if email actually succeeded)
 # -----------------------------
 @api_router.post("/vapi/send-structured-email")
 async def vapi_send_structured_email(request: Request):
@@ -305,7 +291,15 @@ async def vapi_send_structured_email(request: Request):
     payload["reference_id"] = reference_id
 
     try:
-        send_council_request_email(payload)
+        # VERY IMPORTANT:
+        # If your send_council_request_email() returns a value, we treat falsy as failure.
+        # If it raises, we bubble that properly so Vapi knows it failed.
+        result = send_council_request_email(payload)
+        if result is False or result is None:
+            # If your email function doesn't return anything on success,
+            # comment this block out. But given your "200 OK but no email",
+            # this forces you to make the email function confirm success.
+            raise EmailDeliveryError("Email function did not confirm successful delivery.")
     except EmailDeliveryError as e:
         logging.exception("EmailDeliveryError in Vapi endpoint")
         raise HTTPException(status_code=502, detail=f"Email delivery failed: {str(e)}")
