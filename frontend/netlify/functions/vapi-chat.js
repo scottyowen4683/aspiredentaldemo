@@ -41,9 +41,7 @@ exports.handler = async (event) => {
       };
     }
 
-    // ✅ Use your existing Netlify env var name
     const VAPI_API_KEY = process.env.VAPI_API_KEY;
-
     if (!VAPI_API_KEY) {
       return {
         statusCode: 500,
@@ -67,12 +65,12 @@ exports.handler = async (event) => {
       body: JSON.stringify(payload),
     });
 
-    const text = await r.text();
-    let data = {};
+    const raw = await r.text();
+    let data;
     try {
-      data = text ? JSON.parse(text) : {};
+      data = raw ? JSON.parse(raw) : {};
     } catch {
-      data = { raw: text };
+      data = { raw };
     }
 
     if (!r.ok) {
@@ -83,7 +81,9 @@ exports.handler = async (event) => {
           error:
             data?.error ||
             data?.message ||
-            `Vapi request failed (${r.status})`,
+            (typeof data?.raw === "string" && data.raw.trim()
+              ? data.raw
+              : `Vapi request failed (${r.status})`),
           details: data,
         }),
       };
