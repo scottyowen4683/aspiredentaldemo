@@ -40,8 +40,8 @@ export default function SiteLayout() {
     return isGov ? GOV : BIZ;
   }, [location.pathname]);
 
-  // ✅ Logo with fallback (fixes missing /aspire1.png)
-  const [logoSrc, setLogoSrc] = useState("/aspire1.png");
+  // ✅ Use transparent logo first
+  const [logoSrc, setLogoSrc] = useState("/aspire-mark.png");
 
   return (
     <div className="min-h-screen text-white bg-gradient-to-b from-[#0B1224] via-[#070A12] to-[#070A12]">
@@ -51,15 +51,12 @@ export default function SiteLayout() {
       <header className="sticky top-0 z-50 border-b border-white/10 bg-[#0A1020]/70 backdrop-blur-xl">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
           <Link to="/" className="flex items-center gap-3">
-            {/* ✅ Add a subtle badge behind the logo so it doesn’t clash */}
-            <div className="rounded-xl border border-white/10 bg-white/5 p-2">
-              <img
-                src={logoSrc}
-                alt="Aspire"
-                className="h-7 w-auto"
-                onError={() => setLogoSrc("/aspire.png")} // fallback if aspire1.png not in /public
-              />
-            </div>
+            <img
+              src={logoSrc}
+              alt="Aspire Executive Solutions"
+              className="h-9 w-auto"
+              onError={() => setLogoSrc("/aspire1.png")}
+            />
 
             <div className="leading-tight">
               <div className="text-sm font-semibold tracking-wide">Aspire</div>
