@@ -162,6 +162,71 @@ export default function Framework() {
         </div>
       </section>
 
+      {/* ASPIRE PORTAL (added) */}
+      <section className="relative overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-br from-white/10 to-white/5 p-10 md:p-14">
+        <div className="absolute -top-24 -left-24 h-72 w-72 rounded-full bg-indigo-500/15 blur-3xl" />
+        <div className="absolute -bottom-24 -right-24 h-72 w-72 rounded-full bg-cyan-400/10 blur-3xl" />
+
+        <div className="relative">
+          <p className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-4 py-2 text-xs text-white/70">
+            <Layers className="h-4 w-4" />
+            Aspire Portal
+          </p>
+
+          <h2 className="mt-6 text-3xl md:text-4xl font-semibold tracking-tight">
+            Oversight, assurance, and control — without guesswork.
+          </h2>
+          <p className="mt-4 max-w-3xl text-white/70 leading-relaxed">
+            The Aspire Portal is the operational layer behind your AI agents.
+            It’s where leaders and teams gain visibility into what the agent is
+            handling, how it’s performing, and where escalation is occurring —
+            so AI becomes governable, measurable, and continuously improvable.
+          </p>
+
+          <div className="mt-10 grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+            <PortalCard
+              title="Operational visibility"
+              text="See what people ask, what the agent answers, and what gets escalated — across voice and chat."
+            />
+            <PortalCard
+              title="Performance reporting"
+              text="Track deflection, resolution, escalation rates, and top intents — with outcomes you can actually measure."
+            />
+            <PortalCard
+              title="Quality assurance"
+              text="Identify failure modes, refine prompts and flows, and lift performance without rebuilding the system."
+            />
+            <PortalCard
+              title="Governance & defensibility"
+              text="Designed for auditability and controlled behaviour — aligned to Essential Eight (ML2) principles."
+            />
+            <PortalCard
+              title="Continuous optimisation"
+              text="Monthly tuning based on real enquiries, not assumptions — improving outcomes over time."
+            />
+            <PortalCard
+              title="Enterprise readiness"
+              text="A premium AI deployment isn’t a chatbot — it’s a managed service with control and accountability."
+            />
+          </div>
+
+          <div className="mt-10 flex flex-wrap gap-3">
+            <Link
+              to="/government"
+              className="inline-flex items-center gap-2 rounded-2xl border border-white/15 bg-white/5 px-5 py-3 text-sm font-semibold text-white/90 hover:bg-white/10"
+            >
+              Government <ArrowRight className="h-4 w-4" />
+            </Link>
+            <Link
+              to="/business"
+              className="inline-flex items-center gap-2 rounded-2xl border border-white/15 bg-white/5 px-5 py-3 text-sm font-semibold text-white/90 hover:bg-white/10"
+            >
+              Business <ArrowRight className="h-4 w-4" />
+            </Link>
+          </div>
+        </div>
+      </section>
+
       {/* WHO IT'S FOR */}
       <section className="grid gap-6 md:grid-cols-2">
         <UseCase
@@ -269,6 +334,15 @@ function UseCase({ title, subtitle, bullets, cta }) {
       >
         {cta.label} <ArrowRight className="h-4 w-4" />
       </Link>
+    </div>
+  );
+}
+
+function PortalCard({ title, text }) {
+  return (
+    <div className="rounded-3xl border border-white/10 bg-black/20 p-7">
+      <p className="text-sm font-semibold text-white/90">{title}</p>
+      <p className="mt-3 text-sm text-white/70 leading-relaxed">{text}</p>
     </div>
   );
 }
