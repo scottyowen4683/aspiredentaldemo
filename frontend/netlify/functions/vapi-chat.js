@@ -1,7 +1,6 @@
 // netlify/functions/vapi-chat.js
 
 exports.handler = async (event) => {
-  // Basic CORS (safe for your own site)
   if (event.httpMethod === "OPTIONS") {
     return {
       statusCode: 204,
@@ -42,17 +41,17 @@ exports.handler = async (event) => {
       };
     }
 
-    const VAPI_PRIVATE_KEY = process.env.VAPI_PRIVATE_KEY;
+    // ✅ Use your existing Netlify env var name
+    const VAPI_API_KEY = process.env.VAPI_API_KEY;
 
-    if (!VAPI_PRIVATE_KEY) {
+    if (!VAPI_API_KEY) {
       return {
         statusCode: 500,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ error: "Missing VAPI_PRIVATE_KEY on server" }),
+        body: JSON.stringify({ error: "Missing VAPI_API_KEY on server" }),
       };
     }
 
-    // Vapi create chat: requires assistantId/assistant/sessionId/previousChatId (we use assistantId)
     const payload = {
       assistantId,
       input,
@@ -62,7 +61,7 @@ exports.handler = async (event) => {
     const r = await fetch("https://api.vapi.ai/chat", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${VAPI_PRIVATE_KEY}`,
+        Authorization: `Bearer ${VAPI_API_KEY}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify(payload),
@@ -77,7 +76,6 @@ exports.handler = async (event) => {
     }
 
     if (!r.ok) {
-      // Bubble up Vapi’s error so the UI can show the real reason
       return {
         statusCode: r.status,
         headers: { "Content-Type": "application/json" },
