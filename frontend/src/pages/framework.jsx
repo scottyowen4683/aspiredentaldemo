@@ -31,7 +31,7 @@ export default function Framework() {
 
           <p className="mt-5 max-w-2xl text-base md:text-lg text-white/70 leading-relaxed">
             The ASPIRE™ Enterprise AI Framework is the operating system behind
-            every Aspire deployment — ensuring your voice and chat agents are
+            every Aspire deployment, ensuring your voice and chat agents are
             governed, measurable, and reliable in production.
           </p>
 
@@ -81,22 +81,22 @@ export default function Framework() {
         <Principle
           icon={<ShieldCheck className="h-5 w-5" />}
           title="Governance first"
-          text="We design for privacy, consent, escalation, and auditability from day one — so the system is safe in real service environments."
+          text="We design for privacy, consent, escalation, and auditability from day one, so the system is safe in real service environments."
         />
         <Principle
           icon={<BookOpenCheck className="h-5 w-5" />}
           title="Knowledge precision"
-          text="We reduce hallucinations by designing how knowledge is sourced, framed, and cited — and by controlling what the agent is allowed to say."
+          text="We reduce hallucinations by designing how knowledge is sourced, framed, and cited, and by controlling what the agent is allowed to say."
         />
         <Principle
           icon={<Workflow className="h-5 w-5" />}
           title="Workflow orchestration"
-          text="AI isn’t valuable because it talks. It’s valuable because it can trigger the right actions — emails, summaries, tickets, routing, callbacks."
+          text="AI isn’t valuable because it talks. It’s valuable because it can trigger the right actions, emails, summaries, tickets, routing, callbacks."
         />
         <Principle
           icon={<LineChart className="h-5 w-5" />}
           title="Continuous optimisation"
-          text="We tune prompts, flows, and knowledge monthly based on real enquiries — improving outcomes without rebuilding everything."
+          text="We tune prompts, flows, and knowledge monthly based on real enquiries, improving outcomes without rebuilding everything."
         />
       </section>
 
@@ -186,11 +186,11 @@ export default function Framework() {
           <div className="mt-10 grid gap-6 md:grid-cols-2 lg:grid-cols-3">
             <PortalCard
               title="Operational visibility"
-              text="See what people ask, what the agent answers, and what gets escalated — across voice and chat."
+              text="See what people ask, what the agent answers, and what gets escalated across voice and chat."
             />
             <PortalCard
               title="Performance reporting"
-              text="Track deflection, resolution, escalation rates, and top intents — with outcomes you can actually measure."
+              text="Track deflection, resolution, escalation rates, and top intents with outcomes you can actually measure."
             />
             <PortalCard
               title="Quality assurance"
@@ -198,15 +198,15 @@ export default function Framework() {
             />
             <PortalCard
               title="Governance & defensibility"
-              text="Designed for auditability and controlled behaviour — aligned to Essential Eight (ML2) principles."
+              text="Designed for auditability and controlled behaviour aligned to Essential Eight (ML2) principles."
             />
             <PortalCard
               title="Continuous optimisation"
-              text="Monthly tuning based on real enquiries, not assumptions — improving outcomes over time."
+              text="Monthly tuning based on real enquiries, not assumptions, improving outcomes over time."
             />
             <PortalCard
               title="Enterprise readiness"
-              text="A premium AI deployment isn’t a chatbot — it’s a managed service with control and accountability."
+              text="A premium AI deployment isn’t a chatbot, it’s a managed service with control and accountability."
             />
           </div>
 
