@@ -46,6 +46,7 @@ export default function SiteLayout() {
             <NavItem to="/framework">Framework</NavItem>
             <NavItem to="/government">Government</NavItem>
             <NavItem to="/business">Business</NavItem>
+            <NavItem to="/demo">Demo</NavItem>
             <a
               href="/#contact"
               className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-black hover:bg-white/90"
@@ -76,6 +77,9 @@ export default function SiteLayout() {
               </Link>
               <Link className="text-white/80 hover:text-white" to="/business">
                 Business
+              </Link>
+              <Link className="text-white/80 hover:text-white" to="/demo">
+                Demo
               </Link>
               <a
                 href="/#contact"
@@ -116,6 +120,9 @@ export default function SiteLayout() {
               </Link>
               <Link className="hover:text-white" to="/business">
                 Business
+              </Link>
+              <Link className="hover:text-white" to="/demo">
+                Demo
               </Link>
               <Link className="hover:text-white" to="/agents/voice">
                 Voice
