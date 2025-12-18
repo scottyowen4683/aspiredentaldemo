@@ -157,115 +157,118 @@ def debug_env():
     }
 
 
-@api_router.post("/contact/debug", response_model=ContactResponse)
-async def create_contact_submission_debug(input: ContactSubmissionCreate):
-    contact_obj = ContactSubmission(**input.model_dump())
-
-    # DB optional
-    try:
-        if mongo_db is not None:
-            await mongo_db.contact_submissions.insert_one(contact_obj.model_dump())
-    except Exception:
-        logging.exception("Mongo insert failed (debug).")
-
-    # Email sync so you can see errors
-    try:
-        send_contact_notification(
-            contact_obj.name,
-            contact_obj.email,
-            contact_obj.phone or "",
-            (f"Organisation: {contact_obj.org}\n\n" if contact_obj.org else "") + contact_obj.message,
-        )
-        return ContactResponse(status="success", message="Email sent (debug).", id=contact_obj.id)
-    except EmailDeliveryError as e:
-        raise HTTPException(status_code=502, detail=f"Email delivery failed: {str(e)}")
-    except Exception as e:
-        logging.exception("Debug route failed")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 # -----------------------------
-# Vapi tool endpoint (FAST + ROBUST)
+# Vapi helpers
 # -----------------------------
-def _extract_vapi_payload(raw: Any) -> Dict[str, Any]:
-    """
-    Accepts:
-      - normal JSON body with the required fields
-      - Vapi-wrapped tool call bodies that contain { "arguments": "{...json...}" }
-      - other wrappers where args live under toolCalls[0].function.arguments
-    Returns: dict of fields.
-    """
-    if raw is None:
-        return {}
+def _try_json_loads(val: Any) -> Any:
+    if isinstance(val, str):
+        s = val.strip()
+        # Sometimes arguments is a JSON string
+        if (s.startswith("{") and s.endswith("}")) or (s.startswith("[") and s.endswith("]")):
+            try:
+                return json.loads(s)
+            except Exception:
+                return val
+    return val
 
-    if isinstance(raw, dict):
-        # direct payload
-        if "subject" in raw or "request_type" in raw:
-            return raw
 
-        # common: {"arguments": "{...}"} or {"arguments": {...}}
-        if "arguments" in raw:
-            args = raw.get("arguments")
-            if isinstance(args, str):
-                try:
-                    return json.loads(args)
-                except Exception:
-                    return {}
+def _deep_find_arguments(obj: Any) -> Optional[Dict[str, Any]]:
+    """
+    Walk a nested structure and try to locate tool-call arguments in common Vapi shapes.
+    Returns a dict of arguments if found.
+    """
+    obj = _try_json_loads(obj)
+
+    if isinstance(obj, dict):
+        # Direct shape (already the args)
+        if any(k in obj for k in ("to", "subject", "request_type", "resident_name", "resident_phone", "address", "details")):
+            return obj
+
+        # Common wrapper: {"arguments": "...json..."} or {"arguments": {...}}
+        if "arguments" in obj:
+            args = _try_json_loads(obj.get("arguments"))
             if isinstance(args, dict):
                 return args
 
-        # possible wrapper: {"toolCalls":[{"function":{"arguments":{...}}}]}
-        tool_calls = raw.get("toolCalls") or raw.get("tool_calls") or raw.get("toolCallList")
-        if isinstance(tool_calls, list) and tool_calls:
-            fn = tool_calls[0].get("function") or {}
-            args = fn.get("arguments")
-            if isinstance(args, str):
-                try:
-                    return json.loads(args)
-                except Exception:
-                    return {}
-            if isinstance(args, dict):
-                return args
+        # Vapi wrapper: {"message": {...}}
+        if "message" in obj:
+            found = _deep_find_arguments(obj.get("message"))
+            if found:
+                return found
 
-        return raw
+        # Vapi wrappers: toolCalls / toolCallList / tool_calls
+        for key in ("toolCalls", "toolCallList", "tool_calls"):
+            tc = obj.get(key)
+            if isinstance(tc, list) and tc:
+                for item in tc:
+                    found = _deep_find_arguments(item)
+                    if found:
+                        return found
 
-    # if something weird
-    return {}
+        # Vapi wrapper: {"function": {"arguments": ...}}
+        if "function" in obj and isinstance(obj["function"], dict):
+            found = _deep_find_arguments(obj["function"])
+            if found:
+                return found
+
+        # Otherwise search all values
+        for v in obj.values():
+            found = _deep_find_arguments(v)
+            if found:
+                return found
+
+    if isinstance(obj, list):
+        for item in obj:
+            found = _deep_find_arguments(item)
+            if found:
+                return found
+
+    return None
 
 
+# -----------------------------
+# Vapi debug endpoint (browser friendly)
+# -----------------------------
+@api_router.post("/vapi/debug/echo")
+async def vapi_debug_echo(request: Request):
+    raw = await request.json()
+    args = _deep_find_arguments(raw)
+    return {"raw": raw, "extracted_args": args}
+
+
+# -----------------------------
+# Vapi tool endpoint (SYNC SEND + CLEAR ERRORS)
+# -----------------------------
 @api_router.post("/vapi/send-structured-email")
-async def vapi_send_structured_email(request: Request, background_tasks: BackgroundTasks):
+async def vapi_send_structured_email(request: Request):
     try:
         raw = await request.json()
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON body")
 
-    payload = _extract_vapi_payload(raw)
+    payload = _deep_find_arguments(raw) or {}
 
-    # Required fields (matches your Vapi schema)
     required = ["to", "subject", "request_type", "resident_name", "resident_phone", "address", "details"]
     missing = [k for k in required if not payload.get(k)]
     if missing:
-        # Log exactly what we got to make debugging painless
-        logging.warning(f"Vapi payload missing fields: {missing}. Raw={raw}")
+        logging.warning(f"Vapi missing fields={missing} extracted={payload} raw={raw}")
         raise HTTPException(status_code=400, detail=f"Missing required fields: {', '.join(missing)}")
 
-    # Create a reference id so Vapi gets a success response instantly
     reference_id = f"REQ-{uuid.uuid4().hex[:10].upper()}"
+    payload_with_ref = dict(payload)
+    payload_with_ref["reference_id"] = reference_id
 
-    # Send email in background (this is the key to stopping Vapi timeouts)
-    def _safe_send():
-        try:
-            # include reference id in the payload so your email template can show it if you want
-            payload_with_ref = dict(payload)
-            payload_with_ref["reference_id"] = reference_id
-            send_council_request_email(payload_with_ref)
-        except Exception:
-            logging.exception("Error sending Vapi structured email (background task).")
+    # IMPORTANT:
+    # Send synchronously for Vapi so Vapi only sees "success" when email actually sent.
+    try:
+        send_council_request_email(payload_with_ref)
+    except EmailDeliveryError as e:
+        logging.exception("EmailDeliveryError in Vapi endpoint")
+        raise HTTPException(status_code=502, detail=f"Email delivery failed: {str(e)}")
+    except Exception:
+        logging.exception("Unexpected error sending Vapi structured email")
+        raise HTTPException(status_code=500, detail="Internal server error while sending email")
 
-    background_tasks.add_task(_safe_send)
-
-    # Immediate success response so the assistant does NOT say "couldn't help"
     return JSONResponse(
         {
             "success": True,
