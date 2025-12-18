@@ -92,16 +92,15 @@ export default function VapiWidget({
 
       setMessages((prev) => [...prev, { role: "assistant", text: reply }]);
     } catch (err) {
-      console.error(err);
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          text: "Something went wrong. Please refresh and try again.",
-        },
-      ]);
-    } finally {
-      setBusy(false);
+  console.error(err);
+  setMessages((prev) => [
+    ...prev,
+    { role: "assistant", text: `Error: ${err?.message || "Unknown error"}` },
+  ]);
+} finally {
+  setBusy(false);
+}
+
     }
   }
 
