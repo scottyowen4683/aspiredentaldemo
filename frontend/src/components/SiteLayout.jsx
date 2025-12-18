@@ -1,7 +1,6 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Outlet, Link, NavLink, useLocation } from "react-router-dom";
-
-const LOGO = "/aspire1.png";
+import VapiWidget from "./VapiWidget.jsx";
 
 function NavItem({ to, children }) {
   return (
@@ -25,18 +24,43 @@ export default function SiteLayout() {
 
   useEffect(() => setOpen(false), [location.pathname]);
 
-  return (
-    <div className="min-h-screen bg-[#070A12] text-white">
-      <div className="pointer-events-none fixed inset-x-0 top-[-220px] mx-auto h-[520px] w-[900px] rounded-full bg-gradient-to-r from-blue-600/30 via-indigo-500/20 to-cyan-400/20 blur-3xl" />
+  // ✅ Choose assistant by section (Gov vs Business)
+  const assistantId = useMemo(() => {
+    const path = location.pathname || "/";
+    const isGov = path.startsWith("/government");
 
-      <header className="sticky top-0 z-50 border-b border-white/10 bg-[#070A12]/70 backdrop-blur-xl">
+    const GOV =
+      import.meta.env.VITE_VAPI_ASSISTANT_ID_GOV ||
+      import.meta.env.VITE_VAPI_ASSISTANT_ID_GOVERNMENT;
+
+    const BIZ =
+      import.meta.env.VITE_VAPI_ASSISTANT_ID_BIZ ||
+      import.meta.env.VITE_VAPI_ASSISTANT_ID_BUSINESS;
+
+    return isGov ? GOV : BIZ;
+  }, [location.pathname]);
+
+  // ✅ Logo with fallback (fixes missing /aspire1.png)
+  const [logoSrc, setLogoSrc] = useState("/aspire1.png");
+
+  return (
+    <div className="min-h-screen text-white bg-gradient-to-b from-[#0B1224] via-[#070A12] to-[#070A12]">
+      {/* softer premium glow */}
+      <div className="pointer-events-none fixed inset-x-0 top-[-240px] mx-auto h-[560px] w-[980px] rounded-full bg-gradient-to-r from-blue-500/25 via-indigo-500/15 to-cyan-400/15 blur-3xl" />
+
+      <header className="sticky top-0 z-50 border-b border-white/10 bg-[#0A1020]/70 backdrop-blur-xl">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
           <Link to="/" className="flex items-center gap-3">
-            <img src={LOGO} alt="Aspire" className="h-9 w-auto" />
+            <img
+              src={logoSrc}
+              alt="Aspire"
+              className="h-9 w-auto"
+              onError={() => setLogoSrc("/aspire.png")} // fallback if aspire1.png not in /public
+            />
             <div className="leading-tight">
               <div className="text-sm font-semibold tracking-wide">Aspire</div>
               <div className="text-xs text-white/60">
-                AI Agents for Government & Business
+                ASPIRE™ Enterprise AI Framework
               </div>
             </div>
           </Link>
@@ -46,7 +70,6 @@ export default function SiteLayout() {
             <NavItem to="/framework">Framework</NavItem>
             <NavItem to="/government">Government</NavItem>
             <NavItem to="/business">Business</NavItem>
-            <NavItem to="/demo">Demo</NavItem>
             <a
               href="/#contact"
               className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-black hover:bg-white/90"
@@ -64,7 +87,7 @@ export default function SiteLayout() {
         </div>
 
         {open && (
-          <div className="border-t border-white/10 bg-[#070A12]/95 md:hidden">
+          <div className="border-t border-white/10 bg-[#0A1020]/95 md:hidden">
             <div className="mx-auto flex max-w-7xl flex-col gap-4 px-6 py-5">
               <Link className="text-white/80 hover:text-white" to="/agents">
                 Agents
@@ -77,9 +100,6 @@ export default function SiteLayout() {
               </Link>
               <Link className="text-white/80 hover:text-white" to="/business">
                 Business
-              </Link>
-              <Link className="text-white/80 hover:text-white" to="/demo">
-                Demo
               </Link>
               <a
                 href="/#contact"
@@ -100,14 +120,20 @@ export default function SiteLayout() {
         <div className="mx-auto max-w-7xl px-6 py-10 text-sm text-white/60">
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div>
-              <div className="text-white/80 font-semibold">
+              <div className="text-white/85 font-semibold">
                 ASPIRE™ Enterprise AI Framework
               </div>
               <div className="mt-1">
-                Premium-grade AI agents. Built for delivery, governance, and
-                scale.
+                Premium-grade AI agents for Government & Business.
+              </div>
+              <div className="mt-2 text-white/55">
+                Security posture includes alignment to Essential Eight (Maturity Level 2) principles.
+              </div>
+              <div className="mt-3 text-white/55">
+                Aspire Executive Solutions Pty Ltd — All rights reserved.
               </div>
             </div>
+
             <div className="flex flex-wrap gap-6">
               <Link className="hover:text-white" to="/agents">
                 Agents
@@ -121,22 +147,13 @@ export default function SiteLayout() {
               <Link className="hover:text-white" to="/business">
                 Business
               </Link>
-              <Link className="hover:text-white" to="/demo">
-                Demo
-              </Link>
-              <Link className="hover:text-white" to="/agents/voice">
-                Voice
-              </Link>
-              <Link className="hover:text-white" to="/agents/chat">
-                Chat
-              </Link>
-              <Link className="hover:text-white" to="/agents/outbound">
-                Outbound
-              </Link>
             </div>
           </div>
         </div>
       </footer>
+
+      {/* ✅ Vapi widget on ALL pages (mount once) */}
+      <VapiWidget assistantId={assistantId} />
     </div>
   );
 }
