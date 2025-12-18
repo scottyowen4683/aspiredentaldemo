@@ -43,10 +43,10 @@ export default function AgentsVoice() {
               Call the AI: {DEMO_NUMBER}
             </a>
             <Link
-              to="/ai-receptionist"
+              to="/demo"
               className="inline-flex items-center gap-2 rounded-2xl border border-white/15 bg-white/5 px-5 py-3 text-sm font-semibold text-white/90 hover:bg-white/10"
             >
-              Voice demo page <ArrowRight className="h-4 w-4" />
+              View live demos <ArrowRight className="h-4 w-4" />
             </Link>
           </div>
 
