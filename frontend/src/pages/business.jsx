@@ -15,7 +15,7 @@ import OutboundCTA from "../components/OutboundCTA.jsx";
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 
-const DEMO_NUMBER = "+61 7 4357 2749";
+const DEMO_NUMBER = "+61 468 039 529";
 const BOOKING_URL = "https://calendly.com/scott-owen-aspire/ai-receptionist-demo";
 
 export default function Business() {
@@ -117,7 +117,7 @@ export default function Business() {
       <section className="rounded-3xl border border-white/10 bg-white/5 p-10">
         <p className="text-2xl font-semibold">Live demo (Business)</p>
         <p className="mt-3 text-white/70">
-          Call the number above to test the voice experience. The chat widget should appear bottom-right on every page.
+          Call the number above to test the voice experience.
         </p>
 
         <div className="mt-6 grid gap-6 md:grid-cols-2">
@@ -130,7 +130,7 @@ export default function Business() {
             ]}
           />
           <Tile
-            title="What you should see"
+            title="What you will see"
             points={[
               "Fast triage and clear outcomes",
               "Clean capture of details",
@@ -153,7 +153,7 @@ export default function Business() {
       <section className="rounded-3xl border border-white/10 bg-gradient-to-br from-white/10 to-white/5 p-10">
         <p className="text-2xl font-semibold">Why Aspire feels different</p>
         <p className="mt-3 text-white/70 max-w-3xl">
-          Aspire deployments are governed and optimised under the ASPIRE™ Enterprise AI Framework — not “prompted and shipped”.
+          Aspire deployments are governed and optimised under the ASPIRE™ Enterprise AI Framework, not “prompted and shipped”.
         </p>
         <div className="mt-6 grid gap-6 md:grid-cols-3">
           <Mini text="Governance and escalation rules by design." />
