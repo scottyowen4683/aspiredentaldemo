@@ -5,7 +5,7 @@ const GREETING =
 
 export default function VapiWidget({
   assistantId,
-  brandUrl = "https://aspireexecutivesolutions.com.au",
+  brandUrl = "https://aspireexecutive.ai",
 }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
