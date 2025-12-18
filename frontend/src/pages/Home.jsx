@@ -78,7 +78,7 @@ export default function Home() {
 
           <p className="mt-5 text-base leading-relaxed text-white/70 md:text-lg">
             Aspire designs premium voice and chat agents for Government and
-            Business — built to reduce contact centre load, capture intent, and
+            Business. Built to reduce contact centre load, capture intent, and
             escalate cleanly under a framework designed for real operations.
           </p>
 
@@ -130,7 +130,7 @@ export default function Home() {
             <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
               <div className="text-sm font-semibold text-white">Governed Delivery</div>
               <div className="mt-1 text-sm text-white/65">
-                Designed for accountability — not “AI theatre”.
+                Designed for accountability, not “AI theatre”.
               </div>
             </div>
           </div>
@@ -142,7 +142,7 @@ export default function Home() {
         <div>
           <div className="text-sm text-white/60">Why Aspire exists</div>
           <h2 className="mt-2 text-3xl font-semibold tracking-tight text-white">
-            Built by a CEO — not another AI vendor.
+            Built by a CEO, not another tech vendor.
           </h2>
           <p className="mt-4 text-base leading-relaxed text-white/70">
             Aspire was created by someone who has run complex organisations,
@@ -151,7 +151,7 @@ export default function Home() {
           </p>
           <p className="mt-4 text-base leading-relaxed text-white/70">
             This platform wasn’t designed in a lab or a sales deck. It was
-            shaped by operational reality — governance, escalation, workforce
+            shaped by operational reality, governance, escalation, workforce
             dynamics, after-hours demand, and reputational consequence.
           </p>
           <p className="mt-4 text-base leading-relaxed text-white/70">
@@ -187,7 +187,7 @@ export default function Home() {
             </div>
             <div className="mt-2 text-sm leading-relaxed text-white/70">
               Aspire is designed to recognise limits, route to humans cleanly,
-              and preserve context — not “keep talking until it sounds right”.
+              and preserve context, not “keep talking until it sounds right”.
             </div>
           </div>
 
@@ -207,7 +207,7 @@ export default function Home() {
       <section className="grid gap-6 md:grid-cols-2">
         <Card
           title="Government"
-          desc="Designed for public-facing enquiries, structured responses, and controlled handover — aligned to Australian expectations."
+          desc="Designed for public-facing enquiries, structured responses, and controlled handover, aligned to Australian expectations."
           bullets={[
             "Voice + chat agents for contact centres and after-hours",
             "Escalation pathways and controlled responses",
@@ -218,7 +218,7 @@ export default function Home() {
 
         <Card
           title="Business"
-          desc="A premium customer experience that reduces load, captures intent, and protects brand tone — without guesswork."
+          desc="A premium customer experience that reduces load, captures intent, and protects brand tone, without guesswork."
           bullets={[
             "Inbound voice and web chat built for conversion and service",
             "Outbound callbacks (consent-first) where appropriate",
