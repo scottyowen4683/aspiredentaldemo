@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Outlet, Link, NavLink, useLocation } from "react-router-dom";
-import VapiWidget from "./VapiWidget.jsx";
+import VapiWidget from "./Vapi-Widget.jsx";
 
 function NavItem({ to, children }) {
   return (
@@ -24,7 +24,7 @@ export default function SiteLayout() {
 
   useEffect(() => setOpen(false), [location.pathname]);
 
-  // ✅ Choose assistant by section (Gov vs Business)
+  // Choose assistant by section (Gov vs Business)
   const assistantId = useMemo(() => {
     const path = location.pathname || "/";
     const isGov = path.startsWith("/government");
@@ -40,12 +40,14 @@ export default function SiteLayout() {
     return isGov ? GOV : BIZ;
   }, [location.pathname]);
 
-  // ✅ Use transparent logo first
+  // Logo preference
   const [logoSrc, setLogoSrc] = useState("/aspire-mark.png");
+
+  // Optional: hide widget on admin
+  const showWidget = !location.pathname.startsWith("/admin");
 
   return (
     <div className="min-h-screen text-white bg-gradient-to-b from-[#0B1224] via-[#070A12] to-[#070A12]">
-      {/* softer premium glow */}
       <div className="pointer-events-none fixed inset-x-0 top-[-240px] mx-auto h-[560px] w-[980px] rounded-full bg-gradient-to-r from-blue-500/25 via-indigo-500/15 to-cyan-400/15 blur-3xl" />
 
       <header className="sticky top-0 z-50 border-b border-white/10 bg-[#0A1020]/70 backdrop-blur-xl">
@@ -121,18 +123,18 @@ export default function SiteLayout() {
         <div className="mx-auto max-w-7xl px-6 py-10 text-sm text-white/60">
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div>
-              <div className="text-white/85 font-semibold">
+              <div className="font-semibold text-white/85">
                 ASPIRE™ Enterprise AI Framework
               </div>
               <div className="mt-1">
-                Premium-grade AI agents for Government & Business.
+                Premium-grade AI agents for Government and Business.
               </div>
               <div className="mt-2 text-white/55">
                 Security posture includes alignment to Essential Eight (Maturity
                 Level 2) principles.
               </div>
               <div className="mt-3 text-white/55">
-                Aspire Executive Solutions Pty Ltd — All rights reserved.
+                Aspire Executive Solutions Pty Ltd. All rights reserved.
               </div>
             </div>
 
@@ -154,8 +156,8 @@ export default function SiteLayout() {
         </div>
       </footer>
 
-      {/* ✅ Vapi widget on ALL pages (mount once) */}
-      <VapiWidget assistantId={assistantId} />
+      {/* Aspire-built chat widget */}
+      {showWidget && <VapiWidget assistantId={assistantId} />}
     </div>
   );
 }
