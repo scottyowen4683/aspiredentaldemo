@@ -77,7 +77,7 @@ export default function Government() {
 
           <p className="mt-5 max-w-2xl text-base md:text-lg text-white/70 leading-relaxed">
             Aspire deploys premium voice and chat agents designed for councils
-            and complex public-facing environments — controlled responses,
+            and complex public-facing environments, controlled responses,
             clean escalation, and measurable outcomes.
           </p>
 
@@ -122,8 +122,7 @@ export default function Government() {
       <section className="rounded-3xl border border-white/10 bg-white/5 p-10">
         <p className="text-2xl font-semibold">Live demo (Government)</p>
         <p className="mt-3 text-white/70">
-          Call the number above to experience the voice agent. The chat widget
-          should appear bottom-right on every page.
+          Call the number above to experience the demo voice agent Bailey.
         </p>
 
         <div className="mt-6 grid gap-6 md:grid-cols-2">
@@ -136,7 +135,7 @@ export default function Government() {
             ]}
           />
           <Tile
-            title="What you should see"
+            title="What you will see"
             points={[
               "Fast triage and clear resolution pathways",
               "Better service consistency after-hours",
@@ -165,7 +164,7 @@ export default function Government() {
         <div className="mt-8 grid gap-6 md:grid-cols-3">
           <Mini
             title="Controlled knowledge"
-            text="Approved sources, reduced hallucinations, clear boundaries."
+            text="Approved sources, no hallucinations, clear boundaries."
           />
           <Mini
             title="Escalation by design"
@@ -191,8 +190,8 @@ export default function Government() {
       <section className="rounded-3xl border border-white/10 bg-gradient-to-br from-white/10 to-white/5 p-10">
         <p className="text-2xl font-semibold">Why Aspire holds up in government</p>
         <p className="mt-3 text-white/70 max-w-3xl">
-          The ASPIRE™ Enterprise AI Framework is the difference between a
-          “chatbot trial” and a production-grade service capability.
+          The ASPIRE™ Enterprise AI Framework governs how AI agents are designed, 
+          deployed, measured, and improved in live service environments.
         </p>
         <div className="mt-6 grid gap-6 md:grid-cols-3">
           <MiniPlain text="Governance-first design (privacy, consent, escalation)." />
