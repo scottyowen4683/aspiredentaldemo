@@ -1,7 +1,12 @@
-import React from "react";
+import React, { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import axios from "axios";
+import { toast } from "sonner";
 
 const DEMO_URL = "https://calendly.com/scott-owen-aspire/ai-demo";
+
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL;
+const API = `${(BACKEND_URL || "").replace(/\/+$/, "")}/api`;
 
 function Pill({ children }) {
   return (
@@ -57,18 +62,76 @@ function Card({ title, desc, bullets, to }) {
 }
 
 export default function Home() {
+  const [formData, setFormData] = useState({
+    name: "",
+    email: "",
+    phone: "",
+    org: "",
+    message: "",
+  });
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const canSend = useMemo(() => Boolean(BACKEND_URL), []);
+
+  const handleChange = (e) =>
+    setFormData((p) => ({ ...p, [e.target.name]: e.target.value }));
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+
+    if (!canSend) {
+      toast.error("Configuration error", {
+        description: "VITE_BACKEND_URL is not set, so the form cannot send yet.",
+      });
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      // IMPORTANT: your FastAPI /contact only accepts {name,email,phone,message}
+      // org is folded into message to avoid 422 validation errors.
+      const payload = {
+        name: formData.name.trim(),
+        email: formData.email.trim(),
+        phone: (formData.phone || "").trim(),
+        message: `${
+          formData.org?.trim() ? `Organisation: ${formData.org.trim()}\n\n` : ""
+        }${formData.message.trim()}`,
+      };
+
+      const res = await axios.post(`${API}/contact`, payload);
+
+      if (res?.data?.status === "success") {
+        toast.success("Message sent", {
+          description: "We will get back to you within 24 hours.",
+        });
+        setFormData({ name: "", email: "", phone: "", org: "", message: "" });
+      } else {
+        toast.error("Error", {
+          description: "Unexpected server response.",
+        });
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("Error", {
+        description: "Failed to send. Please try again shortly.",
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   return (
     <div className="space-y-14">
       {/* HERO */}
       <section className="relative overflow-hidden rounded-[32px] border border-white/10 bg-gradient-to-br from-[#0B1632] via-[#071022] to-[#070A12] p-10 md:p-14">
-        {/* Lighter, premium glow (less “too dark”) */}
         <div className="pointer-events-none absolute inset-0">
           <div className="absolute -top-40 left-10 h-[520px] w-[520px] rounded-full bg-gradient-to-br from-indigo-500/18 via-cyan-400/10 to-white/0 blur-3xl" />
           <div className="absolute -bottom-40 right-0 h-[560px] w-[560px] rounded-full bg-gradient-to-br from-blue-500/14 via-white/6 to-white/0 blur-3xl" />
         </div>
 
         <div className="relative max-w-3xl">
-          <Pill>ASPIRE™ Enterprise AI Framework</Pill>
+          <Pill>ASPIRE Enterprise AI Framework</Pill>
           <span className="mx-2 text-white/35">•</span>
           <Pill>Essential Eight (ML2) aligned principles</Pill>
 
@@ -116,28 +179,28 @@ export default function Home() {
 
           <div className="mt-7 grid gap-3 sm:grid-cols-3">
             <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-              <div className="text-sm font-semibold text-white">Voice + Chat</div>
+              <div className="text-sm font-semibold text-white">Voice and chat</div>
               <div className="mt-1 text-sm text-white/65">
                 Consistent answers with controlled escalation.
               </div>
             </div>
             <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-              <div className="text-sm font-semibold text-white">Intent Capture</div>
+              <div className="text-sm font-semibold text-white">Intent capture</div>
               <div className="mt-1 text-sm text-white/65">
                 Captures purpose, context, and next steps.
               </div>
             </div>
             <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-              <div className="text-sm font-semibold text-white">Governed Delivery</div>
+              <div className="text-sm font-semibold text-white">Governed delivery</div>
               <div className="mt-1 text-sm text-white/65">
-                Designed for accountability, not “AI theatre”.
+                Designed for accountability, not AI theatre.
               </div>
             </div>
           </div>
         </div>
       </section>
 
-      {/* TRUST WEDGE (CEO-built) */}
+      {/* TRUST WEDGE */}
       <section className="grid gap-10 md:grid-cols-2 md:items-start">
         <div>
           <div className="text-sm text-white/60">Why Aspire exists</div>
@@ -150,14 +213,13 @@ export default function Home() {
             accountability when things go wrong.
           </p>
           <p className="mt-4 text-base leading-relaxed text-white/70">
-            This platform wasn’t designed in a lab or a sales deck. It was
-            shaped by operational reality, governance, escalation, workforce
-            dynamics, after-hours demand, and reputational consequence.
+            This platform was shaped by operational reality, governance,
+            escalation, workforce dynamics, after-hours demand, and reputational
+            consequence.
           </p>
           <p className="mt-4 text-base leading-relaxed text-white/70">
-            That’s why Aspire doesn’t just answer questions. It captures intent,
-            applies controls, and escalates cleanly under the ASPIRE™ Enterprise
-            AI Framework.
+            That is why Aspire does not just answer questions. It captures intent,
+            applies controls, and escalates cleanly under the ASPIRE Enterprise AI Framework.
           </p>
 
           <div className="mt-6">
@@ -187,7 +249,7 @@ export default function Home() {
             </div>
             <div className="mt-2 text-sm leading-relaxed text-white/70">
               Aspire is designed to recognise limits, route to humans cleanly,
-              and preserve context, not “keep talking until it sounds right”.
+              and preserve context, not keep talking until it sounds right.
             </div>
           </div>
 
@@ -196,7 +258,7 @@ export default function Home() {
               Control over novelty
             </div>
             <div className="mt-2 text-sm leading-relaxed text-white/70">
-              Premium AI isn’t about features. It’s about governance, repeatable
+              Premium AI is not about features. It is about governance, repeatable
               quality, and defensibility.
             </div>
           </div>
@@ -209,9 +271,9 @@ export default function Home() {
           title="Government"
           desc="Designed for public-facing enquiries, structured responses, and controlled handover, aligned to Australian expectations."
           bullets={[
-            "Voice + chat agents for contact centres and after-hours",
+            "Voice and chat agents for contact centres and after-hours",
             "Escalation pathways and controlled responses",
-            "Governance-first delivery under the ASPIRE™ framework",
+            "Governance-first delivery under the ASPIRE framework",
           ]}
           to="/government"
         />
@@ -221,7 +283,7 @@ export default function Home() {
           desc="A premium customer experience that reduces load, captures intent, and protects brand tone, without guesswork."
           bullets={[
             "Inbound voice and web chat built for conversion and service",
-            "Outbound callbacks (consent-first) where appropriate",
+            "Outbound engagement where appropriate and consent-first",
             "Designed for clean handover and reporting",
           ]}
           to="/business"
@@ -237,7 +299,8 @@ export default function Home() {
               Demo the experience. Not the pitch.
             </div>
             <div className="mt-2 text-sm text-white/70">
-              Book a live walkthrough and see how Aspire handles voice, chat, and escalation under governance.
+              Book a live walkthrough and see how Aspire handles voice, chat, and
+              escalation under governance.
             </div>
           </div>
           <a
@@ -248,6 +311,101 @@ export default function Home() {
           >
             Book a live demo
           </a>
+        </div>
+      </section>
+
+      {/* CONTACT (WORKING BREVO FORM) */}
+      <section
+        id="contact"
+        className="rounded-3xl border border-white/10 bg-gradient-to-br from-white/10 to-white/5 p-10 md:p-14"
+      >
+        <div className="grid gap-10 md:grid-cols-2 md:items-start">
+          <div>
+            <h2 className="text-3xl md:text-4xl font-semibold tracking-tight">
+              Talk to Aspire
+            </h2>
+            <p className="mt-4 text-white/70 leading-relaxed">
+              Tell us what you want the agent to handle. We will respond with a
+              clear recommendation and next steps.
+            </p>
+
+            <div className="mt-6 space-y-3 text-sm text-white/75">
+              <div className="flex items-start gap-2">
+                <span className="mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full bg-white/60" />
+                <span>Built and managed in Australia by a former CEO.</span>
+              </div>
+              <div className="flex items-start gap-2">
+                <span className="mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full bg-white/60" />
+                <span>Governed delivery under the ASPIRE Enterprise AI Framework.</span>
+              </div>
+              <div className="flex items-start gap-2">
+                <span className="mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full bg-white/60" />
+                <span>Designed for service environments where reputation matters.</span>
+              </div>
+            </div>
+          </div>
+
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <input
+              name="name"
+              placeholder="Your name"
+              value={formData.name}
+              onChange={handleChange}
+              required
+              className="w-full rounded-2xl border border-white/15 bg-white/5 px-4 py-3 text-sm text-white placeholder:text-white/40 outline-none focus:border-white/30"
+            />
+
+            <input
+              name="org"
+              placeholder="Organisation (optional)"
+              value={formData.org}
+              onChange={handleChange}
+              className="w-full rounded-2xl border border-white/15 bg-white/5 px-4 py-3 text-sm text-white placeholder:text-white/40 outline-none focus:border-white/30"
+            />
+
+            <input
+              name="email"
+              type="email"
+              placeholder="Email"
+              value={formData.email}
+              onChange={handleChange}
+              required
+              className="w-full rounded-2xl border border-white/15 bg-white/5 px-4 py-3 text-sm text-white placeholder:text-white/40 outline-none focus:border-white/30"
+            />
+
+            <input
+              name="phone"
+              type="tel"
+              placeholder="Phone (optional)"
+              value={formData.phone}
+              onChange={handleChange}
+              className="w-full rounded-2xl border border-white/15 bg-white/5 px-4 py-3 text-sm text-white placeholder:text-white/40 outline-none focus:border-white/30"
+            />
+
+            <textarea
+              name="message"
+              placeholder="What do you want the agent to handle?"
+              value={formData.message}
+              onChange={handleChange}
+              required
+              rows={5}
+              className="w-full rounded-2xl border border-white/15 bg-white/5 px-4 py-3 text-sm text-white placeholder:text-white/40 outline-none focus:border-white/30"
+            />
+
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="w-full rounded-2xl bg-white px-5 py-3 text-sm font-semibold text-black hover:bg-white/90 disabled:opacity-60"
+            >
+              {isSubmitting ? "Sending..." : "Send"}
+            </button>
+
+            {!canSend ? (
+              <div className="text-xs text-white/50">
+                Backend URL not set. Add VITE_BACKEND_URL in your frontend env.
+              </div>
+            ) : null}
+          </form>
         </div>
       </section>
     </div>
