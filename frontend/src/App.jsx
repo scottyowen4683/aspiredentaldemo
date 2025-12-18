@@ -7,6 +7,7 @@ import SiteLayout from "./components/SiteLayout.jsx";
 import Home from "./pages/Home.jsx";
 import Government from "./pages/government.jsx";
 import Business from "./pages/business.jsx";
+import Framework from "./pages/framework.jsx";
 import AiReceptionist from "./pages/AiReceptionist.jsx";
 
 export default function App() {
@@ -14,6 +15,8 @@ export default function App() {
     <Routes>
       <Route element={<SiteLayout />}>
         <Route index element={<Home />} />
+        <Route path="/framework" element={<Framework />} />
+
 
         {/* Product-led pages (clean paths) */}
         <Route path="/government" element={<Government />} />
