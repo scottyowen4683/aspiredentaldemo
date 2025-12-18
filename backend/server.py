@@ -53,6 +53,9 @@ app = FastAPI()
 api_router = APIRouter(prefix="/api")
 
 
+# -----------------------------
+# Models
+# -----------------------------
 class ContactSubmission(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     name: str
@@ -100,9 +103,9 @@ async def root():
     return {"message": "Aspire Executive Solutions API"}
 
 
-# --------------------------------------------------------------------------------------
-# CONTACT FORM
-# --------------------------------------------------------------------------------------
+# -----------------------------
+# Contact form
+# -----------------------------
 @api_router.post("/contact", response_model=ContactResponse)
 async def create_contact_submission(input: ContactSubmissionCreate, background_tasks: BackgroundTasks):
     contact_obj = ContactSubmission(**input.model_dump())
@@ -181,118 +184,95 @@ async def create_contact_submission_debug(input: ContactSubmissionCreate):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# --------------------------------------------------------------------------------------
-# VAPI STRUCTURED EMAIL - HARDENED PARSER
-# --------------------------------------------------------------------------------------
-def _looks_like_placeholder_email(v: str) -> bool:
-    if not v:
-        return True
-    v = v.strip().lower()
-    return (
-        "your_test_email" in v
-        or "example.com" in v
-        or "yourdomain.com" in v
-        or v == "none"
-        or v == "null"
-    )
-
-
-def _extract_vapi_arguments(payload: Dict[str, Any]) -> Dict[str, Any]:
+# -----------------------------
+# Vapi tool endpoint (FAST + ROBUST)
+# -----------------------------
+def _extract_vapi_payload(raw: Any) -> Dict[str, Any]:
     """
-    Accepts either:
-      A) direct payload: { subject, request_type, resident_name, ... }
-      B) Vapi wrapper:  { toolCalls:[{ function:{ arguments:{...} OR arguments:"{...json...}" } }], ... }
-      C) alternative wrapper variants with toolCallList/toolWithToolCallList etc.
-
-    Returns the clean arguments dict if found, else returns the original payload.
+    Accepts:
+      - normal JSON body with the required fields
+      - Vapi-wrapped tool call bodies that contain { "arguments": "{...json...}" }
+      - other wrappers where args live under toolCalls[0].function.arguments
+    Returns: dict of fields.
     """
-    # If it's already the clean shape, just return it.
-    if isinstance(payload, dict) and payload.get("subject") and payload.get("request_type"):
-        return payload
+    if raw is None:
+        return {}
 
-    # Common locations Vapi may send:
-    candidates = []
+    if isinstance(raw, dict):
+        # direct payload
+        if "subject" in raw or "request_type" in raw:
+            return raw
 
-    # Vapi: toolCalls
-    tc = payload.get("toolCalls")
-    if isinstance(tc, list) and tc:
-        candidates.append(tc)
-
-    # Vapi: toolCallList
-    tcl = payload.get("toolCallList")
-    if isinstance(tcl, list) and tcl:
-        candidates.append(tcl)
-
-    # Some wrappers: message.toolCalls
-    msg = payload.get("message")
-    if isinstance(msg, dict):
-        msg_tc = msg.get("toolCalls")
-        if isinstance(msg_tc, list) and msg_tc:
-            candidates.append(msg_tc)
-
-    # Walk candidates and return first valid arguments
-    for toolcalls in candidates:
-        for item in toolcalls:
-            fn = (item or {}).get("function") or {}
-            args = fn.get("arguments")
-
-            # args might be dict already
+        # common: {"arguments": "{...}"} or {"arguments": {...}}
+        if "arguments" in raw:
+            args = raw.get("arguments")
+            if isinstance(args, str):
+                try:
+                    return json.loads(args)
+                except Exception:
+                    return {}
             if isinstance(args, dict):
                 return args
 
-            # args might be JSON string
-            if isinstance(args, str) and args.strip():
+        # possible wrapper: {"toolCalls":[{"function":{"arguments":{...}}}]}
+        tool_calls = raw.get("toolCalls") or raw.get("tool_calls") or raw.get("toolCallList")
+        if isinstance(tool_calls, list) and tool_calls:
+            fn = tool_calls[0].get("function") or {}
+            args = fn.get("arguments")
+            if isinstance(args, str):
                 try:
-                    parsed = json.loads(args)
-                    if isinstance(parsed, dict):
-                        return parsed
+                    return json.loads(args)
                 except Exception:
-                    # Not JSON; ignore
-                    pass
+                    return {}
+            if isinstance(args, dict):
+                return args
 
-    # Fall back to original payload (so we can log it if needed)
-    return payload
+        return raw
+
+    # if something weird
+    return {}
 
 
 @api_router.post("/vapi/send-structured-email")
-async def vapi_send_structured_email(request: Request):
+async def vapi_send_structured_email(request: Request, background_tasks: BackgroundTasks):
     try:
-        raw_payload = await request.json()
+        raw = await request.json()
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON body")
 
-    # Extract clean arguments from Vapi wrapper (or return raw if already clean)
-    payload = _extract_vapi_arguments(raw_payload)
+    payload = _extract_vapi_payload(raw)
 
-    # Required fields (keep aligned with what you actually need)
-    required = ["subject", "request_type", "resident_name", "resident_phone", "address", "details"]
+    # Required fields (matches your Vapi schema)
+    required = ["to", "subject", "request_type", "resident_name", "resident_phone", "address", "details"]
     missing = [k for k in required if not payload.get(k)]
-
-    # If missing, log the raw payload to help debugging (but don’t email garbage)
     if missing:
-        logging.warning(f"Vapi payload missing required fields: {missing}")
-        logging.info(f"Vapi raw payload received: {json.dumps(raw_payload)[:4000]}")
+        # Log exactly what we got to make debugging painless
+        logging.warning(f"Vapi payload missing fields: {missing}. Raw={raw}")
         raise HTTPException(status_code=400, detail=f"Missing required fields: {', '.join(missing)}")
 
-    # Fix "to" field: use it only if it looks real; otherwise fall back to RECIPIENT_EMAIL
-    to_value = payload.get("to")
-    if not to_value or _looks_like_placeholder_email(str(to_value)):
-        payload["to"] = os.getenv("RECIPIENT_EMAIL")
+    # Create a reference id so Vapi gets a success response instantly
+    reference_id = f"REQ-{uuid.uuid4().hex[:10].upper()}"
 
-    # Final sanity: if still no "to", fail cleanly
-    if not payload.get("to"):
-        raise HTTPException(status_code=500, detail="RECIPIENT_EMAIL is not configured on the server.")
+    # Send email in background (this is the key to stopping Vapi timeouts)
+    def _safe_send():
+        try:
+            # include reference id in the payload so your email template can show it if you want
+            payload_with_ref = dict(payload)
+            payload_with_ref["reference_id"] = reference_id
+            send_council_request_email(payload_with_ref)
+        except Exception:
+            logging.exception("Error sending Vapi structured email (background task).")
 
-    try:
-        # This function should build the final email body from the structured fields.
-        send_council_request_email(payload)
-    except EmailDeliveryError as e:
-        raise HTTPException(status_code=502, detail=f"Email delivery failed: {str(e)}")
-    except Exception:
-        logging.exception("Error processing Vapi structured email")
-        raise HTTPException(status_code=500, detail="Internal server error")
+    background_tasks.add_task(_safe_send)
 
-    return JSONResponse({"success": True})
+    # Immediate success response so the assistant does NOT say "couldn't help"
+    return JSONResponse(
+        {
+            "success": True,
+            "message": "Request lodged successfully.",
+            "reference_id": reference_id,
+        }
+    )
 
 
 app.include_router(api_router)
