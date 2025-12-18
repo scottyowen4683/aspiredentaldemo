@@ -178,7 +178,7 @@ export default function Business() {
             <div className="mt-6 space-y-3">
               <Bullet text="Voice + chat deployed fast." />
               <Bullet text="Framework-led governance and escalation." />
-              <Bullet text="No GHL / LeadConnector clutter." />
+              <Bullet text="Fast deployment." />
             </div>
           </div>
 
