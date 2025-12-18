@@ -2,11 +2,11 @@ from fastapi import FastAPI, APIRouter, HTTPException, BackgroundTasks, Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, EmailStr
-from typing import Optional
+from typing import Optional, Any, Dict
 from dotenv import load_dotenv
 from motor.motor_asyncio import AsyncIOMotorClient
 from pathlib import Path
-import os, uuid, logging
+import os, uuid, logging, json
 from datetime import datetime
 
 from emails import (
@@ -100,10 +100,11 @@ async def root():
     return {"message": "Aspire Executive Solutions API"}
 
 
+# --------------------------------------------------------------------------------------
+# CONTACT FORM
+# --------------------------------------------------------------------------------------
 @api_router.post("/contact", response_model=ContactResponse)
-async def create_contact_submission(
-    input: ContactSubmissionCreate, background_tasks: BackgroundTasks
-):
+async def create_contact_submission(input: ContactSubmissionCreate, background_tasks: BackgroundTasks):
     contact_obj = ContactSubmission(**input.model_dump())
 
     # 1) Best-effort DB persistence (Mongo optional)
@@ -122,8 +123,7 @@ async def create_contact_submission(
                 contact_obj.name,
                 contact_obj.email,
                 contact_obj.phone or "",
-                (f"Organisation: {contact_obj.org}\n\n" if contact_obj.org else "")
-                + contact_obj.message,
+                (f"Organisation: {contact_obj.org}\n\n" if contact_obj.org else "") + contact_obj.message,
             )
         except Exception:
             logging.exception("Contact email send failed.")
@@ -146,10 +146,9 @@ def debug_env():
 
     return {
         "BREVO_API_KEY_set": bool(os.getenv("BREVO_API_KEY")),
-        "BREVO_PASSWORD_set": bool(os.getenv("BREVO_PASSWORD")),
         "SENDER_EMAIL": os.getenv("SENDER_EMAIL"),
         "RECIPIENT_EMAIL": os.getenv("RECIPIENT_EMAIL"),
-        "BREVO_API_KEY_preview": mask(os.getenv("BREVO_API_KEY") or os.getenv("BREVO_PASSWORD")),
+        "BREVO_API_KEY_preview": mask(os.getenv("BREVO_API_KEY")),
         "MONGO_URL_set": bool(os.getenv("MONGO_URL")),
         "DB_NAME": os.getenv("DB_NAME", "app_db"),
     }
@@ -172,8 +171,7 @@ async def create_contact_submission_debug(input: ContactSubmissionCreate):
             contact_obj.name,
             contact_obj.email,
             contact_obj.phone or "",
-            (f"Organisation: {contact_obj.org}\n\n" if contact_obj.org else "")
-            + contact_obj.message,
+            (f"Organisation: {contact_obj.org}\n\n" if contact_obj.org else "") + contact_obj.message,
         )
         return ContactResponse(status="success", message="Email sent (debug).", id=contact_obj.id)
     except EmailDeliveryError as e:
@@ -184,37 +182,109 @@ async def create_contact_submission_debug(input: ContactSubmissionCreate):
 
 
 # --------------------------------------------------------------------------------------
-# Vapi structured email endpoint (tolerant normalisation)
-# - Vapi payloads are not guaranteed to match exact field names every time.
-# - We normalise common variants and require only meaningful content.
+# VAPI STRUCTURED EMAIL - HARDENED PARSER
 # --------------------------------------------------------------------------------------
+def _looks_like_placeholder_email(v: str) -> bool:
+    if not v:
+        return True
+    v = v.strip().lower()
+    return (
+        "your_test_email" in v
+        or "example.com" in v
+        or "yourdomain.com" in v
+        or v == "none"
+        or v == "null"
+    )
+
+
+def _extract_vapi_arguments(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Accepts either:
+      A) direct payload: { subject, request_type, resident_name, ... }
+      B) Vapi wrapper:  { toolCalls:[{ function:{ arguments:{...} OR arguments:"{...json...}" } }], ... }
+      C) alternative wrapper variants with toolCallList/toolWithToolCallList etc.
+
+    Returns the clean arguments dict if found, else returns the original payload.
+    """
+    # If it's already the clean shape, just return it.
+    if isinstance(payload, dict) and payload.get("subject") and payload.get("request_type"):
+        return payload
+
+    # Common locations Vapi may send:
+    candidates = []
+
+    # Vapi: toolCalls
+    tc = payload.get("toolCalls")
+    if isinstance(tc, list) and tc:
+        candidates.append(tc)
+
+    # Vapi: toolCallList
+    tcl = payload.get("toolCallList")
+    if isinstance(tcl, list) and tcl:
+        candidates.append(tcl)
+
+    # Some wrappers: message.toolCalls
+    msg = payload.get("message")
+    if isinstance(msg, dict):
+        msg_tc = msg.get("toolCalls")
+        if isinstance(msg_tc, list) and msg_tc:
+            candidates.append(msg_tc)
+
+    # Walk candidates and return first valid arguments
+    for toolcalls in candidates:
+        for item in toolcalls:
+            fn = (item or {}).get("function") or {}
+            args = fn.get("arguments")
+
+            # args might be dict already
+            if isinstance(args, dict):
+                return args
+
+            # args might be JSON string
+            if isinstance(args, str) and args.strip():
+                try:
+                    parsed = json.loads(args)
+                    if isinstance(parsed, dict):
+                        return parsed
+                except Exception:
+                    # Not JSON; ignore
+                    pass
+
+    # Fall back to original payload (so we can log it if needed)
+    return payload
+
+
 @api_router.post("/vapi/send-structured-email")
 async def vapi_send_structured_email(request: Request):
     try:
-        raw = await request.json()
+        raw_payload = await request.json()
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON body")
 
-    # Normalise inbound payload
-    payload = {
-        "to": raw.get("to"),
-        "subject": raw.get("subject") or "New Council Request",
-        "request_type": raw.get("request_type") or raw.get("type") or "General enquiry",
-        "resident_name": raw.get("resident_name") or raw.get("name") or "Unknown",
-        "resident_phone": raw.get("resident_phone") or raw.get("phone") or "Not provided",
-        "resident_email": raw.get("resident_email") or raw.get("email") or None,
-        "address": raw.get("address") or raw.get("location") or "Not provided",
-        "preferred_contact_method": raw.get("preferred_contact_method") or raw.get("preferred_contact") or None,
-        "urgency": raw.get("urgency") or "Normal",
-        "details": raw.get("details") or raw.get("message") or raw.get("notes") or None,
-        "extra_metadata": raw.get("extra_metadata") or raw,
-    }
+    # Extract clean arguments from Vapi wrapper (or return raw if already clean)
+    payload = _extract_vapi_arguments(raw_payload)
 
-    # Minimum viable requirement: we need actual content to send
-    if not payload.get("details"):
-        raise HTTPException(status_code=400, detail="Missing required content: details/message/notes")
+    # Required fields (keep aligned with what you actually need)
+    required = ["subject", "request_type", "resident_name", "resident_phone", "address", "details"]
+    missing = [k for k in required if not payload.get(k)]
+
+    # If missing, log the raw payload to help debugging (but don’t email garbage)
+    if missing:
+        logging.warning(f"Vapi payload missing required fields: {missing}")
+        logging.info(f"Vapi raw payload received: {json.dumps(raw_payload)[:4000]}")
+        raise HTTPException(status_code=400, detail=f"Missing required fields: {', '.join(missing)}")
+
+    # Fix "to" field: use it only if it looks real; otherwise fall back to RECIPIENT_EMAIL
+    to_value = payload.get("to")
+    if not to_value or _looks_like_placeholder_email(str(to_value)):
+        payload["to"] = os.getenv("RECIPIENT_EMAIL")
+
+    # Final sanity: if still no "to", fail cleanly
+    if not payload.get("to"):
+        raise HTTPException(status_code=500, detail="RECIPIENT_EMAIL is not configured on the server.")
 
     try:
+        # This function should build the final email body from the structured fields.
         send_council_request_email(payload)
     except EmailDeliveryError as e:
         raise HTTPException(status_code=502, detail=f"Email delivery failed: {str(e)}")
