@@ -22,7 +22,7 @@ export default function AgentsChat() {
         <div className="relative">
           <p className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-4 py-2 text-xs text-white/70">
             <ShieldCheck className="h-4 w-4" />
-            Chat Agents • Governed by the ASPIRE™ Enterprise AI Framework
+            Chat Agents. Governed by the ASPIRE™ Enterprise AI Framework.
           </p>
 
           <h1 className="mt-6 text-4xl md:text-6xl font-semibold tracking-tight">
@@ -31,9 +31,9 @@ export default function AgentsChat() {
           </h1>
 
           <p className="mt-5 max-w-3xl text-base md:text-lg text-white/70 leading-relaxed">
-            A premium web chat experience designed for real service delivery:
-            grounded answers, controlled escalation, and structured capture —
-            without the pop-up widget chaos.
+            A premium web chat experience designed for service delivery.
+            Grounded answers, controlled escalation, and structured capture,
+            without pop-up widget chaos.
           </p>
 
           {/* Capability row */}
@@ -41,17 +41,17 @@ export default function AgentsChat() {
             <ValueCard
               icon={<BookOpenCheck className="h-4 w-4" />}
               title="Knowledge precision"
-              text="Grounded responses that stay inside scope — designed to reduce hallucinations and policy risk."
+              text="Grounded responses that stay inside scope. Designed to reduce hallucinations, policy risk, and unnecessary escalation."
             />
             <ValueCard
               icon={<Workflow className="h-4 w-4" />}
               title="Clean handover"
-              text="Escalation that feels intentional: captures the right details and hands over with context your team can use."
+              text="Escalation that feels intentional. Captures the right details and hands over with context teams can action immediately."
             />
             <ValueCard
               icon={<LineChart className="h-4 w-4" />}
               title="Measurable outcomes"
-              text="Real-time reporting in the Aspire Portal: top questions, deflection signals, resolution vs escalation, and failure modes."
+              text="Real-time reporting via the Aspire Portal. Track top questions, deflection signals, resolution versus escalation, and failure modes."
             />
           </div>
 
@@ -87,8 +87,8 @@ export default function AgentsChat() {
               title="Best for"
               bullets={[
                 "High-volume FAQs and self-service deflection",
-                "Capturing enquiry details cleanly (without forms that feel like work)",
-                "Routing to the right team with context",
+                "Capturing enquiry details cleanly, without forms that feel like work",
+                "Routing to the right team with usable context",
                 "Reducing repeat contacts and follow-up loops",
                 "Supporting after-hours service without degrading quality",
               ]}
@@ -98,7 +98,7 @@ export default function AgentsChat() {
               bullets={[
                 "Controlled answers grounded in approved sources",
                 "Escalation rules for sensitive topics and edge cases",
-                "Structured capture (intent, contact, urgency) when required",
+                "Structured capture of intent, contact, and urgency when required",
                 "Governed deployment under the ASPIRE™ Framework",
                 "Monthly optimisation based on real conversations",
               ]}
@@ -109,17 +109,20 @@ export default function AgentsChat() {
           <div className="mt-10 rounded-3xl border border-white/10 bg-black/20 p-10">
             <p className="text-2xl md:text-3xl font-semibold tracking-tight">
               Visibility through the Aspire Portal.
-              <span className="text-white/70"> Continuous improvement by design.</span>
+              <span className="text-white/70">
+                {" "}
+                Continuous improvement by design.
+              </span>
             </p>
             <p className="mt-3 max-w-3xl text-sm md:text-base text-white/70 leading-relaxed">
               Chat should be measurable, not mysterious. The Aspire Portal shows
-              what people asked, what was resolved, what escalated, where the
+              what people asked, what resolved, what escalated, where the
               knowledge is weak, and what to tune next.
             </p>
 
             <div className="mt-6 grid gap-3 md:grid-cols-2">
               <Bullet text="Top enquiry themes and emerging issues" />
-              <Bullet text="Resolution vs escalation with reasons" />
+              <Bullet text="Resolution versus escalation with reasons" />
               <Bullet text="Deflection signals and workload reduction" />
               <Bullet text="Knowledge gaps and recommended updates" />
             </div>
