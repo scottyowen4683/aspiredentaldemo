@@ -23,7 +23,7 @@ export default function Agents() {
         <div className="relative">
           <p className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-4 py-2 text-xs text-white/70">
             <ShieldCheck className="h-4 w-4" />
-            Aspire AI Agents • Governed by the ASPIRE™ Enterprise AI Framework
+            Aspire AI Agents. Governed by the ASPIRE™ Enterprise AI Framework.
           </p>
 
           <h1 className="mt-6 text-4xl md:text-6xl font-semibold tracking-tight">
@@ -32,9 +32,9 @@ export default function Agents() {
           </h1>
 
           <p className="mt-5 max-w-3xl text-base md:text-lg text-white/70 leading-relaxed">
-            Voice, chat, and outbound agents — designed for real operations, not
-            demos. Built with guardrails, escalation, and measurable outcomes,
-            and reported in real time through the{" "}
+            Voice, chat, and outbound agents designed for real operations, not
+            demos. Built with guardrails, controlled escalation, and measurable
+            outcomes. Reported in real time through the{" "}
             <span className="text-white/85 font-semibold">Aspire Portal</span>.
           </p>
 
@@ -43,17 +43,17 @@ export default function Agents() {
             <ValueCard
               icon={<Gauge className="h-4 w-4" />}
               title="High throughput"
-              text="Designed to scale — including handling high-volume periods (up to ~1000 calls per minute, deployment-dependent)."
+              text="Architected for reliability under load, including high-volume periods. Capacity is deployment dependent and engineered, not assumed."
             />
             <ValueCard
               icon={<LineChart className="h-4 w-4" />}
               title="Real-time reporting"
-              text="See what people asked, what was resolved, what escalated, and where optimisation is required."
+              text="See what people asked, what resolved, what escalated, and where optimisation is required. Visibility is operational, not vanity metrics."
             />
             <ValueCard
               icon={<Workflow className="h-4 w-4" />}
               title="Controlled outcomes"
-              text="Triage → action → escalation. Clean handover summaries your team can act on immediately."
+              text="Triage, action, escalation. Clean handover summaries so your team receives context and urgency in a format they can act on."
             />
           </div>
 
@@ -62,7 +62,7 @@ export default function Agents() {
             <AgentCard
               icon={<PhoneCall className="h-4 w-4" />}
               title="Voice Agents"
-              text="Instant call answering, intent capture, triage, and clean escalation — with a calm, consistent tone."
+              text="Instant call answering with structured triage, intent capture, and controlled escalation. Calm, consistent tone by design."
               highlights={[
                 "Fast pickup and structured triage",
                 "Consent-aware and escalation-ready",
@@ -73,7 +73,7 @@ export default function Agents() {
             <AgentCard
               icon={<MessageSquare className="h-4 w-4" />}
               title="Chat Agents"
-              text="Premium web chat that resolves common enquiries and routes the rest — without clunky UX or dead ends."
+              text="Premium web chat that resolves common enquiries and routes the rest. Grounded answers, controlled behaviour, and clean handover."
               highlights={[
                 "Grounded answers and safe fallback",
                 "Short answers by default, detail on request",
@@ -84,10 +84,10 @@ export default function Agents() {
             <AgentCard
               icon={<Zap className="h-4 w-4" />}
               title="Outbound Agents"
-              text="Controlled outbound for callbacks, confirmations, and proactive updates — designed to protect the brand."
+              text="Controlled outbound for callbacks, confirmations, reminders, and proactive updates. Consent-first and brand-protective."
               highlights={[
                 "Consent-first outbound logic",
-                "Guardrails + escalation",
+                "Guardrails and escalation paths",
                 "Measured outcomes and reporting",
               ]}
               to="/agents/outbound"
@@ -106,10 +106,10 @@ export default function Agents() {
                   </span>
                 </p>
                 <p className="mt-3 text-sm md:text-base text-white/70 leading-relaxed">
-                  Every interaction becomes operational intelligence — not
-                  noise. Track volumes, top enquiries, resolution vs escalation,
+                  Every interaction becomes operational intelligence, not noise.
+                  Track volumes, top enquiries, resolution versus escalation,
                   failure modes, and optimisation opportunities. This is how
-                  Aspire stays premium in production: measurable, governed, and
+                  Aspire stays premium in production. Measurable, governed, and
                   continuously improved.
                 </p>
                 <div className="mt-6 grid gap-3 md:grid-cols-2">
@@ -128,8 +128,8 @@ export default function Agents() {
                   See the Framework <ArrowRight className="h-4 w-4" />
                 </Link>
                 <div className="mt-3 text-xs text-white/55 max-w-[260px]">
-                  Agents are deployed under governance, reporting, and control —
-                  not “set and forget”.
+                  Agents are deployed under governance, reporting, and control.
+                  This is not set and forget.
                 </div>
               </div>
             </div>
