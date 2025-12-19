@@ -15,10 +15,7 @@ def _get_brevo_api_instance():
     )
 
 
-# -------------------------------------------------
-# CONTACT FORM EMAIL
-# -------------------------------------------------
-def send_contact_notification(name: str, email: str, phone: str, message: str) -> bool:
+def send_contact_notification(name: str, email: str, phone: str, message: str):
     api_instance = _get_brevo_api_instance()
 
     sender_email = os.environ.get("SENDER_EMAIL")
@@ -38,28 +35,38 @@ def send_contact_notification(name: str, email: str, phone: str, message: str) -
     )
 
     try:
-        response = api_instance.send_transac_email(email_obj)
-
-        # Brevo returns a dict-like object with messageId on success
-        if not response or not getattr(response, "message_id", None):
-            raise EmailDeliveryError("Brevo did not confirm delivery (no message_id)")
-
-        return True
-
+        return api_instance.send_transac_email(email_obj)
     except ApiException as e:
         raise EmailDeliveryError(f"Brevo API error: {e}")
 
 
-# -------------------------------------------------
-# VAPI STRUCTURED COUNCIL EMAIL
-# -------------------------------------------------
-def send_council_request_email(payload: dict) -> bool:
+def send_council_request_email(payload: dict):
+    """
+    Sends a structured council request email via Brevo.
+
+    IMPORTANT SECURITY / RELIABILITY:
+    - Do NOT trust the LLM/tool payload to decide the recipient inbox.
+    - Recipient is forced server-side using COUNCIL_INBOX_EMAIL (preferred),
+      otherwise RECIPIENT_EMAIL.
+    """
     api_instance = _get_brevo_api_instance()
 
     sender_email = os.environ.get("SENDER_EMAIL")
-    recipient_email = payload.get("to") or os.environ.get("RECIPIENT_EMAIL")
 
-    subject = payload.get("subject", "New Council Request")
+    # FORCE recipient to a known inbox (do not trust payload["to"])
+    recipient_email = (
+        os.environ.get("COUNCIL_INBOX_EMAIL")
+        or os.environ.get("RECIPIENT_EMAIL")
+    )
+
+    if not sender_email:
+        raise EmailDeliveryError("Missing SENDER_EMAIL environment variable.")
+    if not recipient_email:
+        raise EmailDeliveryError("Missing COUNCIL_INBOX_EMAIL / RECIPIENT_EMAIL environment variable.")
+    if not os.environ.get("BREVO_API_KEY"):
+        raise EmailDeliveryError("Missing BREVO_API_KEY environment variable.")
+
+    subject = payload.get("subject") or "New Council Request"
 
     html_content = f"""
         <h2>New Council Request – {payload.get('request_type', '')}</h2>
@@ -72,6 +79,10 @@ def send_council_request_email(payload: dict) -> bool:
         <p><strong>Details:</strong><br>{payload.get('details', '')}</p>
         <h3>Extra metadata</h3>
         <pre>{payload.get('extra_metadata') or ''}</pre>
+        <hr>
+        <p style="font-size:12px;color:#666;">
+          Tool payload 'to' (ignored for delivery): {payload.get('to', '')}
+        </p>
     """
 
     email_obj = sib_api_v3_sdk.SendSmtpEmail(
@@ -82,12 +93,7 @@ def send_council_request_email(payload: dict) -> bool:
     )
 
     try:
-        response = api_instance.send_transac_email(email_obj)
-
-        if not response or not getattr(response, "message_id", None):
-            raise EmailDeliveryError("Brevo did not confirm delivery (no message_id)")
-
-        return True
-
+        # Returns a CreateSmtpEmail object (messageId, etc.)
+        return api_instance.send_transac_email(email_obj)
     except ApiException as e:
         raise EmailDeliveryError(f"Brevo API error: {e}")
