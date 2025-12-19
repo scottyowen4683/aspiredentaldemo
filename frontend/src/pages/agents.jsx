@@ -58,7 +58,7 @@ export default function Agents() {
           </div>
 
           {/* Agent cards */}
-          <div className="mt-10 grid gap-6 md:grid-cols-3">
+          <div className="mt-10 grid items-stretch gap-6 md:grid-cols-3">
             <AgentCard
               icon={<PhoneCall className="h-4 w-4" />}
               title="Voice Agents"
@@ -100,10 +100,7 @@ export default function Agents() {
               <div className="max-w-3xl">
                 <p className="text-2xl md:text-3xl font-semibold tracking-tight">
                   The Aspire Portal
-                  <span className="text-white/70">
-                    {" "}
-                    makes performance visible.
-                  </span>
+                  <span className="text-white/70"> makes performance visible.</span>
                 </p>
                 <p className="mt-3 text-sm md:text-base text-white/70 leading-relaxed">
                   Every interaction becomes operational intelligence, not noise.
@@ -187,7 +184,7 @@ function AgentCard({ icon, title, text, highlights, to }) {
   return (
     <Link
       to={to}
-      className="group rounded-3xl border border-white/10 bg-white/5 p-8 hover:bg-white/10 transition-colors"
+      className="group flex h-full flex-col rounded-3xl border border-white/10 bg-white/5 p-8 hover:bg-white/10 transition-colors"
     >
       <div className="flex items-center gap-2 text-white/85">
         <div className="rounded-2xl border border-white/15 bg-white/5 p-3 group-hover:bg-white/10">
@@ -204,7 +201,7 @@ function AgentCard({ icon, title, text, highlights, to }) {
         ))}
       </div>
 
-      <div className="mt-6 inline-flex items-center gap-2 text-sm font-semibold text-white/85">
+      <div className="mt-auto pt-6 inline-flex items-center gap-2 text-sm font-semibold text-white/85">
         Explore <ArrowRight className="h-4 w-4" />
       </div>
     </Link>
