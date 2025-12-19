@@ -193,7 +193,10 @@ function AgentCard({ icon, title, text, highlights, to }) {
         <p className="text-lg font-semibold">{title}</p>
       </div>
 
-      <p className="mt-4 text-sm text-white/70 leading-relaxed">{text}</p>
+      {/* THIS IS THE ONLY CHANGE: lock description height so bullet blocks align */}
+      <p className="mt-4 text-sm text-white/70 leading-relaxed md:line-clamp-3 md:min-h-[4.5rem]">
+        {text}
+      </p>
 
       <div className="mt-5 space-y-2">
         {highlights.map((h) => (
