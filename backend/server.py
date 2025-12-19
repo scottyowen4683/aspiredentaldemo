@@ -223,12 +223,8 @@ async def vapi_send_structured_email(request: Request):
         logging.exception("Unexpected email error")
         raise HTTPException(status_code=500, detail="Internal error")
 
-    return JSONResponse(
-        {
-            "success": True,
-            "reference_id": reference_id,
-        }
-    )
+   return JSONResponse({})
+
 
 
 app.include_router(api_router)
