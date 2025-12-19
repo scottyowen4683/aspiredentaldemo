@@ -25,13 +25,13 @@ export default function Framework() {
           </p>
 
           <h1 className="mt-6 text-4xl md:text-6xl font-semibold tracking-tight">
-            Build AI that’s trusted.
-            <span className="text-white/70"> Not AI that’s “cool”.</span>
+            Build AI that is trusted.
+            <span className="text-white/70"> Not AI that is trendy.</span>
           </h1>
 
           <p className="mt-5 max-w-2xl text-base md:text-lg text-white/70 leading-relaxed">
-            The ASPIRE™ Enterprise AI Framework is the operating system behind
-            every Aspire deployment, ensuring your voice and chat agents are
+            The ASPIRE™ Enterprise AI Framework is the operating model behind
+            every Aspire deployment. It ensures your voice and chat agents are
             governed, measurable, and reliable in production.
           </p>
 
@@ -59,17 +59,17 @@ export default function Framework() {
           <div className="mt-10 grid gap-4 md:grid-cols-3">
             <ValueCard
               icon={<Layers className="h-4 w-4" />}
-              title="Governed Architecture"
-              text="Clear boundaries, safe escalation, and predictable behaviour."
+              title="Governed architecture"
+              text="Clear boundaries, controlled escalation, and predictable behaviour."
             />
             <ValueCard
               icon={<Workflow className="h-4 w-4" />}
               title="Action, not chat"
-              text="Structured workflows that create outcomes — not transcripts."
+              text="Structured workflows designed to produce outcomes, not transcripts."
             />
             <ValueCard
               icon={<LineChart className="h-4 w-4" />}
-              title="Measurable lift"
+              title="Measured impact"
               text="Resolution, deflection, satisfaction, and operational ROI."
             />
           </div>
@@ -86,12 +86,12 @@ export default function Framework() {
         <Principle
           icon={<BookOpenCheck className="h-5 w-5" />}
           title="Knowledge precision"
-          text="We reduce hallucinations by designing how knowledge is sourced, framed, and cited, and by controlling what the agent is allowed to say."
+          text="We reduce hallucinations by governing how knowledge is sourced, framed, and controlled, including what the agent is allowed to say."
         />
         <Principle
           icon={<Workflow className="h-5 w-5" />}
           title="Workflow orchestration"
-          text="AI isn’t valuable because it talks. It’s valuable because it can trigger the right actions, emails, summaries, tickets, routing, callbacks."
+          text="AI is not valuable because it talks. It is valuable because it triggers the right actions, emails, summaries, tickets, routing, and callbacks."
         />
         <Principle
           icon={<LineChart className="h-5 w-5" />}
@@ -103,16 +103,16 @@ export default function Framework() {
       {/* THE FRAMEWORK (pillars) */}
       <section className="rounded-3xl border border-white/10 bg-white/5 p-10 md:p-14">
         <h2 className="text-3xl md:text-4xl font-semibold tracking-tight">
-          The Framework Pillars
+          The framework pillars
         </h2>
         <p className="mt-4 max-w-3xl text-white/70 leading-relaxed">
-          A premium deployment isn’t a prompt. It’s a system. These pillars keep
-          your agents consistent, controllable, and credible.
+          A premium deployment is not a prompt. It is a system. These pillars
+          keep your agents consistent, controllable, and credible.
         </p>
 
         <div className="mt-10 grid gap-6 md:grid-cols-2 lg:grid-cols-3">
           <Pillar
-            title="1) Intent & Triage"
+            title="1) Intent and triage"
             points={[
               "Classify the enquiry quickly and correctly.",
               "Route sensitive matters to humans.",
@@ -120,49 +120,49 @@ export default function Framework() {
             ]}
           />
           <Pillar
-            title="2) Knowledge Design"
+            title="2) Knowledge design"
             points={[
               "Ground answers in approved sources.",
               "Control confidence and uncertainty.",
-              "Avoid policy risk and made-up answers.",
+              "Avoid policy risk and invented answers.",
             ]}
           />
           <Pillar
-            title="3) Experience & Tone"
+            title="3) Experience and tone"
             points={[
               "Human, calm, and consistent delivery.",
-              "No robotic phrasing or ‘AI vibes’.",
-              "Short answers by default; detail on request.",
+              "No robotic phrasing or performative AI language.",
+              "Short answers by default, detail on request.",
             ]}
           />
           <Pillar
-            title="4) Escalation & Handover"
+            title="4) Escalation and handover"
             points={[
-              "Summaries that humans can act on.",
+              "Summaries that humans can action.",
               "Clear next steps for staff.",
-              "Callback logic for high intent queries.",
+              "Callback logic for high intent enquiries.",
             ]}
           />
           <Pillar
-            title="5) Automation & Integrations"
+            title="5) Automation and integrations"
             points={[
-              "Email/SMS/API actions that are auditable.",
-              "Bookings, requests, workflows triggered reliably.",
+              "Email, SMS, and API actions that are auditable.",
+              "Bookings, requests, and workflows triggered reliably.",
               "Designed to work with existing systems.",
             ]}
           />
           <Pillar
-            title="6) Performance & Reporting"
+            title="6) Performance and reporting"
             points={[
-              "Deflection, resolution, satisfaction measured.",
+              "Deflection, resolution, and satisfaction measured.",
               "Top questions and failure modes tracked.",
-              "Monthly optimisation, not set-and-forget.",
+              "Monthly optimisation, not set and forget.",
             ]}
           />
         </div>
       </section>
 
-      {/* ASPIRE PORTAL (added) */}
+      {/* ASPIRE PORTAL */}
       <section className="relative overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-br from-white/10 to-white/5 p-10 md:p-14">
         <div className="absolute -top-24 -left-24 h-72 w-72 rounded-full bg-indigo-500/15 blur-3xl" />
         <div className="absolute -bottom-24 -right-24 h-72 w-72 rounded-full bg-cyan-400/10 blur-3xl" />
@@ -174,39 +174,39 @@ export default function Framework() {
           </p>
 
           <h2 className="mt-6 text-3xl md:text-4xl font-semibold tracking-tight">
-            Oversight, assurance, and control — without guesswork.
+            Oversight, assurance, and control without guesswork.
           </h2>
           <p className="mt-4 max-w-3xl text-white/70 leading-relaxed">
-            The Aspire Portal is the operational layer behind your AI agents.
-            It’s where leaders and teams gain visibility into what the agent is
-            handling, how it’s performing, and where escalation is occurring —
+            The Aspire Portal is the operational layer behind your AI agents. It
+            is where leaders and teams gain visibility into what the agent is
+            handling, how it is performing, and where escalation is occurring,
             so AI becomes governable, measurable, and continuously improvable.
           </p>
 
           <div className="mt-10 grid gap-6 md:grid-cols-2 lg:grid-cols-3">
             <PortalCard
               title="Operational visibility"
-              text="See what people ask, what the agent answers, and what gets escalated across voice and chat."
+              text="See what people ask, what the agent answers, and what escalates across voice and chat."
             />
             <PortalCard
               title="Performance reporting"
-              text="Track deflection, resolution, escalation rates, and top intents with outcomes you can actually measure."
+              text="Track deflection, resolution, escalation rates, and top intents with outcomes you can measure."
             />
             <PortalCard
               title="Quality assurance"
               text="Identify failure modes, refine prompts and flows, and lift performance without rebuilding the system."
             />
             <PortalCard
-              title="Governance & defensibility"
+              title="Governance and defensibility"
               text="Designed for auditability and controlled behaviour aligned to Essential Eight (ML2) principles."
             />
             <PortalCard
               title="Continuous optimisation"
-              text="Monthly tuning based on real enquiries, not assumptions, improving outcomes over time."
+              text="Monthly tuning based on real enquiries, improving outcomes over time."
             />
             <PortalCard
               title="Enterprise readiness"
-              text="A premium AI deployment isn’t a chatbot, it’s a managed service with control and accountability."
+              text="A premium AI deployment is a managed service with control and accountability."
             />
           </div>
 
@@ -227,7 +227,7 @@ export default function Framework() {
         </div>
       </section>
 
-      {/* WHO IT'S FOR */}
+      {/* WHO IT IS FOR */}
       <section className="grid gap-6 md:grid-cols-2">
         <UseCase
           title="Government"
@@ -235,13 +235,13 @@ export default function Framework() {
           bullets={[
             "After-hours coverage without compromising standards.",
             "Handles common enquiries with controlled boundaries.",
-            "Supports disaster/event comms with rapid updates.",
+            "Supports disaster and event communications with rapid updates.",
           ]}
           cta={{ label: "Explore Government", to: "/government" }}
         />
         <UseCase
           title="Business"
-          subtitle="Built for conversion, time-savings, and operational lift."
+          subtitle="Built for conversion, time savings, and operational lift."
           bullets={[
             "Capture missed calls and high intent leads.",
             "Automate bookings, follow ups, and callbacks.",
@@ -259,7 +259,7 @@ export default function Framework() {
               Want the framework applied to your organisation?
             </p>
             <p className="mt-3 text-white/70 max-w-2xl">
-              Tell us what you want the agent to handle. We’ll respond with a
+              Tell us what you want the agent to handle. We will respond with a
               clear recommendation and a clean path to deployment.
             </p>
           </div>
