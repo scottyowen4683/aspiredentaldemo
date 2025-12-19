@@ -1,12 +1,12 @@
-from fastapi import FastAPI, APIRouter, HTTPException, BackgroundTasks, Request, Body
+from fastapi import FastAPI, APIRouter, HTTPException, BackgroundTasks, Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, EmailStr
-from typing import Optional, Any, Dict
+from typing import Optional
 from dotenv import load_dotenv
 from motor.motor_asyncio import AsyncIOMotorClient
 from pathlib import Path
-import os, uuid, logging, json
+import os, uuid, logging
 from datetime import datetime
 
 from emails import (
@@ -18,42 +18,46 @@ from emails import (
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
 
-# -----------------------------
-# Mongo (OPTIONAL)
-# -----------------------------
-MONGO_URL = os.environ.get("MONGO_URL")
+# --------------------------------------------------------------------------------------
+# MongoDB (CONTACT FORM ONLY; OPTIONAL)
+# --------------------------------------------------------------------------------------
+MONGO_URL = os.environ.get("MONGO_URL")  # leave unset to disable Mongo entirely
 DB_NAME = os.environ.get("DB_NAME", "app_db")
 
 mongo_client: Optional[AsyncIOMotorClient] = None
-mongo_db = None
+mongo_db = None  # only used for contact form persistence
 
 
 async def init_mongo():
     global mongo_client, mongo_db
+
     if not MONGO_URL:
-        logging.info("Mongo disabled.")
+        logging.info("Mongo not configured (MONGO_URL not set). Contact storage disabled.")
+        mongo_client = None
+        mongo_db = None
         return
+
     try:
         mongo_client = AsyncIOMotorClient(MONGO_URL, serverSelectionTimeoutMS=3000)
         await mongo_client.admin.command("ping")
         mongo_db = mongo_client[DB_NAME]
-        logging.info("Mongo connected.")
-    except Exception:
-        logging.warning("Mongo unavailable. Continuing without DB.")
+        logging.info("Mongo connected (contact form storage enabled).")
+    except Exception as e:
+        logging.warning(f"Mongo unavailable; continuing without it. Error: {repr(e)}")
         mongo_client = None
         mongo_db = None
 
 
-# -----------------------------
-# App
-# -----------------------------
 app = FastAPI()
 api_router = APIRouter(prefix="/api")
 
 
-# -----------------------------
-# Models
-# -----------------------------
+# --- basic root so Render GET / isn't a 404 ---
+@app.get("/")
+def home():
+    return {"ok": True, "service": "ai-reception", "version": "vapi-email-stable"}
+
+
 class ContactSubmission(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     name: str
@@ -79,9 +83,6 @@ class ContactResponse(BaseModel):
     id: str
 
 
-# -----------------------------
-# Startup / Shutdown
-# -----------------------------
 @app.on_event("startup")
 async def on_startup():
     logging.basicConfig(level=logging.INFO)
@@ -89,173 +90,129 @@ async def on_startup():
 
 
 @app.on_event("shutdown")
-async def shutdown():
-    if mongo_client:
-        mongo_client.close()
+async def shutdown_db_client():
+    global mongo_client
+    try:
+        if mongo_client is not None:
+            mongo_client.close()
+            mongo_client = None
+    except Exception:
+        pass
 
 
-# -----------------------------
-# Health
-# -----------------------------
 @api_router.get("/")
 async def root():
     return {"message": "Aspire Executive Solutions API"}
 
 
-# -----------------------------
-# Contact form
-# -----------------------------
 @api_router.post("/contact", response_model=ContactResponse)
-async def create_contact_submission(
-    input: ContactSubmissionCreate,
-    background_tasks: BackgroundTasks,
-):
-    contact = ContactSubmission(**input.model_dump())
+async def create_contact_submission(input: ContactSubmissionCreate, background_tasks: BackgroundTasks):
+    contact_obj = ContactSubmission(**input.model_dump())
 
+    # 1) Best-effort DB persistence (Mongo optional)
     try:
-        if mongo_db:
-            await mongo_db.contact_submissions.insert_one(contact.model_dump())
+        if mongo_db is not None:
+            await mongo_db.contact_submissions.insert_one(contact_obj.model_dump())
+        else:
+            logging.info("Mongo disabled/unavailable; skipping DB insert.")
     except Exception:
-        logging.exception("Mongo insert failed")
+        logging.exception("Mongo insert failed; continuing without DB persistence.")
 
-    background_tasks.add_task(
-        send_contact_notification,
-        contact.name,
-        contact.email,
-        contact.phone or "",
-        (f"Organisation: {contact.org}\n\n" if contact.org else "") + contact.message,
-    )
+    # 2) Best-effort email (never break UX)
+    def _safe_send():
+        try:
+            send_contact_notification(
+                contact_obj.name,
+                contact_obj.email,
+                contact_obj.phone or "",
+                (f"Organisation: {contact_obj.org}\n\n" if contact_obj.org else "") + contact_obj.message,
+            )
+        except Exception:
+            logging.exception("Contact email send failed.")
+
+    background_tasks.add_task(_safe_send)
 
     return ContactResponse(
         status="success",
-        message="Thank you for contacting us. We'll get back to you shortly.",
-        id=contact.id,
+        message="Thank you for contacting us. We'll get back to you within 24 hours.",
+        id=contact_obj.id,
     )
 
 
-# -----------------------------
-# Env debug
-# -----------------------------
 @api_router.get("/debug/env")
 def debug_env():
+    def mask(v: Optional[str]):
+        if not v:
+            return None
+        return v[:4] + "..." + v[-4:] if len(v) > 8 else v
+
     return {
         "BREVO_API_KEY_set": bool(os.getenv("BREVO_API_KEY")),
         "SENDER_EMAIL": os.getenv("SENDER_EMAIL"),
         "RECIPIENT_EMAIL": os.getenv("RECIPIENT_EMAIL"),
+        "COUNCIL_INBOX_EMAIL": os.getenv("COUNCIL_INBOX_EMAIL"),
+        "BREVO_API_KEY_preview": mask(os.getenv("BREVO_API_KEY")),
         "MONGO_URL_set": bool(os.getenv("MONGO_URL")),
+        "DB_NAME": os.getenv("DB_NAME", "app_db"),
     }
 
 
-# -----------------------------
-# Vapi payload helpers
-# -----------------------------
-def _try_json(val: Any):
-    if isinstance(val, str):
-        try:
-            return json.loads(val)
-        except Exception:
-            return val
-    return val
-
-
-def _find_args(obj: Any) -> Optional[Dict[str, Any]]:
-    obj = _try_json(obj)
-
-    if isinstance(obj, dict):
-        if {"subject", "request_type", "resident_name", "resident_phone", "address", "details"} <= obj.keys():
-            return obj
-
-        for k in ("arguments", "message", "function"):
-            if k in obj:
-                found = _find_args(obj[k])
-                if found:
-                    return found
-
-        for k in ("toolCalls", "tool_calls"):
-            if k in obj and isinstance(obj[k], list):
-                for item in obj[k]:
-                    found = _find_args(item)
-                    if found:
-                        return found
-
-        for v in obj.values():
-            found = _find_args(v)
-            if found:
-                return found
-
-    if isinstance(obj, list):
-        for item in obj:
-            found = _find_args(item)
-            if found:
-                return found
-
-    return None
-
-
-# -----------------------------
-# Vapi debug echo
-# -----------------------------
-@api_router.post("/vapi/debug/echo")
-async def vapi_debug_echo(payload: Dict[str, Any] = Body(default_factory=dict)):
-    return {
-        "raw": payload,
-        "extracted_args": _find_args(payload),
-    }
-
-
-# -----------------------------
-# Vapi tool endpoint (FIXED)
-# -----------------------------
 @api_router.post("/vapi/send-structured-email")
 async def vapi_send_structured_email(request: Request):
+    """
+    Endpoint for Vapi tool.
+    IMPORTANT:
+    - Always return non-200 if Brevo throws an error (so Vapi doesn't claim success).
+    - Recipient is forced inside emails.py (COUNCIL_INBOX_EMAIL / RECIPIENT_EMAIL).
+    """
     try:
-        raw = await request.json()
+        payload = await request.json()
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON body")
-
-    payload = _find_args(raw)
-    if not payload:
-        raise HTTPException(status_code=400, detail="No structured payload found")
 
     required = ["subject", "request_type", "resident_name", "resident_phone", "address", "details"]
     missing = [k for k in required if not payload.get(k)]
     if missing:
-        raise HTTPException(status_code=400, detail=f"Missing fields: {', '.join(missing)}")
+        raise HTTPException(status_code=400, detail=f"Missing required fields: {', '.join(missing)}")
 
+    # defaults
     payload.setdefault("urgency", "Normal")
-    payload.setdefault("resident_email", None)
     payload.setdefault("preferred_contact_method", None)
+    payload.setdefault("resident_email", None)
     payload.setdefault("extra_metadata", {})
 
-    reference_id = f"REQ-{uuid.uuid4().hex[:8].upper()}"
+    reference_id = f"REQ-{uuid.uuid4().hex[:10].upper()}"
     payload["reference_id"] = reference_id
 
     try:
-        send_council_request_email(payload)
+        brevo_res = send_council_request_email(payload)
+
+        # Log Brevo response so you can prove it actually accepted the email
+        msg_id = getattr(brevo_res, "message_id", None) or getattr(brevo_res, "messageId", None) or None
+        logging.info(f"Brevo send_transac_email OK reference_id={reference_id} message_id={msg_id}")
+
+        return JSONResponse(
+            {
+                "success": True,
+                "reference_id": reference_id,
+                "brevo_message_id": msg_id,
+            }
+        )
+
     except EmailDeliveryError as e:
-        raise HTTPException(status_code=502, detail=str(e))
+        logging.exception("EmailDeliveryError in Vapi endpoint")
+        raise HTTPException(status_code=502, detail=f"Email delivery failed: {str(e)}")
     except Exception:
-        logging.exception("Unexpected email error")
-        raise HTTPException(status_code=500, detail="Internal email error")
-
-    return JSONResponse(
-        {
-            "success": True,
-            "reference_id": reference_id,
-            "message": "Request lodged successfully.",
-        }
-    )
+        logging.exception("Unexpected error in Vapi structured email endpoint")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
-# -----------------------------
-# Wiring
-# -----------------------------
 app.include_router(api_router)
 
 app.add_middleware(
     CORSMiddleware,
+    allow_credentials=True,
     allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
-    allow_credentials=True,
 )
