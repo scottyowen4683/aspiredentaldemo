@@ -23,36 +23,36 @@ export default function AgentsVoice() {
         <div className="relative">
           <p className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-4 py-2 text-xs text-white/70">
             <ShieldCheck className="h-4 w-4" />
-            Voice Agents • Governed by the ASPIRE™ Enterprise AI Framework
+            Voice Agents. Governed by the ASPIRE™ Enterprise AI Framework.
           </p>
 
           <h1 className="mt-6 text-4xl md:text-6xl font-semibold tracking-tight">
             The voice experience your customers expect.
-            <span className="text-white/70"> At scale.</span>
+            <span className="text-white/70"> Built for service delivery.</span>
           </h1>
 
           <p className="mt-5 max-w-3xl text-base md:text-lg text-white/70 leading-relaxed">
             A calm, confident voice agent that answers instantly, captures
             intent, and escalates with a structured summary your team can act on.
-            Designed for real operations — not demos.
+            Designed for production environments where reputation matters.
           </p>
 
           {/* Premium capability row */}
           <div className="mt-10 grid gap-4 md:grid-cols-3">
             <ValueCard
               icon={<Gauge className="h-4 w-4" />}
-              title="Built for load"
-              text="Architected for high-volume periods — including handling high throughput (up to ~100 calls per minute, deployment-dependent)."
+              title="Engineered for load"
+              text="Architected for reliability under high-volume periods. Capacity is deployment dependent and engineered, not assumed."
             />
             <ValueCard
               icon={<Workflow className="h-4 w-4" />}
               title="Controlled escalation"
-              text="Clear guardrails, safe handover, and concise call summaries so humans can step in fast."
+              text="Clear guardrails, clean handover, and concise call summaries so humans can step in quickly with context."
             />
             <ValueCard
               icon={<LineChart className="h-4 w-4" />}
               title="Visible performance"
-              text="Real-time reporting in the Aspire Portal: volumes, resolution vs escalation, top topics, and optimisation opportunities."
+              text="Real-time reporting via the Aspire Portal. Track volume, resolution versus escalation, call drivers, and optimisation opportunities."
             />
           </div>
 
@@ -121,15 +121,15 @@ export default function AgentsVoice() {
               <span className="text-white/70"> Not guesswork.</span>
             </p>
             <p className="mt-3 max-w-3xl text-sm md:text-base text-white/70 leading-relaxed">
-              Every call becomes measurable: what people asked, what was resolved,
-              what escalated, and why. This is what makes the voice experience
-              sustainable at scale — visibility, governance, and continuous
+              Every call becomes measurable. Track what people asked, what
+              resolved, what escalated, and why. This is what makes voice
+              sustainable at scale: visibility, governance, and continuous
               improvement.
             </p>
 
             <div className="mt-6 grid gap-3 md:grid-cols-2">
               <Bullet text="Top call drivers and emerging topics" />
-              <Bullet text="Resolution vs escalation (and reasons)" />
+              <Bullet text="Resolution versus escalation and reasons" />
               <Bullet text="Deflection and workload reduction signals" />
               <Bullet text="Monthly tuning to improve outcomes" />
             </div>
