@@ -37,7 +37,7 @@ export default function Business() {
       const res = await axios.post(`${API}/contact`, formData);
       if (res.data.status === "success") {
         toast.success("Message sent", {
-          description: "We’ll get back to you within 24 hours.",
+          description: "We will get back to you within 24 hours.",
         });
         setFormData({ name: "", email: "", phone: "", message: "" });
       } else {
@@ -63,7 +63,7 @@ export default function Business() {
         <div className="relative">
           <p className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-4 py-2 text-xs text-white/70">
             <ShieldCheck className="h-4 w-4" />
-            Business AI Agents • Powered by ASPIRE™ Enterprise AI Framework
+            Business AI Agents. Governed by the ASPIRE™ Enterprise AI Framework.
           </p>
 
           <h1 className="mt-6 text-4xl md:text-6xl font-semibold tracking-tight">
@@ -72,8 +72,9 @@ export default function Business() {
           </h1>
 
           <p className="mt-5 max-w-2xl text-base md:text-lg text-white/70 leading-relaxed">
-            Premium voice and chat agents that triage enquiries, capture details,
-            trigger workflows, and escalate cleanly.
+            Premium voice and chat agents that triage enquiries, capture the
+            right details, trigger workflows, and escalate cleanly. Designed to
+            protect brand tone while reducing operational load.
           </p>
 
           <div className="mt-8 flex flex-wrap gap-3">
@@ -81,7 +82,7 @@ export default function Business() {
               href={BOOKING_URL}
               className="inline-flex items-center gap-2 rounded-2xl bg-white px-5 py-3 text-sm font-semibold text-black hover:bg-white/90"
             >
-              Book a Demo <ArrowRight className="h-4 w-4" />
+              Book a demo <ArrowRight className="h-4 w-4" />
             </a>
 
             <a
@@ -89,31 +90,31 @@ export default function Business() {
               className="inline-flex items-center gap-2 rounded-2xl border border-white/15 bg-white/5 px-5 py-3 text-sm font-semibold text-white/90 hover:bg-white/10"
             >
               <PhoneCall className="h-4 w-4" />
-              Call the AI Demo: {DEMO_NUMBER}
+              Call the AI demo: {DEMO_NUMBER}
             </a>
           </div>
 
           <div className="mt-10 grid gap-4 md:grid-cols-3">
             <ValueCard
               icon={<PhoneCall className="h-4 w-4" />}
-              title="Voice Agent"
-              text="Answers instantly, captures details, escalates cleanly."
+              title="Voice agent"
+              text="Answers instantly, captures intent, and escalates with structured summaries."
             />
             <ValueCard
               icon={<MessageSquare className="h-4 w-4" />}
-              title="Chat Agent"
-              text="Website chat with controlled, grounded responses."
+              title="Chat agent"
+              text="Premium web chat with grounded answers and controlled handover."
             />
             <ValueCard
               icon={<Zap className="h-4 w-4" />}
               title="Automations"
-              text="Email/API workflows that reduce admin workload."
+              text="Email and API workflows that reduce admin effort and improve follow through."
             />
           </div>
         </div>
       </section>
 
-      {/* DEMO SECTION (embedded) */}
+      {/* DEMO SECTION */}
       <section className="rounded-3xl border border-white/10 bg-white/5 p-10">
         <p className="text-2xl font-semibold">Live demo (Business)</p>
         <p className="mt-3 text-white/70">
@@ -124,23 +125,23 @@ export default function Business() {
           <Tile
             title="What to test"
             points={[
-              "Tone: calm, concise, professional",
-              "Control: it should not guess or waffle",
-              "Escalation: it should hand off when needed",
+              "Tone that is calm, concise, and professional",
+              "Control that avoids guessing and stays inside scope",
+              "Escalation that hands over cleanly when needed",
             ]}
           />
           <Tile
             title="What you will see"
             points={[
-              "Fast triage and clear outcomes",
-              "Clean capture of details",
-              "Less noise, better customer experience",
+              "Fast triage with clear outcomes",
+              "Structured capture of details and next steps",
+              "Less noise and a better customer experience",
             ]}
           />
         </div>
       </section>
 
-      {/* OUTBOUND (kept) */}
+      {/* OUTBOUND */}
       <section className="rounded-3xl border border-white/10 bg-white/5 p-8 md:p-10">
         <OutboundCTA
           variant="business"
@@ -151,14 +152,15 @@ export default function Business() {
 
       {/* FRAMEWORK PROMINENCE */}
       <section className="rounded-3xl border border-white/10 bg-gradient-to-br from-white/10 to-white/5 p-10">
-        <p className="text-2xl font-semibold">Why Aspire feels different</p>
+        <p className="text-2xl font-semibold">Why Aspire performs in business</p>
         <p className="mt-3 text-white/70 max-w-3xl">
-          Aspire deployments are governed and optimised under the ASPIRE™ Enterprise AI Framework, not “prompted and shipped”.
+          Aspire deployments are governed and optimised under the ASPIRE™
+          Enterprise AI Framework. This is not a chatbot shipped and forgotten.
         </p>
         <div className="mt-6 grid gap-6 md:grid-cols-3">
-          <Mini text="Governance and escalation rules by design." />
-          <Mini text="Knowledge that’s controlled and measurable." />
-          <Mini text="Continuous optimisation based on real interactions." />
+          <Mini text="Governance and escalation rules are designed in, not bolted on." />
+          <Mini text="Knowledge is controlled, measured, and improved continuously." />
+          <Mini text="Performance is tracked, tuned, and reported through the Aspire Portal." />
         </div>
       </section>
 
@@ -173,12 +175,13 @@ export default function Business() {
               Talk to Aspire
             </h2>
             <p className="mt-4 text-white/70 leading-relaxed">
-              Tell us what you want the agent to handle. We’ll respond with a clear plan.
+              Tell us what you want the agent to handle. We will respond with a
+              clear recommendation and a clean deployment path.
             </p>
             <div className="mt-6 space-y-3">
-              <Bullet text="Voice + chat deployed fast." />
+              <Bullet text="Voice and chat deployed quickly." />
               <Bullet text="Framework-led governance and escalation." />
-              <Bullet text="Fast deployment." />
+              <Bullet text="Designed to reduce load and protect brand tone." />
             </div>
           </div>
 
