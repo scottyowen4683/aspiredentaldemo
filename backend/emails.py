@@ -15,11 +15,10 @@ def _get_brevo_api_instance():
     )
 
 
-def send_contact_notification(name: str, email: str, phone: str, message: str):
-    """
-    Existing function used by the website contact form.
-    Sends a simple notification email with the contact details.
-    """
+# -------------------------------------------------
+# CONTACT FORM EMAIL
+# -------------------------------------------------
+def send_contact_notification(name: str, email: str, phone: str, message: str) -> bool:
     api_instance = _get_brevo_api_instance()
 
     sender_email = os.environ.get("SENDER_EMAIL")
@@ -39,21 +38,25 @@ def send_contact_notification(name: str, email: str, phone: str, message: str):
     )
 
     try:
-        api_instance.send_transac_email(email_obj)
+        response = api_instance.send_transac_email(email_obj)
+
+        # Brevo returns a dict-like object with messageId on success
+        if not response or not getattr(response, "message_id", None):
+            raise EmailDeliveryError("Brevo did not confirm delivery (no message_id)")
+
+        return True
+
     except ApiException as e:
         raise EmailDeliveryError(f"Brevo API error: {e}")
 
 
-def send_council_request_email(payload: dict):
-    """
-    New function used by the Vapi custom tool `send_structured_email`.
-    Expects a JSON payload with structured council request data and
-    sends a formatted email via Brevo.
-    """
+# -------------------------------------------------
+# VAPI STRUCTURED COUNCIL EMAIL
+# -------------------------------------------------
+def send_council_request_email(payload: dict) -> bool:
     api_instance = _get_brevo_api_instance()
 
     sender_email = os.environ.get("SENDER_EMAIL")
-    # If Vapi passes an explicit `to` address, use it; otherwise fall back to RECIPIENT_EMAIL
     recipient_email = payload.get("to") or os.environ.get("RECIPIENT_EMAIL")
 
     subject = payload.get("subject", "New Council Request")
@@ -79,6 +82,12 @@ def send_council_request_email(payload: dict):
     )
 
     try:
-        api_instance.send_transac_email(email_obj)
+        response = api_instance.send_transac_email(email_obj)
+
+        if not response or not getattr(response, "message_id", None):
+            raise EmailDeliveryError("Brevo did not confirm delivery (no message_id)")
+
+        return True
+
     except ApiException as e:
         raise EmailDeliveryError(f"Brevo API error: {e}")
