@@ -21,7 +21,7 @@ export default function AgentsOutbound() {
         <div className="relative">
           <p className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-4 py-2 text-xs text-white/70">
             <ShieldCheck className="h-4 w-4" />
-            Outbound Agents
+            Outbound Agents. Governed by the ASPIRE™ Enterprise AI Framework.
           </p>
 
           <h1 className="mt-6 text-4xl md:text-6xl font-semibold tracking-tight">
@@ -30,9 +30,9 @@ export default function AgentsOutbound() {
           </h1>
 
           <p className="mt-5 max-w-3xl text-base md:text-lg text-white/70 leading-relaxed">
-            Aspire outbound agents deliver controlled outreach — callbacks,
-            confirmations, reminders, and campaigns — with consent-first logic,
-            calm human tone, and escalation built in. Governed by the{" "}
+            Aspire outbound agents deliver controlled outreach for callbacks,
+            confirmations, reminders, and campaigns. Consent-first logic, calm
+            human tone, and escalation are built in. Governed by the{" "}
             <span className="text-white/85 font-semibold">
               ASPIRE™ Enterprise AI Framework
             </span>
@@ -44,40 +44,40 @@ export default function AgentsOutbound() {
             <ValueCard
               icon={<ShieldCheck className="h-4 w-4" />}
               title="Consent-first"
-              text="Designed for opt-in outreach and clear customer expectations."
+              text="Designed for opt-in outreach with clear customer expectations and controlled messaging."
             />
             <ValueCard
               icon={<Workflow className="h-4 w-4" />}
               title="Outcome-driven"
-              text="Captures outcomes cleanly and routes next steps with intent."
+              text="Captures outcomes cleanly and routes next steps by intent, with summaries teams can action."
             />
             <ValueCard
               icon={<LineChart className="h-4 w-4" />}
-              title="Measurable lift"
-              text="Track conversions, call outcomes, and operational ROI."
+              title="Measured impact"
+              text="Track conversions, call outcomes, failure modes, and operational ROI through the Aspire Portal."
             />
           </div>
 
-          {/* What it’s for / How it behaves */}
+          {/* What it is for / How it behaves */}
           <div className="mt-10 grid gap-6 md:grid-cols-2">
             <Tile
               icon={<PhoneCall className="h-4 w-4" />}
-              title="What it’s used for"
+              title="What it is used for"
               bullets={[
                 "Missed-call recovery and web-lead callbacks",
                 "Service confirmations and appointment reminders",
-                "Proactive updates (events, outages, disruptions)",
+                "Proactive updates for events, outages, and disruptions",
                 "Collections and follow-ups with guardrails",
-                "Targeted campaigns without harming the brand",
+                "Targeted campaigns without degrading brand trust",
               ]}
             />
             <Tile
               icon={<Zap className="h-4 w-4" />}
               title="How it behaves"
               bullets={[
-                "Stays inside scope — no guessing or invented claims",
+                "Stays inside scope with controlled behaviour",
                 "Escalates to humans when required or requested",
-                "Uses calm, consistent tone aligned to your standards",
+                "Uses a calm tone aligned to your standards",
                 "Summarises outcomes so teams can act immediately",
                 "Operates under governance, auditability, and control",
               ]}
@@ -92,26 +92,27 @@ export default function AgentsOutbound() {
               </div>
               <div>
                 <p className="text-xl md:text-2xl font-semibold tracking-tight">
-                  Governed outbound — not “spray and pray”.
+                  Governed outbound, not spray and pray.
                 </p>
                 <p className="mt-3 max-w-3xl text-sm md:text-base text-white/70 leading-relaxed">
                   Outbound is where reputational risk lives. Aspire outbound
-                  agents are designed with explicit boundaries, escalation, and
-                  outcome capture so your team stays in control — even at scale.
+                  agents operate with explicit boundaries, controlled escalation,
+                  and outcome capture so your organisation stays in control,
+                  even at scale.
                 </p>
 
                 <div className="mt-6 grid gap-4 md:grid-cols-3">
                   <Mini
                     title="Guardrails"
-                    text="Clear scope, fallback behaviour, and escalation rules."
+                    text="Clear scope, safe fallback behaviour, and escalation rules that prevent guesswork."
                   />
                   <Mini
-                    title="Consent & compliance"
-                    text="Consent-first outreach with controlled messaging."
+                    title="Consent and compliance"
+                    text="Consent-first outreach with controlled messaging, designed to align to policy and standards."
                   />
                   <Mini
                     title="Reporting"
-                    text="Track outcomes, failure modes, and optimisation opportunities."
+                    text="Track outcomes, failure modes, and optimisation opportunities through the Aspire Portal."
                   />
                 </div>
               </div>
