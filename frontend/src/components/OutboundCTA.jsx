@@ -12,8 +12,8 @@ const normalizeAu = (raw) => {
 };
 
 export default function OutboundCTA({
-  variant = "business",                 // "government" | "business"
-  assistantId,                          // OUTBOUND assistant id (env-driven)
+  variant = "business", // "government" | "business"
+  assistantId, // OUTBOUND assistant id (env-driven)
   fromNumber = import.meta.env.VITE_VAPI_FROM_NUMBER,
   apiBase = "/.netlify/functions",
 }) {
@@ -76,54 +76,81 @@ export default function OutboundCTA({
   };
 
   return (
-    <section className="my-10 rounded-2xl border p-6 shadow-sm">
-      <div className="mb-2 flex items-center gap-2 text-sm opacity-70">
+    <section className="my-10 rounded-3xl border border-white/10 bg-white/5 p-8 shadow-sm">
+      <div className="mb-2 flex items-center gap-2 text-sm text-white/70">
         <Megaphone size={16} />
         <span>{copy.eyebrow}</span>
       </div>
 
-      <h3 className="text-2xl font-semibold">{copy.title}</h3>
-      <p className="mt-2">{copy.lead}</p>
+      <h3 className="text-2xl font-semibold text-white">{copy.title}</h3>
+      <p className="mt-2 text-white/70">{copy.lead}</p>
 
       <ul className="mt-4 grid gap-2">
         {copy.points.map((p, i) => (
-          <li key={i} className="flex items-start gap-2">
-            <CheckCircle size={18} className="mt-0.5" />
+          <li key={i} className="flex items-start gap-2 text-white/75">
+            <CheckCircle size={18} className="mt-0.5 text-white/70" />
             <span>{p}</span>
           </li>
         ))}
       </ul>
 
-      <div className="mt-5 grid gap-3 sm:flex sm:items-center">
+      <div className="mt-6 grid gap-3 sm:flex sm:items-center">
         <input
           type="tel"
           placeholder="Your phone (e.g. 0412 345 678)"
           value={phone}
           onChange={(e) => setPhone(e.target.value)}
-          className="w-full rounded-lg border px-3 py-2"
           inputMode="tel"
+          className="
+            w-full
+            rounded-2xl
+            border border-white/15
+            bg-white/5
+            px-4 py-3
+            text-sm
+            text-white
+            placeholder:text-white/40
+            outline-none
+            focus:border-white/30
+          "
         />
+
         <button
           onClick={handleCall}
           disabled={loading}
-          className="w-full sm:w-auto rounded-lg border px-4 py-2 font-medium hover:opacity-90 disabled:opacity-60 flex items-center gap-2"
+          className="
+            w-full sm:w-auto
+            rounded-2xl
+            bg-white
+            px-5 py-3
+            text-sm
+            font-semibold
+            text-black
+            hover:bg-white/90
+            disabled:opacity-60
+            inline-flex
+            items-center
+            justify-center
+            gap-2
+          "
         >
           <Phone size={18} />
           {loading ? "Calling…" : "Get the AI to call me now"}
         </button>
       </div>
 
-      <label className="mt-3 flex items-center gap-2 text-sm">
+      <label className="mt-4 flex items-start gap-2 text-sm text-white/70">
         <input
           type="checkbox"
           checked={consent}
           onChange={(e) => setConsent(e.target.checked)}
+          className="mt-1 h-4 w-4 rounded border-white/30 bg-white/10"
         />
         I consent to receive an automated call now from Aspire.
       </label>
 
-      <div className="mt-4 flex items-start gap-2 text-sm opacity-75">
-        <Sparkles size={16} className="mt-0.5" />
+      <div className="mt-5 flex items-start gap-2 text-sm text-white/70">
+        <Sparkles size={16} className="mt-0.5 text-white/70" />
         <div>
           Human-sounding AI with full compliance options. Clone your own voice or
           choose from hundreds of premium voices.
