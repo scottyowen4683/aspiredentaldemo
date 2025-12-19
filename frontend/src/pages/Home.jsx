@@ -131,18 +131,21 @@ export default function Home() {
         </div>
 
         <div className="relative max-w-3xl">
-          <Pill>ASPIRE Enterprise AI Framework</Pill>
-          <span className="mx-2 text-white/35">•</span>
-          <Pill>Essential Eight (ML2) aligned principles</Pill>
+          <div className="flex flex-wrap items-center gap-2">
+            <Pill>ASPIRE Enterprise AI Framework</Pill>
+            <Pill>Australian built and managed</Pill>
+            <Pill>Essential Eight (ML2) aligned principles</Pill>
+          </div>
 
           <h1 className="mt-6 text-4xl font-semibold tracking-tight text-white md:text-6xl">
             When AI speaks on your behalf, it carries your reputation.
           </h1>
 
           <p className="mt-5 text-base leading-relaxed text-white/70 md:text-lg">
-            Aspire designs premium voice and chat agents for Government and
-            Business. Built to reduce contact centre load, capture intent, and
-            escalate cleanly under a framework designed for real operations.
+            Aspire delivers premium voice and chat agents for Government and
+            Business. Every deployment is governed, measurable, and designed for
+            real service delivery. Intent is captured cleanly, escalation is
+            controlled, and outcomes are visible in the Aspire Portal.
           </p>
 
           <div className="mt-7 flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -179,21 +182,27 @@ export default function Home() {
 
           <div className="mt-7 grid gap-3 sm:grid-cols-3">
             <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-              <div className="text-sm font-semibold text-white">Voice and chat</div>
+              <div className="text-sm font-semibold text-white">
+                Governed voice and chat
+              </div>
               <div className="mt-1 text-sm text-white/65">
-                Consistent answers with controlled escalation.
+                Consistent answers with controlled escalation and clean handover.
               </div>
             </div>
             <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-              <div className="text-sm font-semibold text-white">Intent capture</div>
+              <div className="text-sm font-semibold text-white">
+                Structured intent capture
+              </div>
               <div className="mt-1 text-sm text-white/65">
-                Captures purpose, context, and next steps.
+                Captures purpose, context, and next steps that teams can action.
               </div>
             </div>
             <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-              <div className="text-sm font-semibold text-white">Governed delivery</div>
+              <div className="text-sm font-semibold text-white">
+                Delivery, not theatre
+              </div>
               <div className="mt-1 text-sm text-white/65">
-                Designed for accountability, not AI theatre.
+                Built for accountability, repeatable quality, and defensibility.
               </div>
             </div>
           </div>
@@ -205,21 +214,26 @@ export default function Home() {
         <div>
           <div className="text-sm text-white/60">Why Aspire exists</div>
           <h2 className="mt-2 text-3xl font-semibold tracking-tight text-white">
-            Built by a CEO, not another tech vendor.
+            Built in Australia by a former CEO, for organisations that cannot
+            afford failure.
           </h2>
+
           <p className="mt-4 text-base leading-relaxed text-white/70">
             Aspire was created by someone who has run complex organisations,
-            managed public scrutiny, dealt with service failures, and carried
-            accountability when things go wrong.
+            operated under public scrutiny, handled service failures, and carried
+            accountability when outcomes matter.
           </p>
+
           <p className="mt-4 text-base leading-relaxed text-white/70">
-            This platform was shaped by operational reality, governance,
-            escalation, workforce dynamics, after-hours demand, and reputational
-            consequence.
+            The ASPIRE Enterprise AI Framework is the operating model behind each
+            deployment. It governs what the agent can say, when it must stop,
+            how escalation occurs, and how performance is measured and improved.
           </p>
+
           <p className="mt-4 text-base leading-relaxed text-white/70">
-            That is why Aspire does not just answer questions. It captures intent,
-            applies controls, and escalates cleanly under the ASPIRE Enterprise AI Framework.
+            This is not a chatbot. It is a controlled service channel that
+            captures intent, applies boundaries, and preserves context through
+            to resolution.
           </p>
 
           <div className="mt-6">
@@ -239,17 +253,17 @@ export default function Home() {
             </div>
             <div className="mt-2 text-sm leading-relaxed text-white/70">
               Built for environments where an incorrect answer becomes a service
-              failure, a reputational issue, or a governance problem.
+              failure, a reputational issue, or a governance issue.
             </div>
           </div>
 
           <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-7">
             <div className="text-sm font-semibold text-white">
-              Escalation is a feature
+              Escalation is enforced
             </div>
             <div className="mt-2 text-sm leading-relaxed text-white/70">
-              Aspire is designed to recognise limits, route to humans cleanly,
-              and preserve context, not keep talking until it sounds right.
+              Aspire recognises limits, routes to humans cleanly, preserves
+              context, and avoids the behaviour that creates false confidence.
             </div>
           </div>
 
@@ -258,8 +272,8 @@ export default function Home() {
               Control over novelty
             </div>
             <div className="mt-2 text-sm leading-relaxed text-white/70">
-              Premium AI is not about features. It is about governance, repeatable
-              quality, and defensibility.
+              Premium AI is not feature count. It is governance, repeatable
+              quality, and defensibility at scale.
             </div>
           </div>
         </div>
@@ -269,10 +283,10 @@ export default function Home() {
       <section className="grid gap-6 md:grid-cols-2">
         <Card
           title="Government"
-          desc="Designed for public-facing enquiries, structured responses, and controlled handover, aligned to Australian expectations."
+          desc="Designed for public-facing enquiries, structured responses, and controlled handover. Built for Australian service delivery expectations."
           bullets={[
-            "Voice and chat agents for contact centres and after-hours",
-            "Escalation pathways and controlled responses",
+            "Voice and chat for contact centres and after-hours coverage",
+            "Controlled escalation pathways and structured responses",
             "Governance-first delivery under the ASPIRE framework",
           ]}
           to="/government"
@@ -280,11 +294,11 @@ export default function Home() {
 
         <Card
           title="Business"
-          desc="A premium customer experience that reduces load, captures intent, and protects brand tone, without guesswork."
+          desc="A premium customer experience that reduces load, captures intent, and protects brand tone through governed delivery and reporting."
           bullets={[
             "Inbound voice and web chat built for conversion and service",
-            "Outbound engagement where appropriate and consent-first",
-            "Designed for clean handover and reporting",
+            "Outbound engagement where appropriate, consent-first by design",
+            "Clean handover, measurable outcomes, and continuous improvement",
           ]}
           to="/business"
         />
@@ -300,7 +314,8 @@ export default function Home() {
             </div>
             <div className="mt-2 text-sm text-white/70">
               Book a live walkthrough and see how Aspire handles voice, chat, and
-              escalation under governance.
+              escalation under governance, with performance visibility in the
+              Aspire Portal.
             </div>
           </div>
           <a
@@ -314,7 +329,7 @@ export default function Home() {
         </div>
       </section>
 
-      {/* CONTACT (WORKING BREVO FORM) */}
+      {/* CONTACT */}
       <section
         id="contact"
         className="rounded-3xl border border-white/10 bg-gradient-to-br from-white/10 to-white/5 p-10 md:p-14"
@@ -336,11 +351,15 @@ export default function Home() {
               </div>
               <div className="flex items-start gap-2">
                 <span className="mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full bg-white/60" />
-                <span>Governed delivery under the ASPIRE Enterprise AI Framework.</span>
+                <span>
+                  Governed delivery under the ASPIRE Enterprise AI Framework.
+                </span>
               </div>
               <div className="flex items-start gap-2">
                 <span className="mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full bg-white/60" />
-                <span>Designed for service environments where reputation matters.</span>
+                <span>
+                  Designed for service environments where reputation matters.
+                </span>
               </div>
             </div>
           </div>
