@@ -19,25 +19,32 @@ ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
 
 # --------------------------------------------------------------------------------------
-# MongoDB (OPTIONAL – CONTACT FORM ONLY)
+# MongoDB (CONTACT FORM ONLY; OPTIONAL)
+# IMPORTANT: do NOT default to localhost. If MONGO_URL is not set, Mongo is disabled.
 # --------------------------------------------------------------------------------------
-MONGO_URL = os.environ.get("MONGO_URL")
+MONGO_URL = os.environ.get("MONGO_URL")  # leave unset to disable Mongo entirely
 DB_NAME = os.environ.get("DB_NAME", "app_db")
 
 mongo_client: Optional[AsyncIOMotorClient] = None
-mongo_db = None
+mongo_db = None  # only used for contact form persistence
 
 
 async def init_mongo():
     global mongo_client, mongo_db
+
     if not MONGO_URL:
-        logging.info("Mongo not configured. Skipping DB.")
+        logging.info("Mongo not configured (MONGO_URL not set). Contact storage disabled.")
+        mongo_client = None
+        mongo_db = None
         return
+
     try:
         mongo_client = AsyncIOMotorClient(MONGO_URL, serverSelectionTimeoutMS=3000)
         await mongo_client.admin.command("ping")
         mongo_db = mongo_client[DB_NAME]
-    except Exception:
+        logging.info("Mongo connected (contact form storage enabled).")
+    except Exception as e:
+        logging.warning(f"Mongo unavailable; continuing without it. Error: {repr(e)}")
         mongo_client = None
         mongo_db = None
 
@@ -75,89 +82,170 @@ class ContactResponse(BaseModel):
 
 
 @app.on_event("startup")
-async def startup():
+async def on_startup():
     logging.basicConfig(level=logging.INFO)
     await init_mongo()
 
 
-# -----------------------------
-# Root
-# -----------------------------
+@app.on_event("shutdown")
+async def shutdown_db_client():
+    global mongo_client
+    try:
+        if mongo_client is not None:
+            mongo_client.close()
+            mongo_client = None
+    except Exception:
+        pass
+
+
 @api_router.get("/")
 async def root():
     return {"message": "Aspire Executive Solutions API"}
 
 
 # -----------------------------
-# Website contact form
+# Contact form
 # -----------------------------
 @api_router.post("/contact", response_model=ContactResponse)
-async def contact(input: ContactSubmissionCreate, background_tasks: BackgroundTasks):
-    obj = ContactSubmission(**input.model_dump())
+async def create_contact_submission(input: ContactSubmissionCreate, background_tasks: BackgroundTasks):
+    contact_obj = ContactSubmission(**input.model_dump())
 
-    if mongo_db:
+    # 1) Best-effort DB persistence (Mongo optional)
+    try:
+        if mongo_db is not None:
+            await mongo_db.contact_submissions.insert_one(contact_obj.model_dump())
+        else:
+            logging.info("Mongo disabled/unavailable; skipping DB insert.")
+    except Exception:
+        logging.exception("Mongo insert failed; continuing without DB persistence.")
+
+    # 2) Best-effort email (never break UX)
+    def _safe_send():
         try:
-            await mongo_db.contact_submissions.insert_one(obj.model_dump())
+            send_contact_notification(
+                contact_obj.name,
+                contact_obj.email,
+                contact_obj.phone or "",
+                (f"Organisation: {contact_obj.org}\n\n" if contact_obj.org else "") + contact_obj.message,
+            )
         except Exception:
-            logging.exception("Mongo insert failed")
+            logging.exception("Contact email send failed.")
 
-    background_tasks.add_task(
-        send_contact_notification,
-        obj.name,
-        obj.email,
-        obj.phone or "",
-        (f"Organisation: {obj.org}\n\n" if obj.org else "") + obj.message,
-    )
+    background_tasks.add_task(_safe_send)
 
     return ContactResponse(
         status="success",
-        message="Thank you for contacting us.",
-        id=obj.id,
+        message="Thank you for contacting us. We'll get back to you within 24 hours.",
+        id=contact_obj.id,
     )
 
 
+@api_router.get("/debug/env")
+def debug_env():
+    def mask(v: Optional[str]):
+        if not v:
+            return None
+        return v[:4] + "..." + v[-4:] if len(v) > 8 else v
+
+    return {
+        "BREVO_API_KEY_set": bool(os.getenv("BREVO_API_KEY")),
+        "SENDER_EMAIL": os.getenv("SENDER_EMAIL"),
+        "RECIPIENT_EMAIL": os.getenv("RECIPIENT_EMAIL"),
+        "BREVO_API_KEY_preview": mask(os.getenv("BREVO_API_KEY")),
+        "MONGO_URL_set": bool(os.getenv("MONGO_URL")),
+        "DB_NAME": os.getenv("DB_NAME", "app_db"),
+    }
+
+
+@api_router.post("/contact/debug", response_model=ContactResponse)
+async def create_contact_submission_debug(input: ContactSubmissionCreate):
+    contact_obj = ContactSubmission(**input.model_dump())
+
+    # DB optional
+    try:
+        if mongo_db is not None:
+            await mongo_db.contact_submissions.insert_one(contact_obj.model_dump())
+    except Exception:
+        logging.exception("Mongo insert failed (debug).")
+
+    # Email sync so you can see errors
+    try:
+        send_contact_notification(
+            contact_obj.name,
+            contact_obj.email,
+            contact_obj.phone or "",
+            (f"Organisation: {contact_obj.org}\n\n" if contact_obj.org else "") + contact_obj.message,
+        )
+        return ContactResponse(status="success", message="Email sent (debug).", id=contact_obj.id)
+    except EmailDeliveryError as e:
+        raise HTTPException(status_code=502, detail=f"Email delivery failed: {str(e)}")
+    except Exception as e:
+        logging.exception("Debug route failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # -----------------------------
-# Helpers – Vapi payload unwrap
+# Vapi payload unwrapping helpers
 # -----------------------------
-def _try_json(val):
+def _try_json_loads(val: Any) -> Any:
     if isinstance(val, str):
-        try:
-            return json.loads(val)
-        except Exception:
-            return val
+        s = val.strip()
+        if (s.startswith("{") and s.endswith("}")) or (s.startswith("[") and s.endswith("]")):
+            try:
+                return json.loads(s)
+            except Exception:
+                return val
     return val
 
 
-def _deep_find_arguments(obj) -> Optional[Dict[str, Any]]:
-    obj = _try_json(obj)
+def _deep_find_arguments(obj: Any) -> Optional[Dict[str, Any]]:
+    """
+    Walk a nested structure and try to locate tool-call arguments in common Vapi shapes.
+    Returns a dict of arguments if found.
+    """
+    obj = _try_json_loads(obj)
 
     if isinstance(obj, dict):
-        if {"subject", "request_type", "resident_name", "resident_phone", "address", "details"} <= obj.keys():
+        # Direct args (already the correct shape)
+        if any(k in obj for k in ("to", "subject", "request_type", "resident_name", "resident_phone", "address", "details")):
             return obj
 
+        # Common wrapper: {"arguments": "...json..."} or {"arguments": {...}}
         if "arguments" in obj:
-            args = _try_json(obj["arguments"])
+            args = _try_json_loads(obj.get("arguments"))
             if isinstance(args, dict):
                 return args
 
-        for k in ("toolCalls", "toolCallList", "tool_calls"):
-            if k in obj and isinstance(obj[k], list):
-                for i in obj[k]:
-                    found = _deep_find_arguments(i)
+        # Common wrapper: {"message": {...}}
+        if "message" in obj:
+            found = _deep_find_arguments(obj.get("message"))
+            if found:
+                return found
+
+        # Vapi wrappers
+        for key in ("toolCalls", "toolCallList", "tool_calls"):
+            tc = obj.get(key)
+            if isinstance(tc, list):
+                for item in tc:
+                    found = _deep_find_arguments(item)
                     if found:
                         return found
 
-        if "function" in obj:
-            return _deep_find_arguments(obj["function"])
+        # Wrapper: {"function": {"arguments": ...}}
+        if "function" in obj and isinstance(obj["function"], dict):
+            found = _deep_find_arguments(obj["function"])
+            if found:
+                return found
 
+        # Otherwise search all values
         for v in obj.values():
             found = _deep_find_arguments(v)
             if found:
                 return found
 
     if isinstance(obj, list):
-        for i in obj:
-            found = _deep_find_arguments(i)
+        for item in obj:
+            found = _deep_find_arguments(item)
             if found:
                 return found
 
@@ -166,73 +254,62 @@ def _deep_find_arguments(obj) -> Optional[Dict[str, Any]]:
 
 # -----------------------------
 # Vapi debug echo
+# IMPORTANT: define Body() so Swagger shows a request body box.
 # -----------------------------
 @api_router.post("/vapi/debug/echo")
 async def vapi_debug_echo(payload: Dict[str, Any] = Body(default_factory=dict)):
-    return {
-        "raw": payload,
-        "extracted": _deep_find_arguments(payload),
-    }
+    extracted = _deep_find_arguments(payload)
+    return {"raw": payload, "extracted_args": extracted}
 
 
 # -----------------------------
-# Vapi email tool (FIXED)
+# Vapi tool endpoint
+# CRITICAL: return 200 + {} so Vapi treats tool call as success.
 # -----------------------------
 @api_router.post("/vapi/send-structured-email")
 async def vapi_send_structured_email(request: Request):
     try:
         raw = await request.json()
     except Exception:
-        raise HTTPException(status_code=400, detail="Invalid JSON")
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
 
     payload = _deep_find_arguments(raw) or {}
 
-    REQUIRED = [
-        "subject",
-        "request_type",
-        "resident_name",
-        "resident_phone",
-        "address",
-        "details",
-    ]
-
-    missing = [k for k in REQUIRED if not payload.get(k)]
+    required = ["to", "subject", "request_type", "resident_name", "resident_phone", "address", "details"]
+    missing = [k for k in required if not payload.get(k)]
     if missing:
-        logging.warning(f"Missing fields: {missing} payload={payload}")
-        raise HTTPException(status_code=400, detail=f"Missing fields: {missing}")
+        logging.warning(f"Vapi missing fields={missing} extracted={payload}")
+        raise HTTPException(status_code=400, detail=f"Missing required fields: {', '.join(missing)}")
 
-    # FORCE EMAIL DESTINATION SERVER-SIDE
-    payload["to"] = os.environ.get("RECIPIENT_EMAIL")
-    if not payload["to"]:
-        raise HTTPException(status_code=500, detail="Recipient email not configured")
-
+    # Optional defaults
     payload.setdefault("urgency", "Normal")
-    payload.setdefault("resident_email", None)
     payload.setdefault("preferred_contact_method", None)
+    payload.setdefault("resident_email", None)
     payload.setdefault("extra_metadata", {})
 
-    reference_id = f"REQ-{uuid.uuid4().hex[:8].upper()}"
+    reference_id = f"REQ-{uuid.uuid4().hex[:10].upper()}"
     payload["reference_id"] = reference_id
 
     try:
+        # Send the email; if Brevo errors, emails.py raises EmailDeliveryError
         send_council_request_email(payload)
     except EmailDeliveryError as e:
-        logging.exception("Email delivery failed")
-        raise HTTPException(status_code=502, detail=str(e))
+        logging.exception("EmailDeliveryError in Vapi endpoint")
+        raise HTTPException(status_code=502, detail=f"Email delivery failed: {str(e)}")
     except Exception:
-        logging.exception("Unexpected email error")
-        raise HTTPException(status_code=500, detail="Internal error")
+        logging.exception("Unexpected error sending Vapi structured email")
+        raise HTTPException(status_code=500, detail="Internal server error while sending email")
 
-   return JSONResponse({})
-
+    # IMPORTANT: empty JSON response avoids Vapi thinking it's a failure
+    return JSONResponse({})
 
 
 app.include_router(api_router)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
     allow_credentials=True,
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
