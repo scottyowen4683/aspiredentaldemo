@@ -24,6 +24,31 @@ export default function SiteLayout() {
 
   useEffect(() => setOpen(false), [location.pathname]);
 
+  // 1) Always go to top on route change (pathname change)
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  }, [location.pathname]);
+
+  // 2) If a hash exists (e.g. #contact), scroll to it with offset (sticky header)
+  useEffect(() => {
+    if (!location.hash) return;
+
+    const id = location.hash.replace("#", "");
+    const el = document.getElementById(id);
+    if (!el) return;
+
+    // Sticky header offset: adjust this if you change header height
+    const HEADER_OFFSET = 96;
+
+    // Wait a tick so the new route has rendered its DOM
+    requestAnimationFrame(() => {
+      const rect = el.getBoundingClientRect();
+      const absoluteTop = rect.top + window.pageYOffset;
+      const targetY = Math.max(absoluteTop - HEADER_OFFSET, 0);
+      window.scrollTo({ top: targetY, left: 0, behavior: "smooth" });
+    });
+  }, [location.hash, location.pathname]);
+
   // Choose assistant by section (Gov vs Business)
   const assistantId = useMemo(() => {
     const path = location.pathname || "/";
@@ -73,12 +98,14 @@ export default function SiteLayout() {
             <NavItem to="/framework">Framework</NavItem>
             <NavItem to="/government">Government</NavItem>
             <NavItem to="/business">Business</NavItem>
-            <a
-              href="/#contact"
+
+            {/* Use Link so it stays SPA and works with hash scroll */}
+            <Link
+              to="/#contact"
               className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-black hover:bg-white/90"
             >
               Contact
-            </a>
+            </Link>
           </nav>
 
           <button
@@ -104,12 +131,14 @@ export default function SiteLayout() {
               <Link className="text-white/80 hover:text-white" to="/business">
                 Business
               </Link>
-              <a
-                href="/#contact"
+
+              {/* Use Link here too */}
+              <Link
+                to="/#contact"
                 className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-black hover:bg-white/90"
               >
                 Contact
-              </a>
+              </Link>
             </div>
           </div>
         )}
