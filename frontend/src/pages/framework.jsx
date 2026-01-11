@@ -8,6 +8,11 @@ import {
   LineChart,
   ArrowRight,
   CheckCircle2,
+  Target,
+  Shield,
+  Users,
+  BarChart3,
+  RefreshCcw,
 } from "lucide-react";
 
 export default function Framework() {
@@ -159,6 +164,81 @@ export default function Framework() {
               "Monthly optimisation, not set and forget.",
             ]}
           />
+        </div>
+      </section>
+
+      {/* ASPIRE™ EXECUTIVE AI FRAMEWORK FLOW */}
+      <section className="relative overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-br from-white/10 to-white/5 p-10 md:p-14">
+        <div className="absolute -top-24 -right-24 h-72 w-72 rounded-full bg-blue-600/15 blur-3xl" />
+        <div className="absolute -bottom-24 -left-24 h-72 w-72 rounded-full bg-cyan-400/10 blur-3xl" />
+
+        <div className="relative">
+          <p className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-4 py-2 text-xs text-white/70">
+            <ShieldCheck className="h-4 w-4" />
+            ASPIRE™ Executive AI Framework
+          </p>
+
+          <h2 className="mt-6 text-3xl md:text-4xl font-semibold tracking-tight">
+            How the framework operates in production.
+          </h2>
+          <p className="mt-4 max-w-3xl text-white/70 leading-relaxed">
+            The framework is applied to every deployment. It governs what the
+            agent can say, when it must stop, how escalation occurs, and how
+            performance is measured and improved over time.
+          </p>
+
+          <div className="mt-10 grid gap-6 lg:grid-cols-2">
+            <div className="space-y-4">
+              <FlowStep
+                icon={<Target className="h-5 w-5" />}
+                title="Intent Capture"
+                text="Every interaction is classified and measurable, so volume turns into operational insight."
+              />
+              <FlowArrow />
+              <FlowStep
+                icon={<Shield className="h-5 w-5" />}
+                title="Controlled Response"
+                text="Safe by default. Clear boundaries, controlled language, and predictable behaviour."
+              />
+              <FlowArrow />
+              <FlowStep
+                icon={<Users className="h-5 w-5" />}
+                title="Governed Escalation"
+                text="When AI reaches its limits, humans take over with context preserved and urgency clear."
+              />
+              <FlowArrow />
+              <FlowStep
+                icon={<BarChart3 className="h-5 w-5" />}
+                title="Outcome Visibility"
+                text="Every interaction results in action, a decision, or a clean handover — not just a transcript."
+              />
+              <FlowArrow />
+              <FlowStep
+                icon={<RefreshCcw className="h-5 w-5" />}
+                title="Continuous Optimisation"
+                text="Monthly review and tuning based on real enquiries, reducing risk and improving performance."
+              />
+            </div>
+
+            <div className="rounded-3xl border border-white/10 bg-black/20 p-8">
+              <p className="text-sm font-semibold text-white/90">
+                What this means for executives
+              </p>
+              <p className="mt-3 text-sm text-white/70 leading-relaxed">
+                Aspire is not a tool you switch on. It is a governed operating
+                model that protects your reputation, reduces operational load,
+                and makes service delivery measurable. The framework is applied
+                consistently across voice, chat, and outbound workflows.
+              </p>
+
+              <div className="mt-6 space-y-3">
+                <Bullet text="Controlled behaviour designed for real service environments." />
+                <Bullet text="Escalation rules that preserve context and accountability." />
+                <Bullet text="Operational reporting that leaders can act on, not vanity metrics." />
+                <Bullet text="Continuous improvement loop under a managed service model." />
+              </div>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -352,6 +432,32 @@ function Bullet({ text }) {
     <div className="flex items-start gap-2 text-sm text-white/75">
       <CheckCircle2 className="mt-0.5 h-4 w-4 text-white/70" />
       <span>{text}</span>
+    </div>
+  );
+}
+
+/* framework flow UI */
+
+function FlowStep({ icon, title, text }) {
+  return (
+    <div className="group rounded-3xl border border-white/10 bg-black/20 p-7 transition hover:bg-black/25">
+      <div className="flex items-start gap-4">
+        <div className="rounded-2xl border border-white/15 bg-white/5 p-3 text-white/85">
+          {icon}
+        </div>
+        <div>
+          <p className="text-sm font-semibold text-white/90">{title}</p>
+          <p className="mt-2 text-sm text-white/70 leading-relaxed">{text}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FlowArrow() {
+  return (
+    <div className="flex justify-center py-1">
+      <div className="h-10 w-px bg-gradient-to-b from-white/0 via-white/15 to-white/0" />
     </div>
   );
 }
