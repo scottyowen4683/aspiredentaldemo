@@ -1,0 +1,35 @@
+name: Index Knowledge Base TXT
+
+on:
+  workflow_dispatch:
+
+jobs:
+  index-kb:
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Index knowledge base
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          TENANT_ID: ${{ secrets.TENANT_ID }}
+          SOURCE_NAME: ${{ secrets.SOURCE_NAME }}
+          EMBED_MODEL: text-embedding-3-small
+        run: |
+          node scripts/index_kb_txt.js netlify/functions/moreton_kb.txt
