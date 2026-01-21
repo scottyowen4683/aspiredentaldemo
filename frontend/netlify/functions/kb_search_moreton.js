@@ -1,191 +1,197 @@
 // frontend/netlify/functions/kb_search_moreton.js
-// Netlify Function (CommonJS) - returns Vapi Custom Tool envelope: { results: [{ toolCallId, result|error }] }
-
 const fs = require("fs");
 const path = require("path");
 
-let KB_TEXT = null;
-
-function loadKb() {
-  if (KB_TEXT) return KB_TEXT;
-  const kbPath = path.join(__dirname, "..", "kb", "moreton_bay_kb.txt");
-  KB_TEXT = fs.readFileSync(kbPath, "utf8");
-  return KB_TEXT;
+function json(res, statusCode, bodyObj) {
+  res.statusCode = statusCode;
+  res.setHeader("Content-Type", "application/json");
+  res.end(JSON.stringify(bodyObj));
 }
 
-function normalise(s) {
+function safeSingleLine(s) {
   return String(s || "")
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\r?\n|\r/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
 
-function bestSnippet(query, kbText) {
-  const q = normalise(query);
-  if (!q) return null;
+function extractToolCall(body) {
+  // Vapi commonly sends tool calls under message.toolCalls or message.toolCallList (varies)
+  const msg = body?.message || body;
 
-  // Split into chunks on blank lines (simple + effective for txt KBs)
-  const chunks = kbText
-    .split(/\n\s*\n+/g)
-    .map((c) => c.trim())
-    .filter(Boolean);
+  const toolCalls =
+    msg?.toolCalls ||
+    msg?.toolCallList ||
+    msg?.tool_calls ||
+    msg?.toolCall?.toolCalls ||
+    [];
 
-  const qWords = q.split(" ").filter((w) => w.length > 2);
+  const first = Array.isArray(toolCalls) ? toolCalls[0] : null;
 
-  let best = null;
-  let bestScore = 0;
+  // Sometimes Vapi sends one tool call directly
+  const toolCallId =
+    first?.id ||
+    first?.toolCallId ||
+    msg?.toolCallId ||
+    body?.toolCallId ||
+    null;
 
-  for (const chunk of chunks) {
-    const hay = normalise(chunk);
-    if (!hay) continue;
+  // Arguments often come as a JSON string in function.arguments
+  let query =
+    body?.query ||
+    msg?.query ||
+    null;
 
-    let score = 0;
+  if (!query) {
+    const argStr =
+      first?.function?.arguments ||
+      first?.function?.args ||
+      first?.arguments ||
+      null;
 
-    // Keyword scoring
-    for (const w of qWords) {
-      if (hay.includes(w)) score += 2;
-    }
-
-    // Bonus for exact phrase-ish match (first 40 chars)
-    if (hay.includes(q)) score += 6;
-
-    // Bonus for councillor / division style queries
-    if (q.includes("division") && hay.includes("division")) score += 3;
-    if (q.includes("councillor") && hay.includes("councillor")) score += 3;
-
-    if (score > bestScore) {
-      bestScore = score;
-      best = chunk;
+    if (typeof argStr === "string" && argStr.trim()) {
+      try {
+        const parsed = JSON.parse(argStr);
+        query = parsed?.query || parsed?.q || parsed?.text || null;
+      } catch (e) {
+        // If it's not JSON, treat as raw text
+        query = argStr;
+      }
+    } else if (typeof argStr === "object" && argStr) {
+      query = argStr?.query || argStr?.q || argStr?.text || null;
     }
   }
 
-  if (!best || bestScore < 3) return null;
-
-  // Keep the reply short and single-line (important for Vapi tool results)
-  const trimmed = best.length > 900 ? best.slice(0, 900) + "…" : best;
-  return trimmed.replace(/\s*\n+\s*/g, " ").trim();
+  return {
+    toolCallId,
+    query: safeSingleLine(query || ""),
+  };
 }
 
-exports.handler = async (event) => {
-  // LOG EVERYTHING ONCE so you can see what Vapi is sending
-  console.log("kb_search_moreton RAW event.body:", event.body);
+function loadKbText() {
+  // Put your KB text file here:
+  // frontend/netlify/functions/kb/moreton_kb.txt
+  const kbPath = path.join(__dirname, "kb", "moreton_kb.txt");
+  if (!fs.existsSync(kbPath)) return null;
+  return fs.readFileSync(kbPath, "utf8");
+}
 
-  let body = {};
+function searchKb(kbText, query) {
+  if (!kbText || !query) return null;
+
+  // Basic, fast “good enough” search for a pilot:
+  // - Find lines containing ALL keywords (ignoring tiny words)
+  // - Return top matches + surrounding context
+  const keywords = query
+    .toLowerCase()
+    .split(/[^a-z0-9]+/g)
+    .filter(Boolean)
+    .filter((w) => w.length >= 3);
+
+  if (keywords.length === 0) return null;
+
+  const lines = kbText.split(/\r?\n/);
+
+  // Score lines by keyword hits
+  const scored = [];
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
+    const low = l.toLowerCase();
+
+    let hits = 0;
+    for (const k of keywords) {
+      if (low.includes(k)) hits++;
+    }
+
+    // Require at least half the keywords to match (tweakable)
+    if (hits >= Math.ceil(keywords.length / 2)) {
+      scored.push({ i, hits, l });
+    }
+  }
+
+  if (scored.length === 0) return null;
+
+  scored.sort((a, b) => b.hits - a.hits);
+
+  // Build a compact answer with small context window
+  const top = scored.slice(0, 3).map(({ i }) => {
+    const start = Math.max(0, i - 1);
+    const end = Math.min(lines.length - 1, i + 2);
+    const chunk = lines.slice(start, end + 1).join(" | ");
+    return chunk;
+  });
+
+  return safeSingleLine(top.join(" || "));
+}
+
+exports.handler = async (event, context, callback) => {
   try {
-    body = event.body ? JSON.parse(event.body) : {};
-  } catch (e) {
-    // If body isn't JSON, still return Vapi envelope with error
-    return {
-      statusCode: 200,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        results: [
-          {
-            toolCallId: "unknown",
-            error: "Request body was not valid JSON",
-          },
-        ],
-      }),
-    };
-  }
+    const body = event.body ? JSON.parse(event.body) : {};
 
-  // Vapi typically sends toolCallId + query, but we handle multiple shapes
-  const toolCallId =
-    body.toolCallId ||
-    body.tool_call_id ||
-    body?.toolCall?.id ||
-    body?.tool_call?.id ||
-    body?.id ||
-    body?.callId ||
-    body?.call_id ||
-    // some platforms nest it:
-    body?.tool?.toolCallId ||
-    body?.tool?.id;
+    const { toolCallId, query } = extractToolCall(body);
 
-  const query =
-    body.query ||
-    body.q ||
-    body.search ||
-    body?.arguments?.query ||
-    body?.input?.query ||
-    "";
+    // IMPORTANT: If toolCallId is missing, Vapi can’t map the response.
+    // We still return something to help you debug.
+    const effectiveToolCallId = toolCallId || "call_missing_toolCallId";
 
-  if (!toolCallId) {
-    console.log("Missing toolCallId. Parsed body:", body);
-    return {
-      statusCode: 200,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        results: [
-          {
-            toolCallId: "missing_toolCallId",
-            error:
-              "Missing toolCallId in request. Vapi requires it to match the tool call.",
-          },
-        ],
-      }),
-    };
-  }
+    const kbText = loadKbText();
+    if (!kbText) {
+      return callback(
+        null,
+        {
+          statusCode: 200,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            results: [
+              {
+                toolCallId: effectiveToolCallId,
+                result:
+                  "KB file not found on server. Add it at: frontend/netlify/functions/kb/moreton_kb.txt",
+              },
+            ],
+          }),
+        }
+      );
+    }
 
-  if (!query || String(query).trim().length === 0) {
-    return {
-      statusCode: 200,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        results: [
-          {
-            toolCallId,
-            error: "Missing required parameter: query",
-          },
-        ],
-      }),
-    };
-  }
+    const found = searchKb(kbText, query);
 
-  try {
-    const kbText = loadKb();
-    const snippet = bestSnippet(query, kbText);
+    const result = found
+      ? found
+      : `No match in KB for: ${safeSingleLine(query)}. Try a different keyword.`;
 
-    const result = snippet
-      ? snippet
-      : "No match found in the Moreton Bay knowledge base for that query.";
-
-    // MUST be single-line string
-    const singleLine = String(result).replace(/\s*\n+\s*/g, " ").trim();
-
-    console.log("Returning tool result for", toolCallId);
-
-    return {
-      statusCode: 200,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        results: [
-          {
-            toolCallId,
-            result: singleLine,
-          },
-        ],
-      }),
-    };
+    return callback(
+      null,
+      {
+        statusCode: 200,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          results: [
+            {
+              toolCallId: effectiveToolCallId,
+              result,
+            },
+          ],
+        }),
+      }
+    );
   } catch (err) {
-    const msg = String(err?.message || err || "Unknown error")
-      .replace(/\s*\n+\s*/g, " ")
-      .trim();
-
-    console.log("Tool error:", msg);
-
-    return {
-      statusCode: 200,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        results: [
-          {
-            toolCallId,
-            error: msg,
-          },
-        ],
-      }),
-    };
+    // Must still return Vapi format if possible
+    const msg = safeSingleLine(err?.message || "Unknown error");
+    return callback(
+      null,
+      {
+        statusCode: 200,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          results: [
+            {
+              toolCallId: "call_error",
+              result: `Tool error: ${msg}`,
+            },
+          ],
+        }),
+      }
+    );
   }
 };
