@@ -1,7 +1,6 @@
 import React from "react";
-import VapiWidget from "../components/vapi-widget";
+import VapiWidget from "../../components/vapi-widget.jsx";
 
-// IMPORTANT: this is the env var you showed
 const assistantId = import.meta.env.VITE_VAPI_ASSISTANT_MORETON;
 
 export default function MoretonBayPilot() {
@@ -41,42 +40,45 @@ export default function MoretonBayPilot() {
             </div>
           </div>
 
-          {/* Title + Purpose */}
           <div className="max-w-3xl">
             <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">
               Aspire AI Chat Pilot — Moreton Bay
             </h1>
             <p className="mt-2 text-sm leading-relaxed text-white/70 md:text-base">
-              This page is a controlled evaluation environment to trial an AI assistant for
-              common, low-risk enquiries. It is vendor-hosted and not connected to Council systems.
+              This page is a controlled evaluation environment to trial an AI
+              assistant for common, low-risk enquiries. It is vendor-hosted and
+              not connected to Council systems.
             </p>
           </div>
 
-          {/* Key guardrails */}
           <div className="grid gap-4 md:grid-cols-3">
             <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5">
               <div className="text-sm font-semibold">Scope</div>
               <div className="mt-1 text-sm text-white/65">
-                Informational enquiries only (e.g. bins, rates dates, opening hours, general guidance).
+                Informational enquiries only (e.g. bins, rates dates, opening
+                hours, general guidance).
               </div>
             </div>
             <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5">
               <div className="text-sm font-semibold">Governance</div>
               <div className="mt-1 text-sm text-white/65">
-                Designed to escalate or stop when a request is outside scope. Council remains in control.
+                Designed to escalate or stop when a request is outside scope.
+                Council remains in control.
               </div>
             </div>
             <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5">
               <div className="text-sm font-semibold">Urgent matters</div>
               <div className="mt-1 text-sm text-white/65">
-                Not for emergencies. For urgent issues, use official Council channels.
+                Not for emergencies. For urgent issues, use official Council
+                channels.
               </div>
             </div>
           </div>
 
-          {/* Contact block */}
           <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5">
-            <div className="text-sm font-semibold">Pilot support & escalation</div>
+            <div className="text-sm font-semibold">
+              Pilot support & escalation
+            </div>
             <div className="mt-1 text-sm text-white/70">
               For any queries or escalations, please contact{" "}
               <span className="font-semibold text-white">Scott</span> on{" "}
@@ -90,19 +92,19 @@ export default function MoretonBayPilot() {
             </div>
           </div>
 
-          {/* Footer note */}
           <div className="text-xs leading-relaxed text-white/55">
-            By using this pilot, you acknowledge responses may be incomplete or subject to change.
-            Please avoid entering sensitive personal information unless explicitly required for a specific task.
+            By using this pilot, you acknowledge responses may be incomplete or
+            subject to change. Please avoid entering sensitive personal
+            information unless explicitly required for a specific task.
           </div>
         </header>
 
-        {/* Main content */}
         <main className="mt-8 grid gap-6 lg:grid-cols-[1.4fr_0.6fr]">
           <section className="rounded-3xl border border-white/10 bg-white/[0.03] p-7 shadow-[0_18px_70px_rgba(0,0,0,0.45)] backdrop-blur-xl">
             <h2 className="text-sm font-semibold text-white/90">How to test</h2>
             <p className="mt-2 text-sm leading-relaxed text-white/65">
-              Ask a few typical questions. Focus on clarity, accuracy, escalation behaviour and tone.
+              Ask a few typical questions. Focus on clarity, accuracy, escalation
+              behaviour and tone.
             </p>
 
             <div className="mt-5 grid gap-3 md:grid-cols-2">
@@ -135,7 +137,9 @@ export default function MoretonBayPilot() {
           </section>
 
           <aside className="rounded-3xl border border-white/10 bg-white/[0.03] p-7 shadow-[0_18px_70px_rgba(0,0,0,0.45)] backdrop-blur-xl">
-            <h2 className="text-sm font-semibold text-white/90">Pilot constraints</h2>
+            <h2 className="text-sm font-semibold text-white/90">
+              Pilot constraints
+            </h2>
             <ul className="mt-3 space-y-2 text-sm text-white/65">
               <li>• No payments or account-specific actions</li>
               <li>• No decisions or formal determinations</li>
@@ -146,27 +150,34 @@ export default function MoretonBayPilot() {
             <div className="mt-6 rounded-2xl border border-white/10 bg-white/[0.02] p-5">
               <div className="text-sm font-semibold">Assistant ID check</div>
               <div className="mt-2 text-xs text-white/60">
-                Env var: <span className="font-mono text-white/80">VITE_VAPI_ASSISTANT_MORETON</span>
+                Env var:{" "}
+                <span className="font-mono text-white/80">
+                  VITE_VAPI_ASSISTANT_MORETON
+                </span>
               </div>
               <div className="mt-2 text-xs text-white/60">
                 Status:{" "}
-                <span className={assistantId ? "text-emerald-300" : "text-amber-300"}>
-                  {assistantId ? "Configured" : "Missing — set in Netlify env vars"}
+                <span
+                  className={
+                    assistantId ? "text-emerald-300" : "text-amber-300"
+                  }
+                >
+                  {assistantId
+                    ? "Configured"
+                    : "Missing — set in Netlify env vars"}
                 </span>
               </div>
             </div>
           </aside>
         </main>
 
-        {/* Chat widget */}
         <VapiWidget
           assistantId={assistantId}
           title="Moreton Bay • Aspire AI Chat Pilot"
-          greeting="Hi — I’m the City of Moreton Bay assistant for this limited pilot. Ask a common question (bins, rates dates, opening hours, permits). For urgent matters, please use Council’s official channels."
+          greeting="Hi — I’m the City of Moreton Bay AI assistant. Ask me a question, I am here to learn and help. For urgent matters, please use Council’s official channels."
           brandUrl="https://aspireexecutive.ai"
         />
       </div>
     </div>
   );
 }
-
