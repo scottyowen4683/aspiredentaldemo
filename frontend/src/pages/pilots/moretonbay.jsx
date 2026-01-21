@@ -1,5 +1,5 @@
 import React from "react";
-import VapiWidget from "../../components/vapi-widget";
+import VapiWidget from "./vapi-widget.jsx";
 
 const assistantId = import.meta.env.VITE_VAPI_ASSISTANT_MORETON;
 
