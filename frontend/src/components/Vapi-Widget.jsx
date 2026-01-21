@@ -1,11 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
-const GREETING =
-  "Hello, I'm your demo chat bot, you can ask me anything about Aspire AI";
+const DEFAULT_GREETING =
+  "Hello — I’m the Aspire AI assistant. Ask me a question and I’ll do my best to help.";
 
 export default function VapiWidget({
   assistantId,
   brandUrl = "https://aspireexecutive.ai",
+  title = "Aspire AI Chat",
+  greeting = DEFAULT_GREETING,
 }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -15,7 +17,7 @@ export default function VapiWidget({
   const [chatId, setChatId] = useState(null);
 
   const [messages, setMessages] = useState(() => [
-    { role: "assistant", text: GREETING },
+    { role: "assistant", text: greeting },
   ]);
 
   const scrollRef = useRef(null);
@@ -33,7 +35,7 @@ export default function VapiWidget({
 
   function resetChat() {
     setChatId(null);
-    setMessages([{ role: "assistant", text: GREETING }]);
+    setMessages([{ role: "assistant", text: greeting }]);
     setBusy(false);
     setInput("");
   }
@@ -49,7 +51,7 @@ export default function VapiWidget({
         {
           role: "assistant",
           text:
-            "Error: assistantId is missing. Check Netlify build env vars: VITE_VAPI_ASSISTANT_ID_BUSINESS and VITE_VAPI_ASSISTANT_ID_GOV, then redeploy.",
+            "Error: assistantId is missing. Check Netlify build env vars and redeploy.",
         },
       ]);
       setInput("");
@@ -131,9 +133,7 @@ export default function VapiWidget({
                 🤖
               </div>
               <div className="leading-tight">
-                <div className="text-sm font-semibold text-white">
-                  Aspire AI Demo Chat
-                </div>
+                <div className="text-sm font-semibold text-white">{title}</div>
                 <div className="text-xs text-white/60">
                   {busy ? "Thinking..." : "Online"}
                 </div>
@@ -169,9 +169,7 @@ export default function VapiWidget({
                 return (
                   <div
                     key={i}
-                    className={`flex ${
-                      isUser ? "justify-end" : "justify-start"
-                    }`}
+                    className={`flex ${isUser ? "justify-end" : "justify-start"}`}
                   >
                     <div
                       className={[
