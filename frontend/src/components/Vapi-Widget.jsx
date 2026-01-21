@@ -51,7 +51,7 @@ export default function VapiWidget({
         {
           role: "assistant",
           text:
-            "Error: assistantId is missing. Check Netlify build env vars and redeploy.",
+            "Error: assistantId is missing. Check Netlify environment variables and redeploy.",
         },
       ]);
       setInput("");
@@ -122,7 +122,7 @@ export default function VapiWidget({
           <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-black text-white shadow-sm">
             💬
           </span>
-          <span className="tracking-wide">Chat With Me</span>
+          <span className="tracking-wide">Chat</span>
         </button>
       ) : (
         <div className="flex h-[540px] w-[380px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0A1020] shadow-[0_18px_70px_rgba(0,0,0,0.55)] ring-1 ring-white/10">
@@ -169,7 +169,9 @@ export default function VapiWidget({
                 return (
                   <div
                     key={i}
-                    className={`flex ${isUser ? "justify-end" : "justify-start"}`}
+                    className={`flex ${
+                      isUser ? "justify-end" : "justify-start"
+                    }`}
                   >
                     <div
                       className={[
