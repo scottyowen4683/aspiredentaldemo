@@ -1,22 +1,19 @@
 import React from "react";
-import VapiWidget from "../../components/vapi-widget.jsx";
+import VapiWidget from "../../components/vapi-widget";
 
 const assistantId = import.meta.env.VITE_VAPI_ASSISTANT_MORETON;
 
 export default function MoretonBayPilot() {
   return (
     <div className="min-h-screen bg-[#070A12] text-white">
-      {/* Subtle premium background */}
       <div className="pointer-events-none fixed inset-0 opacity-60">
         <div className="absolute -top-48 left-1/2 h-[520px] w-[520px] -translate-x-1/2 rounded-full bg-white/10 blur-[120px]" />
         <div className="absolute bottom-[-240px] right-[-140px] h-[520px] w-[520px] rounded-full bg-white/10 blur-[140px]" />
       </div>
 
       <div className="relative mx-auto max-w-6xl px-6 py-10">
-        {/* Header */}
         <header className="flex flex-col gap-6 rounded-3xl border border-white/10 bg-white/[0.03] p-7 shadow-[0_18px_70px_rgba(0,0,0,0.55)] backdrop-blur-xl">
           <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
-            {/* Logos */}
             <div className="flex items-center gap-5">
               <div className="flex items-center gap-4">
                 <img
@@ -33,7 +30,6 @@ export default function MoretonBayPilot() {
               </div>
             </div>
 
-            {/* Badge */}
             <div className="inline-flex w-fit items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs text-white/70">
               <span className="h-2 w-2 rounded-full bg-emerald-400/80" />
               Pilot environment • Chat evaluation only
@@ -174,7 +170,7 @@ export default function MoretonBayPilot() {
         <VapiWidget
           assistantId={assistantId}
           title="Moreton Bay • Aspire AI Chat Pilot"
-          greeting="Hi — I’m the City of Moreton Bay AI assistant. Ask me a question, I am here to learn and help. For urgent matters, please use Council’s official channels."
+          greeting="Hi — I’m the Aspire AI assistant for this limited pilot. Ask a common question (bins, rates dates, opening hours, permits). For urgent matters, please use Council’s official channels."
           brandUrl="https://aspireexecutive.ai"
         />
       </div>
