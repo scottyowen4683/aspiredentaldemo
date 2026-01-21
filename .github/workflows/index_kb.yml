@@ -1,0 +1,59 @@
+name: Index Council Knowledge Base
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: "Branch to read KB files from (default: moretonbaypilot)"
+        required: true
+        default: "moretonbaypilot"
+
+      tenant_id:
+        description: "Supabase tenant_id (e.g. moreton_bay, gold_coast)"
+        required: true
+        default: "moreton_bay"
+
+      source_name:
+        description: "Human-readable source name stored in Supabase"
+        required: true
+        default: "Moreton Bay Council KB (Oct 2025)"
+
+      kb_file:
+        description: "Path to the TXT file inside the repo"
+        required: true
+        default: "frontend/netlify/functions/kb/moreton_kb.txt"
+
+      embed_model:
+        description: "Embedding model (must match your DB vector dimension)"
+        required: true
+        default: "text-embedding-3-small"
+
+jobs:
+  index-kb:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout selected branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm install
+
+      - name: Index KB into Supabase
+        working-directory: frontend
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          TENANT_ID: ${{ inputs.tenant_id }}
+          SOURCE_NAME: ${{ inputs.source_name }}
+          EMBED_MODEL: ${{ inputs.embed_model }}
+        run: node scripts/index_kb_txt.js ../${{ inputs.kb_file }}
