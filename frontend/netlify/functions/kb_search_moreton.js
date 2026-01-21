@@ -1,197 +1,151 @@
-// frontend/netlify/functions/kb_search_moreton.js
-const fs = require("fs");
-const path = require("path");
+import fs from "fs";
+import path from "path";
 
-function json(res, statusCode, bodyObj) {
-  res.statusCode = statusCode;
-  res.setHeader("Content-Type", "application/json");
-  res.end(JSON.stringify(bodyObj));
-}
-
-function safeSingleLine(s) {
-  return String(s || "")
-    .replace(/\r?\n|\r/g, " ")
+function normalise(s) {
+  return (s || "")
+    .toLowerCase()
     .replace(/\s+/g, " ")
+    .replace(/[^\w\s@().-]/g, "")
     .trim();
 }
 
-function extractToolCall(body) {
-  // Vapi commonly sends tool calls under message.toolCalls or message.toolCallList (varies)
-  const msg = body?.message || body;
+function extractDivisionNumber(query) {
+  const q = (query || "").toLowerCase();
+  // matches: "division 3", "divison 3", "div 3", "division:3"
+  const m = q.match(/\bdiv(?:ision|ison)?\s*[:\-]?\s*(\d{1,2})\b/);
+  if (m && m[1]) return Number(m[1]);
+  return null;
+}
 
-  const toolCalls =
-    msg?.toolCalls ||
-    msg?.toolCallList ||
-    msg?.tool_calls ||
-    msg?.toolCall?.toolCalls ||
-    [];
+function getLines(text) {
+  return (text || "").split(/\r?\n/).map((l) => l.trim());
+}
 
-  const first = Array.isArray(toolCalls) ? toolCalls[0] : null;
-
-  // Sometimes Vapi sends one tool call directly
-  const toolCallId =
-    first?.id ||
-    first?.toolCallId ||
-    msg?.toolCallId ||
-    body?.toolCallId ||
-    null;
-
-  // Arguments often come as a JSON string in function.arguments
-  let query =
-    body?.query ||
-    msg?.query ||
-    null;
-
-  if (!query) {
-    const argStr =
-      first?.function?.arguments ||
-      first?.function?.args ||
-      first?.arguments ||
-      null;
-
-    if (typeof argStr === "string" && argStr.trim()) {
-      try {
-        const parsed = JSON.parse(argStr);
-        query = parsed?.query || parsed?.q || parsed?.text || null;
-      } catch (e) {
-        // If it's not JSON, treat as raw text
-        query = argStr;
-      }
-    } else if (typeof argStr === "object" && argStr) {
-      query = argStr?.query || argStr?.q || argStr?.text || null;
+function buildDivisionIndex(lines) {
+  // Creates a map: divisionNumber -> array of lines that mention that division
+  const map = new Map();
+  for (const line of lines) {
+    const m = line.match(/\bdivision\s*(\d{1,2})\b/i);
+    if (m && m[1]) {
+      const n = Number(m[1]);
+      if (!map.has(n)) map.set(n, []);
+      map.get(n).push(line);
     }
   }
-
-  return {
-    toolCallId,
-    query: safeSingleLine(query || ""),
-  };
+  return map;
 }
 
-function loadKbText() {
-  // Put your KB text file here:
-  // frontend/netlify/functions/kb/moreton_kb.txt
-  const kbPath = path.join(__dirname, "kb", "moreton_kb.txt");
-  if (!fs.existsSync(kbPath)) return null;
-  return fs.readFileSync(kbPath, "utf8");
-}
+function bestGeneralMatch(lines, query) {
+  const q = normalise(query);
+  if (!q) return null;
 
-function searchKb(kbText, query) {
-  if (!kbText || !query) return null;
+  const qTerms = q.split(" ").filter(Boolean);
 
-  // Basic, fast “good enough” search for a pilot:
-  // - Find lines containing ALL keywords (ignoring tiny words)
-  // - Return top matches + surrounding context
-  const keywords = query
-    .toLowerCase()
-    .split(/[^a-z0-9]+/g)
-    .filter(Boolean)
-    .filter((w) => w.length >= 3);
+  let best = { score: 0, line: null };
+  for (const line of lines) {
+    const nl = normalise(line);
+    if (!nl) continue;
 
-  if (keywords.length === 0) return null;
-
-  const lines = kbText.split(/\r?\n/);
-
-  // Score lines by keyword hits
-  const scored = [];
-  for (let i = 0; i < lines.length; i++) {
-    const l = lines[i];
-    const low = l.toLowerCase();
-
-    let hits = 0;
-    for (const k of keywords) {
-      if (low.includes(k)) hits++;
+    let score = 0;
+    for (const t of qTerms) {
+      if (t.length <= 2) continue;
+      if (nl.includes(t)) score += 1;
     }
 
-    // Require at least half the keywords to match (tweakable)
-    if (hits >= Math.ceil(keywords.length / 2)) {
-      scored.push({ i, hits, l });
-    }
+    // small boost if line contains exact query phrase
+    if (nl.includes(q)) score += 3;
+
+    if (score > best.score) best = { score, line };
   }
 
-  if (scored.length === 0) return null;
-
-  scored.sort((a, b) => b.hits - a.hits);
-
-  // Build a compact answer with small context window
-  const top = scored.slice(0, 3).map(({ i }) => {
-    const start = Math.max(0, i - 1);
-    const end = Math.min(lines.length - 1, i + 2);
-    const chunk = lines.slice(start, end + 1).join(" | ");
-    return chunk;
-  });
-
-  return safeSingleLine(top.join(" || "));
+  return best.score > 0 ? best.line : null;
 }
 
-exports.handler = async (event, context, callback) => {
+export async function handler(event) {
   try {
     const body = event.body ? JSON.parse(event.body) : {};
+    const query = body?.query || body?.input || "";
 
-    const { toolCallId, query } = extractToolCall(body);
+    const kbPath = path.join(process.cwd(), "netlify", "functions", "kb", "moreton_kb.txt");
 
-    // IMPORTANT: If toolCallId is missing, Vapi can’t map the response.
-    // We still return something to help you debug.
-    const effectiveToolCallId = toolCallId || "call_missing_toolCallId";
+    if (!fs.existsSync(kbPath)) {
+      return {
+        statusCode: 200,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          reply:
+            "KB file not found on server. Add it at: frontend/netlify/functions/kb/moreton_kb.txt",
+        }),
+      };
+    }
 
-    const kbText = loadKbText();
-    if (!kbText) {
-      return callback(
-        null,
-        {
+    const kb = fs.readFileSync(kbPath, "utf8");
+    const lines = getLines(kb).filter(Boolean);
+
+    // 1) If the query is asking for a specific division, return ONLY that division block/line(s).
+    const div = extractDivisionNumber(query);
+    if (div !== null) {
+      const divIndex = buildDivisionIndex(lines);
+
+      // direct hits
+      const hits = divIndex.get(div) || [];
+
+      // Also scan for "Division X:" style inside larger lines
+      // and return the sentence/segment that contains the division.
+      const inlineHits = [];
+      const rx = new RegExp(`\\bDivision\\s*${div}\\b[^|.\\n]*`, "gi");
+      for (const raw of lines) {
+        const m = raw.match(rx);
+        if (m && m.length) inlineHits.push(...m.map((x) => x.trim()));
+      }
+
+      const combined = [...new Set([...hits, ...inlineHits])].filter(Boolean);
+
+      if (combined.length) {
+        return {
           statusCode: 200,
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            results: [
-              {
-                toolCallId: effectiveToolCallId,
-                result:
-                  "KB file not found on server. Add it at: frontend/netlify/functions/kb/moreton_kb.txt",
-              },
-            ],
+            reply: combined.slice(0, 6).join(" | "),
           }),
-        }
-      );
+        };
+      }
+
+      // if no match found for that division, say so clearly
+      return {
+        statusCode: 200,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          reply: `I couldn't find Division ${div} in the Moreton Bay KB content currently loaded.`,
+        }),
+      };
     }
 
-    const found = searchKb(kbText, query);
-
-    const result = found
-      ? found
-      : `No match in KB for: ${safeSingleLine(query)}. Try a different keyword.`;
-
-    return callback(
-      null,
-      {
+    // 2) Otherwise: best general match
+    const best = bestGeneralMatch(lines, query);
+    if (best) {
+      return {
         statusCode: 200,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          results: [
-            {
-              toolCallId: effectiveToolCallId,
-              result,
-            },
-          ],
-        }),
-      }
-    );
+        body: JSON.stringify({ reply: best }),
+      };
+    }
+
+    return {
+      statusCode: 200,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        reply:
+          "I couldn't find that in the Moreton Bay KB content currently loaded. Try rephrasing the question or ask about a specific service/topic.",
+      }),
+    };
   } catch (err) {
-    // Must still return Vapi format if possible
-    const msg = safeSingleLine(err?.message || "Unknown error");
-    return callback(
-      null,
-      {
-        statusCode: 200,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          results: [
-            {
-              toolCallId: "call_error",
-              result: `Tool error: ${msg}`,
-            },
-          ],
-        }),
-      }
-    );
+    return {
+      statusCode: 200,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        reply: `Tool error: ${err?.message || "Unknown error"}`,
+      }),
+    };
   }
-};
+}
