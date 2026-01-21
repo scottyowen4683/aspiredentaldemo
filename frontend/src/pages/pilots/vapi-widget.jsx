@@ -3,6 +3,44 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 const DEFAULT_GREETING =
   "Hello — I’m the Aspire AI assistant. Ask me a question and I’ll do my best to help.";
 
+function safeStringify(obj, maxLen = 1400) {
+  try {
+    const s = JSON.stringify(obj, null, 2);
+    return s.length > maxLen ? s.slice(0, maxLen) + "\n…(truncated)" : s;
+  } catch {
+    return String(obj);
+  }
+}
+
+function extractReply(data) {
+  // Common shapes we might receive back from a chat proxy
+  const candidates = [
+    data?.output?.[0]?.content,
+    data?.output?.[0]?.text,
+    data?.reply,
+    data?.message,
+    data?.text,
+    data?.content,
+    data?.data?.output?.[0]?.content,
+    data?.data?.output?.[0]?.text,
+    data?.data?.message,
+    data?.data?.text,
+  ];
+
+  for (const c of candidates) {
+    if (typeof c === "string" && c.trim()) return c.trim();
+  }
+
+  // If Vapi returns an array of messages
+  if (Array.isArray(data?.messages)) {
+    const last = [...data.messages].reverse().find((m) => m?.role !== "user");
+    if (last?.content && typeof last.content === "string") return last.content;
+    if (last?.text && typeof last.text === "string") return last.text;
+  }
+
+  return null;
+}
+
 export default function VapiWidget({
   assistantId,
   brandUrl = "https://aspireexecutive.ai",
@@ -49,7 +87,7 @@ export default function VapiWidget({
         {
           role: "assistant",
           text:
-            "Error: assistantId is missing. Confirm Netlify environment variable VITE_VAPI_ASSISTANT_MORETON is set for this pilot site and redeploy.",
+            "Error: assistantId is missing. Confirm Netlify env var VITE_VAPI_ASSISTANT_MORETON is set for this pilot site and redeploy.",
         },
       ]);
       setInput("");
@@ -71,12 +109,12 @@ export default function VapiWidget({
         }),
       });
 
-      const raw = await res.text();
-      let data = {};
+      const rawText = await res.text();
+      let data;
       try {
-        data = raw ? JSON.parse(raw) : {};
+        data = rawText ? JSON.parse(rawText) : {};
       } catch {
-        data = { raw };
+        data = { raw: rawText };
       }
 
       if (!res.ok) {
@@ -91,12 +129,22 @@ export default function VapiWidget({
 
       if (data?.id) setChatId(data.id);
 
-      const reply =
-        data?.output?.[0]?.content ||
-        data?.output?.[0]?.text ||
-        "Sorry, I did not get a reply. Please try again.";
+      const reply = extractReply(data);
 
-      setMessages((prev) => [...prev, { role: "assistant", text: reply }]);
+      if (!reply) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "assistant",
+            text:
+              "No reply field was found in the server response.\n\n" +
+              "Debug (response snippet):\n" +
+              safeStringify(data),
+          },
+        ]);
+      } else {
+        setMessages((prev) => [...prev, { role: "assistant", text: reply }]);
+      }
     } catch (err) {
       console.error(err);
       setMessages((prev) => [
@@ -124,7 +172,6 @@ export default function VapiWidget({
         </button>
       ) : (
         <div className="flex h-[540px] w-[380px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0A1020] shadow-[0_18px_70px_rgba(0,0,0,0.55)] ring-1 ring-white/10">
-          {/* Header */}
           <div className="flex items-center justify-between gap-3 border-b border-white/10 bg-[#0A1020]/90 px-4 py-3 backdrop-blur-xl">
             <div className="flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white text-black">
@@ -156,7 +203,6 @@ export default function VapiWidget({
             </div>
           </div>
 
-          {/* Messages */}
           <div
             ref={scrollRef}
             className="flex-1 overflow-auto bg-gradient-to-b from-[#0A1020] to-[#070A12] px-4 py-4"
@@ -187,7 +233,6 @@ export default function VapiWidget({
             </div>
           </div>
 
-          {/* Input */}
           <div className="border-t border-white/10 bg-[#0A1020]/90 px-3 py-3 backdrop-blur-xl">
             <div className="flex items-center gap-2">
               <input
