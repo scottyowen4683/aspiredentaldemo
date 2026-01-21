@@ -32,4 +32,5 @@ jobs:
           SOURCE_NAME: ${{ secrets.SOURCE_NAME }}
           EMBED_MODEL: text-embedding-3-small
         run: |
-          node scripts/index_kb_txt.js netlify/functions/moreton_kb.txt
+          node scripts/index_kb_txt.js netlify/functions/kb/moreton_kb.txt
+
