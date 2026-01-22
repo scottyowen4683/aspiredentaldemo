@@ -1,25 +1,12 @@
 // netlify/functions/vapi-chat.js
 //
-// Fixes conversation continuity by using Vapi sessionId properly.
-// - If no sessionId is provided, creates one via POST https://api.vapi.ai/session (requires assistantId)
-// - Then chats via POST https://api.vapi.ai/chat using ONLY { sessionId, input } (no assistantId allowed)
+// Multi-tenant KB retrieval + Vapi chat
+// Adds stable session support:
+// - Accepts client "sessionId" (preferred) OR "previousChatId" (legacy)
+// - Sends to Vapi as previousChatId
+// - Returns sessionId = Vapi response id (so client can persist it)
 //
-// Still supports KB retrieval + injection via Supabase + OpenAI embeddings.
-//
-// Request body expected from widget:
-// {
-//   assistantId: "...",         // required to create session if sessionId missing
-//   tenantId: "moreton",        // required for KB filtering
-//   input: "user message",      // required
-//   sessionId: "session_xxx"    // optional; persisted in localStorage by widget
-// }
-//
-// Response includes:
-// {
-//   ...vapiChatResponse,
-//   sessionId: "session_xxx",
-//   kb: { ...debug }
-// }
+// No extra dependencies: uses fetch only.
 
 const fs = require("fs");
 const path = require("path");
@@ -144,14 +131,17 @@ async function createEmbedding({ apiKey, model, input }) {
   return embedding;
 }
 
-async function supabaseRpcMatch({
-  supabaseUrl,
-  serviceRoleKey,
-  tenantId,
-  embedding,
-  matchCount,
-}) {
+async function supabaseRpcMatch({ supabaseUrl, serviceRoleKey, tenantId, embedding, matchCount }) {
   const endpoint = `${supabaseUrl.replace(/\/+$/, "")}/rest/v1/rpc/match_knowledge_chunks`;
+
+  // Your RPC expects:
+  // { query_embedding, match_count, tenant_filter }
+  // (This matches what your vapi-kb-tool.js is using.)
+  const bodyArray = {
+    query_embedding: embedding,
+    match_count: matchCount,
+    tenant_filter: tenantId,
+  };
 
   const headers = {
     apikey: serviceRoleKey,
@@ -160,12 +150,6 @@ async function supabaseRpcMatch({
   };
 
   // Attempt 1: send array
-  const bodyArray = {
-    p_tenant_id: tenantId,
-    p_query_embedding: embedding,
-    p_match_count: matchCount,
-  };
-
   let r = await fetch(endpoint, {
     method: "POST",
     headers,
@@ -184,9 +168,9 @@ async function supabaseRpcMatch({
 
   // Attempt 2: send vector literal string
   const bodyString = {
-    p_tenant_id: tenantId,
-    p_query_embedding: `[${embedding.join(",")}]`,
-    p_match_count: matchCount,
+    query_embedding: `[${embedding.join(",")}]`,
+    match_count: matchCount,
+    tenant_filter: tenantId,
   };
 
   r = await fetch(endpoint, {
@@ -218,76 +202,6 @@ async function supabaseRpcMatch({
   return data;
 }
 
-async function vapiCreateSession({ apiKey, assistantId }) {
-  const r = await fetch("https://api.vapi.ai/session", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ assistantId }),
-  });
-
-  const raw = await r.text();
-  let data;
-  try {
-    data = raw ? JSON.parse(raw) : {};
-  } catch {
-    data = { raw };
-  }
-
-  if (!r.ok) {
-    const msg =
-      data?.error ||
-      data?.message ||
-      (typeof data?.raw === "string" && data.raw.trim()
-        ? data.raw
-        : `Vapi session create failed (${r.status})`);
-    const err = new Error(msg);
-    err.status = r.status;
-    err.details = data;
-    throw err;
-  }
-
-  if (!data?.id) throw new Error("Vapi session create returned no session id.");
-  return data.id;
-}
-
-async function vapiChat({ apiKey, sessionId, input }) {
-  // IMPORTANT: when using sessionId, DO NOT send assistantId. Vapi will 400. :contentReference[oaicite:1]{index=1}
-  const r = await fetch("https://api.vapi.ai/chat", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ sessionId, input }),
-  });
-
-  const raw = await r.text();
-  let data;
-  try {
-    data = raw ? JSON.parse(raw) : {};
-  } catch {
-    data = { raw };
-  }
-
-  if (!r.ok) {
-    const msg =
-      data?.error ||
-      data?.message ||
-      (typeof data?.raw === "string" && data.raw.trim()
-        ? data.raw
-        : `Vapi chat failed (${r.status})`);
-    const err = new Error(msg);
-    err.status = r.status;
-    err.details = data;
-    throw err;
-  }
-
-  return data;
-}
-
 exports.handler = async (event) => {
   if (event.httpMethod === "OPTIONS") {
     return { statusCode: 204, headers: corsHeaders(), body: "" };
@@ -299,20 +213,20 @@ exports.handler = async (event) => {
 
   try {
     const body = event.body ? JSON.parse(event.body) : {};
+
     const {
       assistantId,
       tenantId: rawTenantId,
       input,
-      sessionId: incomingSessionId,
+
+      // ✅ accept BOTH (client can send either)
+      sessionId,
+      previousChatId,
     } = body || {};
 
-    if (!assistantId || typeof assistantId !== "string") {
-      return json(400, { error: "Missing assistantId" }, corsHeaders());
-    }
-
-    if (!input || typeof input !== "string") {
+    if (!assistantId) return json(400, { error: "Missing assistantId" }, corsHeaders());
+    if (!input || typeof input !== "string")
       return json(400, { error: "Missing input" }, corsHeaders());
-    }
 
     const tenantId = resolveTenantId(rawTenantId, assistantId);
     if (!tenantId) {
@@ -329,17 +243,9 @@ exports.handler = async (event) => {
     }
 
     const VAPI_API_KEY = process.env.VAPI_API_KEY;
-    if (!VAPI_API_KEY) {
-      return json(500, { error: "Missing VAPI_API_KEY on server" }, corsHeaders());
-    }
+    if (!VAPI_API_KEY) return json(500, { error: "Missing VAPI_API_KEY on server" }, corsHeaders());
 
-    // Resolve / create Vapi session
-    let sessionId = (incomingSessionId && String(incomingSessionId).trim()) || null;
-    if (!sessionId) {
-      sessionId = await vapiCreateSession({ apiKey: VAPI_API_KEY, assistantId });
-    }
-
-    // KB retrieval env
+    // KB env
     const SUPABASE_URL = process.env.SUPABASE_URL;
     const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
     const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
@@ -382,26 +288,64 @@ exports.handler = async (event) => {
         ].join("\n")
       : input.trim();
 
-    // Chat with Vapi using sessionId-only payload
-    let chatData;
+    // ✅ session continuity:
+    // client sessionId is just our stable name for Vapi previousChatId
+    const continuityId =
+      (typeof sessionId === "string" && sessionId.trim() ? sessionId.trim() : null) ||
+      (typeof previousChatId === "string" && previousChatId.trim() ? previousChatId.trim() : null);
+
+    const payload = {
+      assistantId,
+      input: injectedInput,
+      ...(continuityId ? { previousChatId: continuityId } : {}),
+    };
+
+    const r = await fetch("https://api.vapi.ai/chat", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${VAPI_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const raw = await r.text();
+    let data;
     try {
-      chatData = await vapiChat({ apiKey: VAPI_API_KEY, sessionId, input: injectedInput });
-    } catch (e) {
-      // If session expired (sessions expire ~24h) we recreate once and retry :contentReference[oaicite:2]{index=2}
-      const msg = String(e?.message || "");
-      if (msg.toLowerCase().includes("session") || msg.toLowerCase().includes("expired")) {
-        sessionId = await vapiCreateSession({ apiKey: VAPI_API_KEY, assistantId });
-        chatData = await vapiChat({ apiKey: VAPI_API_KEY, sessionId, input: injectedInput });
-      } else {
-        throw e;
-      }
+      data = raw ? JSON.parse(raw) : {};
+    } catch {
+      data = { raw };
     }
 
-    // Attach sessionId so the widget can persist it
-    chatData.sessionId = sessionId;
+    if (!r.ok) {
+      return json(
+        r.status,
+        {
+          error:
+            data?.error ||
+            data?.message ||
+            (typeof data?.raw === "string" && data.raw.trim()
+              ? data.raw
+              : `Vapi request failed (${r.status})`),
+          details: data,
+        },
+        corsHeaders()
+      );
+    }
 
-    // Optional debug
-    chatData.kb = {
+    // ✅ IMPORTANT:
+    // Return a stable sessionId for the widget to store.
+    // Vapi returns `id` for the chat session.
+    const returnedSessionId = typeof data?.id === "string" && data.id.trim() ? data.id.trim() : null;
+
+    // Attach compatibility fields WITHOUT breaking the Vapi response shape your widget reads
+    if (returnedSessionId) {
+      data.sessionId = returnedSessionId;      // what your widget expects
+      data.previousChatId = returnedSessionId; // optional
+    }
+
+    // Optional debug KB info
+    data.kb = {
       tenantId,
       used: Boolean(kbContext),
       matchCount: Array.isArray(kbMatches) ? kbMatches.length : 0,
@@ -417,7 +361,7 @@ exports.handler = async (event) => {
     return {
       statusCode: 200,
       headers: { ...corsHeaders(), "Content-Type": "application/json" },
-      body: JSON.stringify(chatData),
+      body: JSON.stringify(data),
     };
   } catch (err) {
     console.error("[vapi-chat] error", err);
