@@ -1,12 +1,11 @@
 // frontend/netlify/functions/kb-search.js
 //
-// Purpose:
-// - Given assistantId + query, map assistantId -> tenant_id
-// - Embed the query
-// - Call Supabase RPC match_knowledge_chunks
-// - Return top KB chunks (only for that tenant)
+// Supports 2 routing modes:
+// A) Preferred: pass tenant in URL query string: ?tenant=moreton
+// B) Fallback: pass assistantId (body or query string) and map via assistant-map.json
 //
-// This is designed to be called by Vapi tools/webhooks or your own backend.
+// Optional auth:
+// - If ASPIRE_API_KEY is set in Netlify env vars, requests MUST include header: x-aspire-key
 
 const fs = require("fs");
 const path = require("path");
@@ -25,10 +24,19 @@ function json(statusCode, body) {
     statusCode,
     headers: {
       "Content-Type": "application/json",
-      "Access-Control-Allow-Origin": "*"
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, x-aspire-key",
     },
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
   };
+}
+
+function getQueryParam(event, key) {
+  const raw = event.rawQuery || "";
+  const sp = new URLSearchParams(raw);
+  const v = sp.get(key);
+  return v && String(v).trim() ? String(v).trim() : null;
 }
 
 exports.handler = async (event) => {
@@ -38,9 +46,9 @@ exports.handler = async (event) => {
       headers: {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Methods": "POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type"
+        "Access-Control-Allow-Headers": "Content-Type, x-aspire-key",
       },
-      body: ""
+      body: "",
     };
   }
 
@@ -49,14 +57,23 @@ exports.handler = async (event) => {
   }
 
   try {
+    // Optional API key protection
+    const ASPIRE_API_KEY = process.env.ASPIRE_API_KEY;
+    if (ASPIRE_API_KEY) {
+      const provided =
+        event.headers?.["x-aspire-key"] ||
+        event.headers?.["X-Aspire-Key"] ||
+        event.headers?.["x-aspire-key".toLowerCase()];
+      if (!provided || provided !== ASPIRE_API_KEY) {
+        return json(401, { error: "Unauthorized (missing/invalid x-aspire-key)" });
+      }
+    }
+
     const body = event.body ? JSON.parse(event.body) : {};
-    const assistantId = body.assistantId;
+
     const query = body.query || body.input; // allow either field name
     const topK = Number(body.topK || 6);
 
-    if (!assistantId || typeof assistantId !== "string") {
-      return json(400, { error: "Missing assistantId" });
-    }
     if (!query || typeof query !== "string") {
       return json(400, { error: "Missing query (or input)" });
     }
@@ -72,41 +89,56 @@ exports.handler = async (event) => {
 
     const EMBED_MODEL = process.env.EMBED_MODEL || "text-embedding-3-small";
 
-    const map = loadAssistantMap();
-    const tenant_id = map[assistantId];
+    // Preferred: tenant passed in URL
+    let tenant_id = getQueryParam(event, "tenant");
 
+    // Fallback: tenant via assistant-map
     if (!tenant_id) {
-      return json(403, {
-        error: "assistantId is not mapped to a tenant",
-        assistantId
-      });
+      const assistantId =
+        (body.assistantId && String(body.assistantId).trim()) ||
+        getQueryParam(event, "assistantId");
+
+      if (!assistantId) {
+        return json(400, {
+          error:
+            "Missing tenant. Pass ?tenant=moreton in URL (preferred) or provide assistantId (body or ?assistantId=...).",
+        });
+      }
+
+      const map = loadAssistantMap();
+      tenant_id = map[assistantId];
+
+      if (!tenant_id) {
+        return json(403, {
+          error: "assistantId is not mapped to a tenant",
+          assistantId,
+        });
+      }
     }
 
     const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
-      auth: { persistSession: false }
+      auth: { persistSession: false },
     });
 
     const emb = await openai.embeddings.create({
       model: EMBED_MODEL,
-      input: query
+      input: query,
     });
 
     const query_embedding = emb.data[0].embedding;
 
-    // Calls your RPC function (you already have match_knowledge_chunks)
     const { data, error } = await supabase.rpc("match_knowledge_chunks", {
       query_embedding,
       match_count: topK,
-      tenant_filter: tenant_id
+      tenant_filter: tenant_id,
     });
 
     if (error) {
       return json(500, { error: "Supabase RPC failed", details: error });
     }
 
-    // Return a clean payload for Vapi tool usage
     return json(200, {
       tenant_id,
       topK,
@@ -115,8 +147,8 @@ exports.handler = async (event) => {
         source: r.source,
         section: r.section,
         content: r.content,
-        similarity: r.similarity
-      }))
+        similarity: r.similarity,
+      })),
     });
   } catch (err) {
     return json(500, { error: err?.message || "Server error" });
