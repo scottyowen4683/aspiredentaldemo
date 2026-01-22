@@ -5,7 +5,7 @@ const DEFAULT_GREETING =
 
 export default function VapiWidget({
   assistantId,
-  tenantId, // ✅ NEW (e.g. "moreton_bay")
+  tenantId, // ← REQUIRED for KB routing
   brandUrl = "https://aspireexecutive.ai",
   title = "Aspire AI Chat",
   greeting = DEFAULT_GREETING,
@@ -24,8 +24,13 @@ export default function VapiWidget({
   const scrollRef = useRef(null);
 
   const canSend = useMemo(() => {
-    return Boolean(assistantId) && input.trim().length > 0 && !busy;
-  }, [assistantId, input, busy]);
+    return (
+      Boolean(assistantId) &&
+      Boolean(tenantId) &&
+      input.trim().length > 0 &&
+      !busy
+    );
+  }, [assistantId, tenantId, input, busy]);
 
   useEffect(() => {
     if (!open) return;
@@ -45,29 +50,14 @@ export default function VapiWidget({
     const text = input.trim();
     if (!text || busy) return;
 
-    if (!assistantId) {
+    if (!assistantId || !tenantId) {
       setMessages((prev) => [
         ...prev,
         { role: "user", text },
         {
           role: "assistant",
           text:
-            "Error: assistantId is missing. Check Netlify environment variables and redeploy.",
-        },
-      ]);
-      setInput("");
-      return;
-    }
-
-    // tenantId is required for multi-council retrieval
-    if (!tenantId) {
-      setMessages((prev) => [
-        ...prev,
-        { role: "user", text },
-        {
-          role: "assistant",
-          text:
-            "Error: tenantId is missing. Pass tenantId (e.g. moreton_bay) into the VapiWidget component.",
+            "Configuration error: assistantId or tenantId is missing. Check the page setup.",
         },
       ]);
       setInput("");
@@ -84,7 +74,7 @@ export default function VapiWidget({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           assistantId,
-          tenantId, // ✅ NEW: tells backend which council KB to use
+          tenantId, // ← THIS IS THE KEY LINE
           input: text,
           previousChatId: chatId || undefined,
         }),
