@@ -1,20 +1,42 @@
 // netlify/functions/vapi-chat.js
 //
-// Multi-tenant KB retrieval + Vapi chat + OUR OWN SESSION CONTINUITY
+// Multi-tenant KB retrieval + Vapi chat + YOUR OWN SESSION CONTINUITY
 //
-// Key change:
-// - Vapi does NOT provide a stable session id for chat.
-// - We generate/accept our own sessionId and persist the returned Vapi chat id
-//   (data.id) against (tenantId, sessionId) in Supabase.
-// - On later requests we look up that stored vapi_chat_id and send as previousChatId.
+// Key fixes:
+// ✅ Accepts client-provided sessionId (generated/persisted by your widget)
+// ✅ If sessionId missing, generates one and returns it
+// ✅ Persists mapping: (tenantId, sessionId) -> vapi_chat_id in Supabase
+// ✅ On later turns, automatically sends previousChatId to Vapi (so Vapi remembers)
+// ✅ OPTIONAL memory summary read/write using your conversation_sessions table (ENV controlled)
+// ✅ Optional debug fields returned so you can verify what's happening in Network/Console
 //
-// Requires Supabase table:
-// public.chat_session_links (tenant_id, session_id, vapi_chat_id, updated_at)
+// Required ENV:
+// - VAPI_API_KEY
+// - SUPABASE_URL
+// - SUPABASE_SERVICE_ROLE_KEY
+// - OPENAI_API_KEY
 //
-// Optional KB injection remains the same.
+// Optional ENV:
+// - KB_ENABLED=true|false (default true)
+// - EMBED_MODEL=text-embedding-3-small (default)
+// - KB_MATCH_COUNT=5 (default)
+// - ALLOWED_TENANTS=moreton,goldcoast (optional)
+// - ENABLE_MEMORY_READ=true|false (default false here)
+// - ENABLE_MEMORY_WRITE=true|false (default false)
+// - MEMORY_MAX_CHARS=1200 (default 1200)
+// - MEMORY_SUMMARY_MODEL=gpt-4o-mini (default)
+// - MEMORY_CONTEXT_PREFIX="Conversation summary:" (default)
+//
+// Tables expected:
+// - public.chat_session_links (for vapi chat id mapping)
+// - public.conversation_sessions (your existing summary table)
 
 const fs = require("fs");
 const path = require("path");
+
+/* =========================
+   BASIC HELPERS
+========================= */
 
 function json(statusCode, bodyObj, extraHeaders = {}) {
   return {
@@ -33,6 +55,11 @@ function corsHeaders() {
     "Access-Control-Allow-Methods": "POST, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
   };
+}
+
+function singleLine(str) {
+  if (str == null) return "";
+  return String(str).replace(/\r?\n|\r/g, " ").replace(/\s+/g, " ").trim();
 }
 
 function normaliseTenantId(value) {
@@ -56,9 +83,11 @@ function loadAssistantMap() {
 }
 
 function resolveTenantId(rawTenantId, assistantId) {
+  // 1) explicit tenantId wins
   const direct = normaliseTenantId(rawTenantId);
   if (direct) return direct;
 
+  // 2) assistantId -> tenant map
   if (assistantId && typeof assistantId === "string") {
     try {
       const map = loadAssistantMap();
@@ -69,8 +98,18 @@ function resolveTenantId(rawTenantId, assistantId) {
       // ignore
     }
   }
+
   return null;
 }
+
+function makeSessionId() {
+  const rand = Math.random().toString(16).slice(2);
+  return `sess_${Date.now()}_${rand}`;
+}
+
+/* =========================
+   KB HELPERS
+========================= */
 
 function buildKbContext(matches) {
   if (!Array.isArray(matches) || matches.length === 0) return "";
@@ -103,7 +142,10 @@ async function createEmbedding({ apiKey, model, input }) {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ model, input }),
+    body: JSON.stringify({
+      model,
+      input,
+    }),
   });
 
   const raw = await r.text();
@@ -121,16 +163,14 @@ async function createEmbedding({ apiKey, model, input }) {
       (typeof data?.raw === "string" && data.raw.trim()
         ? data.raw
         : `OpenAI embeddings request failed (${r.status})`);
-    const err = new Error(msg);
-    err.status = r.status;
-    err.details = data;
-    throw err;
+    throw new Error(msg);
   }
 
   const embedding = data?.data?.[0]?.embedding;
   if (!Array.isArray(embedding) || embedding.length < 10) {
     throw new Error("OpenAI embeddings returned no embedding vector.");
   }
+
   return embedding;
 }
 
@@ -143,19 +183,19 @@ async function supabaseRpcMatch({
 }) {
   const endpoint = `${supabaseUrl.replace(/\/+$/, "")}/rest/v1/rpc/match_knowledge_chunks`;
 
-  const bodyArray = {
-    p_tenant_id: tenantId,
-    p_query_embedding: embedding,
-    p_match_count: matchCount,
-  };
-
   const headers = {
     apikey: serviceRoleKey,
     Authorization: `Bearer ${serviceRoleKey}`,
     "Content-Type": "application/json",
   };
 
-  // Attempt 1: array
+  // Attempt array first
+  const bodyArray = {
+    p_tenant_id: tenantId,
+    p_query_embedding: embedding,
+    p_match_count: matchCount,
+  };
+
   let r = await fetch(endpoint, {
     method: "POST",
     headers,
@@ -172,7 +212,7 @@ async function supabaseRpcMatch({
 
   if (r.ok) return data;
 
-  // Attempt 2: vector literal string
+  // Retry vector literal string
   const bodyString = {
     p_tenant_id: tenantId,
     p_query_embedding: `[${embedding.join(",")}]`,
@@ -199,26 +239,27 @@ async function supabaseRpcMatch({
       (typeof data?.raw === "string" && data.raw.trim()
         ? data.raw
         : `Supabase RPC failed (${r.status})`);
-    const err = new Error(msg);
-    err.status = r.status;
-    err.details = data;
-    throw err;
+    throw new Error(msg);
   }
 
   return data;
 }
 
 /* =========================
-   SESSION LINK STORAGE (Supabase PostgREST)
+   SUPABASE TABLE HELPERS (REST)
 ========================= */
 
-async function loadLinkedVapiChatId({ supabaseUrl, serviceRoleKey, tenantId, sessionId }) {
-  const endpoint = `${supabaseUrl.replace(/\/+$/, "")}/rest/v1/chat_session_links` +
+// GET single row: chat_session_links (tenant_id + session_id)
+async function getChatLink({ supabaseUrl, serviceRoleKey, tenantId, sessionId }) {
+  const base = supabaseUrl.replace(/\/+$/, "");
+  const url =
+    `${base}/rest/v1/chat_session_links` +
     `?tenant_id=eq.${encodeURIComponent(tenantId)}` +
     `&session_id=eq.${encodeURIComponent(sessionId)}` +
-    `&select=vapi_chat_id`;
+    `&select=vapi_chat_id,updated_at` +
+    `&limit=1`;
 
-  const r = await fetch(endpoint, {
+  const r = await fetch(url, {
     method: "GET",
     headers: {
       apikey: serviceRoleKey,
@@ -229,18 +270,22 @@ async function loadLinkedVapiChatId({ supabaseUrl, serviceRoleKey, tenantId, ses
 
   const raw = await r.text();
   let data;
-  try { data = raw ? JSON.parse(raw) : []; } catch { data = []; }
-
+  try {
+    data = raw ? JSON.parse(raw) : [];
+  } catch {
+    data = [];
+  }
   if (!r.ok) return null;
-  const row = Array.isArray(data) ? data[0] : null;
-  const id = row?.vapi_chat_id;
-  return typeof id === "string" && id.trim() ? id.trim() : null;
+  if (!Array.isArray(data) || data.length === 0) return null;
+  return data[0] || null;
 }
 
-async function upsertLinkedVapiChatId({ supabaseUrl, serviceRoleKey, tenantId, sessionId, vapiChatId }) {
-  const endpoint = `${supabaseUrl.replace(/\/+$/, "")}/rest/v1/chat_session_links`;
+// UPSERT: chat_session_links
+async function upsertChatLink({ supabaseUrl, serviceRoleKey, tenantId, sessionId, vapiChatId }) {
+  const base = supabaseUrl.replace(/\/+$/, "");
+  const url = `${base}/rest/v1/chat_session_links`;
 
-  const r = await fetch(endpoint, {
+  const r = await fetch(url, {
     method: "POST",
     headers: {
       apikey: serviceRoleKey,
@@ -248,19 +293,153 @@ async function upsertLinkedVapiChatId({ supabaseUrl, serviceRoleKey, tenantId, s
       "Content-Type": "application/json",
       Prefer: "resolution=merge-duplicates,return=minimal",
     },
-    body: JSON.stringify([{
-      tenant_id: tenantId,
-      session_id: sessionId,
-      vapi_chat_id: vapiChatId,
-      updated_at: new Date().toISOString(),
-    }]),
+    body: JSON.stringify([
+      {
+        tenant_id: tenantId,
+        session_id: sessionId,
+        vapi_chat_id: vapiChatId,
+        updated_at: new Date().toISOString(),
+      },
+    ]),
   });
 
-  // We don’t care about body; just that it worked
-  return r.ok;
+  if (!r.ok) {
+    // don't hard fail — you still want answers even if persistence hiccups
+    const raw = await r.text().catch(() => "");
+    console.warn("[chat_session_links] upsert failed:", raw);
+  }
 }
 
+// conversation_sessions: read summary
+async function getConversationSummary({ supabaseUrl, serviceRoleKey, tenantId, sessionId }) {
+  const base = supabaseUrl.replace(/\/+$/, "");
+  const url =
+    `${base}/rest/v1/conversation_sessions` +
+    `?tenant_id=eq.${encodeURIComponent(tenantId)}` +
+    `&session_id=eq.${encodeURIComponent(sessionId)}` +
+    `&select=summary,updated_at` +
+    `&limit=1`;
+
+  const r = await fetch(url, {
+    method: "GET",
+    headers: {
+      apikey: serviceRoleKey,
+      Authorization: `Bearer ${serviceRoleKey}`,
+      "Content-Type": "application/json",
+    },
+  });
+
+  const raw = await r.text();
+  let data;
+  try {
+    data = raw ? JSON.parse(raw) : [];
+  } catch {
+    data = [];
+  }
+  if (!r.ok) return null;
+  if (!Array.isArray(data) || data.length === 0) return null;
+  return data[0]?.summary ? String(data[0].summary) : null;
+}
+
+// conversation_sessions: upsert summary
+async function upsertConversationSummary({ supabaseUrl, serviceRoleKey, tenantId, sessionId, summary }) {
+  const base = supabaseUrl.replace(/\/+$/, "");
+  const url = `${base}/rest/v1/conversation_sessions`;
+
+  const r = await fetch(url, {
+    method: "POST",
+    headers: {
+      apikey: serviceRoleKey,
+      Authorization: `Bearer ${serviceRoleKey}`,
+      "Content-Type": "application/json",
+      Prefer: "resolution=merge-duplicates,return=minimal",
+    },
+    body: JSON.stringify([
+      {
+        tenant_id: tenantId,
+        session_id: sessionId,
+        summary,
+        updated_at: new Date().toISOString(),
+      },
+    ]),
+  });
+
+  if (!r.ok) {
+    const raw = await r.text().catch(() => "");
+    console.warn("[conversation_sessions] upsert failed:", raw);
+  }
+}
+
+// optional: update rolling summary with OpenAI chat
+async function updateRollingSummary({ openaiKey, model, maxChars, previousSummary, userInput, assistantOutput }) {
+  const prompt = [
+    "You are maintaining a short rolling summary of a user's ongoing chat session.",
+    `Return plain text only. Max ${maxChars} characters.`,
+    "Keep only stable facts and current intent. Be concise.",
+    "",
+    `PREVIOUS SUMMARY: ${previousSummary || "(none)"}`,
+    `LATEST USER MESSAGE: ${singleLine(userInput).slice(0, 800)}`,
+    `LATEST ASSISTANT OUTPUT: ${singleLine(assistantOutput).slice(0, 800)}`,
+    "",
+    "UPDATED SUMMARY:",
+  ].join("\n");
+
+  const r = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${openaiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model,
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.2,
+    }),
+  });
+
+  const raw = await r.text();
+  let data;
+  try {
+    data = raw ? JSON.parse(raw) : {};
+  } catch {
+    data = {};
+  }
+
+  if (!r.ok) {
+    const msg =
+      data?.error?.message ||
+      data?.message ||
+      (typeof raw === "string" && raw.trim() ? raw : "Summary update failed");
+    throw new Error(msg);
+  }
+
+  const text = data?.choices?.[0]?.message?.content;
+  if (!text) return null;
+  return singleLine(text).slice(0, maxChars);
+}
+
+/* =========================
+   CONFIG (ENV)
+========================= */
+
+const CFG = {
+  KB_ENABLED: String(process.env.KB_ENABLED || "true").toLowerCase() !== "false",
+  EMBED_MODEL: process.env.EMBED_MODEL || "text-embedding-3-small",
+  KB_MATCH_COUNT: Number(process.env.KB_MATCH_COUNT || 5),
+
+  ENABLE_MEMORY_READ: String(process.env.ENABLE_MEMORY_READ || "false").toLowerCase() === "true",
+  ENABLE_MEMORY_WRITE: String(process.env.ENABLE_MEMORY_WRITE || "false").toLowerCase() === "true",
+  MEMORY_MAX_CHARS: Number(process.env.MEMORY_MAX_CHARS || 1200),
+  MEMORY_SUMMARY_MODEL: process.env.MEMORY_SUMMARY_MODEL || "gpt-4o-mini",
+  MEMORY_CONTEXT_PREFIX: process.env.MEMORY_CONTEXT_PREFIX || "Conversation summary:",
+};
+
+/* =========================
+   HANDLER
+========================= */
+
 exports.handler = async (event) => {
+  // CORS preflight
   if (event.httpMethod === "OPTIONS") {
     return { statusCode: 204, headers: corsHeaders(), body: "" };
   }
@@ -271,13 +450,14 @@ exports.handler = async (event) => {
 
   try {
     const body = event.body ? JSON.parse(event.body) : {};
-
     const {
       assistantId,
       tenantId: rawTenantId,
       input,
-      sessionId: rawSessionId,     // ✅ our stable session key
-      previousChatId: rawPrevChatId // optional override
+      // client session id (from your widget localStorage)
+      sessionId: clientSessionId,
+      // allow manual override, but we will usually ignore and use our stored mapping
+      previousChatId: bodyPreviousChatId,
     } = body || {};
 
     if (!assistantId) return json(400, { error: "Missing assistantId" }, corsHeaders());
@@ -294,30 +474,42 @@ exports.handler = async (event) => {
     }
 
     const VAPI_API_KEY = process.env.VAPI_API_KEY;
-    if (!VAPI_API_KEY) return json(500, { error: "Missing VAPI_API_KEY on server" }, corsHeaders());
-
     const SUPABASE_URL = process.env.SUPABASE_URL;
     const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
     const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
-    const KB_ENABLED = String(process.env.KB_ENABLED || "true").toLowerCase() !== "false";
-    const EMBED_MODEL = process.env.EMBED_MODEL || "text-embedding-3-small";
-    const KB_MATCH_COUNT = Number(process.env.KB_MATCH_COUNT || 5);
+    if (!VAPI_API_KEY) return json(500, { error: "Missing VAPI_API_KEY on server" }, corsHeaders());
+    if (!SUPABASE_URL) return json(500, { error: "Missing SUPABASE_URL on server" }, corsHeaders());
+    if (!SUPABASE_SERVICE_ROLE_KEY) return json(500, { error: "Missing SUPABASE_SERVICE_ROLE_KEY on server" }, corsHeaders());
+    if (!OPENAI_API_KEY) return json(500, { error: "Missing OPENAI_API_KEY on server" }, corsHeaders());
 
-    // ✅ sessionId: if client didn’t send one, generate a simple fallback.
-    // (Client SHOULD send one; this just prevents hard failure.)
-    const sessionId =
-      (typeof rawSessionId === "string" && rawSessionId.trim() ? rawSessionId.trim() : null) ||
-      `sess_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    // Session id: use client session id if provided, else generate one
+    const sessionId = (typeof clientSessionId === "string" && clientSessionId.trim())
+      ? clientSessionId.trim()
+      : makeSessionId();
 
-    // ✅ Resolve previousChatId in priority order:
-    // 1) explicitly provided by client (rawPrevChatId)
-    // 2) load stored vapi_chat_id from Supabase via (tenantId, sessionId)
-    let previousChatId =
-      (typeof rawPrevChatId === "string" && rawPrevChatId.trim() ? rawPrevChatId.trim() : null);
+    // Look up our stored Vapi chat id for this session
+    const linkRow = await getChatLink({
+      supabaseUrl: SUPABASE_URL,
+      serviceRoleKey: SUPABASE_SERVICE_ROLE_KEY,
+      tenantId,
+      sessionId,
+    });
 
-    if (!previousChatId && SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
-      previousChatId = await loadLinkedVapiChatId({
+    const storedVapiChatId = linkRow?.vapi_chat_id ? String(linkRow.vapi_chat_id) : null;
+
+    // Choose the previousChatId we will send to Vapi:
+    // - manual override from caller wins ONLY if present
+    // - else stored mapping wins
+    const previousChatIdToSend =
+      (typeof bodyPreviousChatId === "string" && bodyPreviousChatId.trim())
+        ? bodyPreviousChatId.trim()
+        : (storedVapiChatId || null);
+
+    // Optional: load rolling summary (your own memory table) and inject into prompt
+    let conversationSummary = null;
+    if (CFG.ENABLE_MEMORY_READ) {
+      conversationSummary = await getConversationSummary({
         supabaseUrl: SUPABASE_URL,
         serviceRoleKey: SUPABASE_SERVICE_ROLE_KEY,
         tenantId,
@@ -325,14 +517,17 @@ exports.handler = async (event) => {
       });
     }
 
-    // ==== KB retrieval (optional) ====
+    /* =========================
+       KB retrieval
+    ========================= */
+
     let kbMatches = [];
     let kbContext = "";
 
-    if (KB_ENABLED && SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY && OPENAI_API_KEY) {
+    if (CFG.KB_ENABLED) {
       const queryEmbedding = await createEmbedding({
         apiKey: OPENAI_API_KEY,
-        model: EMBED_MODEL,
+        model: CFG.EMBED_MODEL,
         input: input.trim(),
       });
 
@@ -341,12 +536,16 @@ exports.handler = async (event) => {
         serviceRoleKey: SUPABASE_SERVICE_ROLE_KEY,
         tenantId,
         embedding: queryEmbedding,
-        matchCount: Number.isFinite(KB_MATCH_COUNT) ? KB_MATCH_COUNT : 5,
+        matchCount: Number.isFinite(CFG.KB_MATCH_COUNT) ? CFG.KB_MATCH_COUNT : 5,
       });
 
       kbMatches = Array.isArray(matches) ? matches : [];
       kbContext = buildKbContext(kbMatches);
     }
+
+    /* =========================
+       Build Vapi injected input
+    ========================= */
 
     const injectedInput = kbContext
       ? [
@@ -354,19 +553,26 @@ exports.handler = async (event) => {
           "Answer using ONLY the knowledge base excerpts below when they contain the answer.",
           "If the KB does not contain the answer, say you don’t have that information and suggest the best next step.",
           "",
+          conversationSummary
+            ? `${CFG.MEMORY_CONTEXT_PREFIX}\n${conversationSummary}\n`
+            : "",
           kbContext,
           "",
           `USER QUESTION: ${input.trim()}`,
         ].join("\n")
       : input.trim();
 
+    /* =========================
+       Call Vapi
+    ========================= */
+
     const payload = {
       assistantId,
       input: injectedInput,
-      ...(previousChatId ? { previousChatId } : {}),
+      ...(previousChatIdToSend ? { previousChatId: previousChatIdToSend } : {}),
     };
 
-    const r = await fetch("https://api.vapi.ai/chat", {
+    const vapiResp = await fetch("https://api.vapi.ai/chat", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${VAPI_API_KEY}`,
@@ -375,47 +581,94 @@ exports.handler = async (event) => {
       body: JSON.stringify(payload),
     });
 
-    const raw = await r.text();
+    const raw = await vapiResp.text();
     let data;
-    try { data = raw ? JSON.parse(raw) : {}; } catch { data = { raw }; }
+    try {
+      data = raw ? JSON.parse(raw) : {};
+    } catch {
+      data = { raw };
+    }
 
-    if (!r.ok) {
+    if (!vapiResp.ok) {
       return json(
-        r.status,
+        vapiResp.status,
         {
           error:
             data?.error ||
             data?.message ||
             (typeof data?.raw === "string" && data.raw.trim()
               ? data.raw
-              : `Vapi request failed (${r.status})`),
+              : `Vapi request failed (${vapiResp.status})`),
           details: data,
-          sessionId, // return anyway for debugging
+          sessionId,
         },
         corsHeaders()
       );
     }
 
-    // ✅ store Vapi chat id for next turn
-    const returnedVapiChatId = typeof data?.id === "string" && data.id.trim() ? data.id.trim() : null;
-    if (returnedVapiChatId && SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
-      await upsertLinkedVapiChatId({
+    // Vapi returns an id for the chat thread
+    const vapiChatIdReturned = data?.id ? String(data.id) : null;
+
+    // Store mapping (sessionId -> vapiChatIdReturned) so next request can continue
+    if (vapiChatIdReturned) {
+      await upsertChatLink({
         supabaseUrl: SUPABASE_URL,
         serviceRoleKey: SUPABASE_SERVICE_ROLE_KEY,
         tenantId,
         sessionId,
-        vapiChatId: returnedVapiChatId,
+        vapiChatId: vapiChatIdReturned,
       });
     }
 
-    // Helpful debug (safe)
-    data.sessionId = sessionId; // ✅ ALWAYS return our stable session id
+    // Optional: update rolling summary (your conversation_sessions table)
+    if (CFG.ENABLE_MEMORY_WRITE) {
+      try {
+        const prev = conversationSummary || null;
+        const replyText =
+          data?.output?.[0]?.content ||
+          data?.output?.[0]?.text ||
+          "";
+
+        const updated = await updateRollingSummary({
+          openaiKey: OPENAI_API_KEY,
+          model: CFG.MEMORY_SUMMARY_MODEL,
+          maxChars: CFG.MEMORY_MAX_CHARS,
+          previousSummary: prev,
+          userInput: input,
+          assistantOutput: replyText,
+        });
+
+        if (updated) {
+          await upsertConversationSummary({
+            supabaseUrl: SUPABASE_URL,
+            serviceRoleKey: SUPABASE_SERVICE_ROLE_KEY,
+            tenantId,
+            sessionId,
+            summary: updated,
+          });
+        }
+      } catch (e) {
+        console.warn("[memory] update failed:", e?.message || e);
+      }
+    }
+
+    // Attach debug block (safe, helps you verify continuity)
+    data.sessionId = sessionId;
     data.kb = {
       tenantId,
       used: Boolean(kbContext),
       matchCount: Array.isArray(kbMatches) ? kbMatches.length : 0,
-      previousChatIdSent: previousChatId || null,
-      vapiChatIdReturned: returnedVapiChatId || null,
+      previousChatIdSent: previousChatIdToSend,
+      vapiChatIdReturned,
+      storedVapiChatIdBeforeCall: storedVapiChatId,
+      memorySummaryUsed: Boolean(conversationSummary),
+      matches: (kbMatches || []).map((m) => ({
+        id: m.id,
+        section: m.section,
+        source: m.source,
+        similarity: m.similarity,
+        priority: m.priority,
+      })),
     };
 
     return {
