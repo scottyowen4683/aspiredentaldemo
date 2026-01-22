@@ -1,0 +1,28 @@
+name: Update assistant-map.json
+
+on:
+  push:
+    paths:
+      - "frontend/netlify/functions/tenants/assistant-map.json"
+
+  workflow_dispatch:
+
+jobs:
+  validate-assistant-map:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm install
+
+      - name: Validate assistant-map.json is valid JSON
+        run: node -e "JSON.parse(require('fs').readFileSync('frontend/netlify/functions/tenants/assistant-map.json','utf8')); console.log('assistant-map.json is valid JSON');"
