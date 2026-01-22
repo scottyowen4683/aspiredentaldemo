@@ -5,6 +5,7 @@ const DEFAULT_GREETING =
 
 export default function VapiWidget({
   assistantId,
+  tenantId, // ✅ ADD
   brandUrl = "https://aspireexecutive.ai",
   title = "Aspire AI Chat",
   greeting = DEFAULT_GREETING,
@@ -22,9 +23,17 @@ export default function VapiWidget({
 
   const scrollRef = useRef(null);
 
+  // ✅ Optional: pilot-safe fallback so it never breaks if tenantId isn't passed
+  const effectiveTenantId = (tenantId || "moreton").trim().toLowerCase();
+
   const canSend = useMemo(() => {
-    return Boolean(assistantId) && input.trim().length > 0 && !busy;
-  }, [assistantId, input, busy]);
+    return (
+      Boolean(assistantId) &&
+      Boolean(effectiveTenantId) &&
+      input.trim().length > 0 &&
+      !busy
+    );
+  }, [assistantId, effectiveTenantId, input, busy]);
 
   useEffect(() => {
     if (!open) return;
@@ -56,11 +65,17 @@ export default function VapiWidget({
       setMessages((prev) => [
         ...prev,
         { role: "user", text },
-        {
-          role: "assistant",
-          text:
-            "Missing assistantId. Add it to the page URL query string like: ?assistantId=YOUR_ID",
-        },
+        { role: "assistant", text: "Missing assistantId (page config)." },
+      ]);
+      setInput("");
+      return;
+    }
+
+    if (!effectiveTenantId) {
+      setMessages((prev) => [
+        ...prev,
+        { role: "user", text },
+        { role: "assistant", text: "Missing tenantId (page config)." },
       ]);
       setInput("");
       return;
@@ -76,6 +91,7 @@ export default function VapiWidget({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           assistantId,
+          tenantId: effectiveTenantId, // ✅ ADD (THIS fixes the 400)
           input: text,
           previousChatId: chatId || undefined,
         }),
