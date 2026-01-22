@@ -5,22 +5,21 @@
 // - Always returns { results: [ { toolCallId, result|error } ] }
 // - result/error MUST be a single-line string (no \n)
 //
+// Tenant resolution order (most reliable first):
+// 1) tenantId sent in the webhook body (from your website widget / vapi-chat)
+// 2) assistantId -> assistant-map.json (if assistantId is present)
+// 3) URL query string ?tenant=moreton fallback
+//
 // Function behavior:
-// - Works with Vapi payload shape where tool calls live under body.message.toolCalls
-// - Extracts toolCallId reliably (MUST match Vapi call id)
-// - Extracts query reliably (supports object or string arguments)
-// - Resolves tenant via (1) assistantId mapping OR (2) URL ?tenant=moreton fallback
+// - Extracts toolCallId from Vapi payload
+// - Extracts query from Vapi payload
 // - Embeds query and queries Supabase RPC match_knowledge_chunks
-// - Returns a compact single-line string summary of top KB chunks
+// - Returns a single-line string summary of top KB chunks
 
 const fs = require("fs");
 const path = require("path");
 const OpenAI = require("openai");
 const { createClient } = require("@supabase/supabase-js");
-
-/* =========================
-   UTILITIES
-   ========================= */
 
 function loadAssistantMap() {
   const p = path.join(__dirname, "tenants", "assistant-map.json");
@@ -43,7 +42,7 @@ function okVapi(toolCallId, resultStr) {
       "Content-Type": "application/json",
       "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Methods": "POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type, Authorization",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Aspire-Webhook-Secret",
     },
     body: JSON.stringify({
       results: [
@@ -63,7 +62,7 @@ function errVapi(toolCallId, errorStr) {
       "Content-Type": "application/json",
       "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Methods": "POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type, Authorization",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Aspire-Webhook-Secret",
     },
     body: JSON.stringify({
       results: [
@@ -83,79 +82,38 @@ function pickFirstString(...vals) {
   return null;
 }
 
-// Vapi sometimes wraps everything under body.message
-function unwrapPayload(body) {
-  if (body && typeof body === "object" && body.message && typeof body.message === "object") {
-    return body.message;
-  }
-  return body || {};
-}
-
-function getTenantFromUrl(event) {
-  try {
-    const u = new URL(event.rawUrl || event.headers?.referer || "http://x/");
-    const tenant = u.searchParams.get("tenant");
-    return tenant && tenant.trim() ? tenant.trim() : null;
-  } catch {
-    const tenant = event.queryStringParameters?.tenant;
-    return tenant && String(tenant).trim() ? String(tenant).trim() : null;
-  }
-}
-
-function extractFirstToolCall(payload) {
-  // Vapi log shows payload.toolCalls exists inside message
-  const tc =
-    payload?.toolCalls?.[0] ||
-    payload?.toolCallList?.[0] ||
-    payload?.tool_call_list?.[0] ||
-    null;
-
-  // Sometimes it’s nested again under toolWithToolCallList[].toolCall
-  if (!tc && Array.isArray(payload?.toolWithToolCallList) && payload.toolWithToolCallList[0]?.toolCall) {
-    return payload.toolWithToolCallList[0].toolCall;
-  }
-
-  return tc;
-}
-
-function extractToolCallId(payload) {
-  const tc = extractFirstToolCall(payload);
+function extractToolCallId(body) {
+  // Vapi may send this in different shapes
   return pickFirstString(
-    payload?.toolCallId,
-    payload?.tool_call_id,
-    tc?.id
+    body?.toolCallId,
+    body?.tool_call_id,
+    body?.toolCall?.id,
+    body?.tool_call?.id,
+    body?.message?.toolCallId,
+    body?.message?.toolCall?.id,
+    body?.call?.toolCallId,
+    body?.message?.toolCalls?.[0]?.id,
+    body?.message?.toolCallList?.[0]?.id
   );
 }
 
-function extractQuery(payload) {
-  const tc = extractFirstToolCall(payload);
-
-  // direct common fields
-  const direct = pickFirstString(payload?.query, payload?.input, payload?.text);
-  if (direct) return direct;
-
-  const args = tc?.function?.arguments;
-
-  // Your log shows arguments can be an OBJECT: { query: "..." }
-  if (args && typeof args === "object") {
-    return pickFirstString(args.query, args.input);
-  }
-
-  // Or arguments could be a JSON string: "{\"query\":\"...\"}"
-  if (typeof args === "string" && args.trim()) {
-    try {
-      const parsed = JSON.parse(args);
-      return pickFirstString(parsed?.query, parsed?.input) || args.trim();
-    } catch {
-      return args.trim();
-    }
-  }
-
-  return null;
+function extractQuery(body) {
+  // Your tool parameter is "query" in Vapi, but it often arrives nested.
+  return pickFirstString(
+    body?.query,
+    body?.input,
+    body?.text,
+    body?.arguments?.query,
+    body?.params?.query,
+    body?.toolCall?.arguments?.query,
+    body?.tool_call?.arguments?.query,
+    body?.message?.toolCall?.arguments?.query,
+    body?.message?.toolCalls?.[0]?.function?.arguments?.query,
+    body?.message?.toolCallList?.[0]?.function?.arguments?.query
+  );
 }
 
-function extractAssistantId(body, payload) {
-  // In your logs, assistant info is outside message: body.assistant.id
+function extractAssistantId(body) {
   return pickFirstString(
     body?.assistantId,
     body?.assistant_id,
@@ -163,13 +121,35 @@ function extractAssistantId(body, payload) {
     body?.call?.assistantId,
     body?.call?.assistant?.id,
     body?.metadata?.assistantId,
-    body?.metadata?.assistant?.id,
-
-    // sometimes can be inside message too
-    payload?.assistantId,
-    payload?.assistant_id,
-    payload?.assistant?.id
+    body?.metadata?.assistant?.id
   );
+}
+
+function extractTenantId(body) {
+  // Allow tenantId to be passed from your website widget / vapi-chat path
+  return pickFirstString(
+    body?.tenantId,
+    body?.tenant_id,
+    body?.metadata?.tenantId,
+    body?.metadata?.tenant_id,
+    body?.message?.tenantId,
+    body?.message?.metadata?.tenantId
+  );
+}
+
+function getTenantFromUrl(event) {
+  // Netlify gives queryStringParameters reliably
+  const qsTenant = event.queryStringParameters?.tenant;
+  if (qsTenant && String(qsTenant).trim()) return String(qsTenant).trim();
+
+  // Also try rawUrl if available
+  try {
+    const u = new URL(event.rawUrl || "http://x/");
+    const tenant = u.searchParams.get("tenant");
+    return tenant && tenant.trim() ? tenant.trim() : null;
+  } catch {
+    return null;
+  }
 }
 
 function formatKbResults(results, maxChars = 3500) {
@@ -189,10 +169,6 @@ function formatKbResults(results, maxChars = 3500) {
   return out.replace(/\s\|\|\s$/, "").trim();
 }
 
-/* =========================
-   HANDLER
-   ========================= */
-
 exports.handler = async (event) => {
   if (event.httpMethod === "OPTIONS") {
     return {
@@ -200,13 +176,12 @@ exports.handler = async (event) => {
       headers: {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Methods": "POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Aspire-Webhook-Secret",
       },
       body: "",
     };
   }
 
-  // Vapi expects POST
   if (event.httpMethod !== "POST") {
     return errVapi("call_unknown", "Method Not Allowed (POST required).");
   }
@@ -218,46 +193,49 @@ exports.handler = async (event) => {
     return errVapi("call_unknown", "Invalid JSON body.");
   }
 
-  // Unwrap Vapi message envelope
-  const payload = unwrapPayload(body);
-
-  // Logs (keep)
+  // Debug logs (keep while stabilising)
   console.log("VAPI_RAW_BODY:", JSON.stringify(body).slice(0, 5000));
   console.log("VAPI_QUERYSTRING:", event.queryStringParameters);
 
-  // Extract tool call + query correctly from payload.message.*
-  const toolCallId = extractToolCallId(payload) || "call_unknown";
-  const query = extractQuery(payload);
-  const assistantId = extractAssistantId(body, payload);
+  const toolCallId = extractToolCallId(body) || "call_unknown";
+  const query = extractQuery(body);
+  const assistantId = extractAssistantId(body);
 
-  // Tenant resolution:
-  // (A) assistantId -> tenant via assistant-map.json
-  // (B) fallback: URL query param ?tenant=moreton
+  // Tenant resolution
+  const tenantFromBody = extractTenantId(body);
   const tenantFromUrl = getTenantFromUrl(event);
 
   if (!query) {
     return errVapi(
       toolCallId,
-      "Missing query. Vapi did not supply arguments.query. Check tool schema required:['query'] and assistant tool call."
+      "Missing query. Ensure the Vapi tool has required parameter 'query' and the assistant is passing it."
     );
   }
 
-  const map = (() => {
-    try {
-      return loadAssistantMap();
-    } catch {
-      return {};
-    }
-  })();
-
   let tenant_id = null;
-  if (assistantId && map[assistantId]) tenant_id = map[assistantId];
+
+  // 1) Explicit tenantId passed in body
+  if (tenantFromBody) tenant_id = tenantFromBody;
+
+  // 2) assistantId map
+  if (!tenant_id) {
+    const map = (() => {
+      try {
+        return loadAssistantMap();
+      } catch {
+        return {};
+      }
+    })();
+    if (assistantId && map[assistantId]) tenant_id = map[assistantId];
+  }
+
+  // 3) URL fallback
   if (!tenant_id && tenantFromUrl) tenant_id = tenantFromUrl;
 
   if (!tenant_id) {
     return errVapi(
       toolCallId,
-      `Missing tenant id. assistantId not mapped and no ?tenant= provided. assistantId=${assistantId || "null"}`
+      `Missing tenant id. No tenantId in body, assistantId not mapped, and no ?tenant= provided. assistantId=${assistantId || "null"}`
     );
   }
 
@@ -288,11 +266,9 @@ exports.handler = async (event) => {
       return errVapi(toolCallId, "Embedding failed: no embedding returned.");
     }
 
-    const topK = 6;
-
     const { data, error } = await supabase.rpc("match_knowledge_chunks", {
       query_embedding,
-      match_count: topK,
+      match_count: 6,
       tenant_filter: tenant_id,
     });
 
@@ -308,8 +284,7 @@ exports.handler = async (event) => {
       similarity: r.similarity,
     }));
 
-    const resultStr = formatKbResults(results);
-    return okVapi(toolCallId, resultStr);
+    return okVapi(toolCallId, formatKbResults(results));
   } catch (e) {
     return errVapi(toolCallId, `KB search failed: ${singleLine(e?.message || e)}`);
   }
