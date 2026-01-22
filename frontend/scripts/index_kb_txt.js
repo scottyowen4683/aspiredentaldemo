@@ -159,23 +159,21 @@ function chunkBlockText(bodyText) {
   const text = normaliseText(bodyText);
   if (!text) return [];
 
-  const MIN_CHARS = 700;
   const MAX_CHARS = 2200;
 
-  const paras = text.split("\n\n");
-  const chunks = [];
-  let buf = "";
-
-  const flush = (force = false) => {
-    const c = buf.trim();
-    if (!c) {
-      buf = "";
-      return;
-    }
-    if (!force && c.length < MIN_CHARS) return;
-    chunks.push(c);
+const flush = () => {
+  const c = buf.trim();
+  if (!c) {
     buf = "";
-  };
+    return;
+  }
+
+  // Always emit the chunk.
+  // Headings define meaning, not size.
+  chunks.push(c);
+  buf = "";
+};
+
 
   for (const p of paras) {
     const para = p.trim();
