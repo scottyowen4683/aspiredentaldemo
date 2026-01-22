@@ -6,16 +6,21 @@
 // - result/error MUST be a single-line string (no \n)
 //
 // Function behavior:
-// - Extracts toolCallId from Vapi payload (including toolCalls[0].id)
-// - Extracts query from Vapi payload (including toolCalls[0].function.arguments JSON string)
+// - Works with Vapi payload shape where tool calls live under body.message.toolCalls
+// - Extracts toolCallId reliably (MUST match Vapi call id)
+// - Extracts query reliably (supports object or string arguments)
 // - Resolves tenant via (1) assistantId mapping OR (2) URL ?tenant=moreton fallback
 // - Embeds query and queries Supabase RPC match_knowledge_chunks
-// - Returns a single-line string summary of top KB chunks
+// - Returns a compact single-line string summary of top KB chunks
 
 const fs = require("fs");
 const path = require("path");
 const OpenAI = require("openai");
 const { createClient } = require("@supabase/supabase-js");
+
+/* =========================
+   UTILITIES
+   ========================= */
 
 function loadAssistantMap() {
   const p = path.join(__dirname, "tenants", "assistant-map.json");
@@ -78,71 +83,79 @@ function pickFirstString(...vals) {
   return null;
 }
 
-function extractToolCallId(body) {
-  // Vapi may send this in different shapes.
-  // Your log shows: body.toolCalls[0].id
-  return pickFirstString(
-    body?.toolCallId,
-    body?.tool_call_id,
-    body?.toolCall?.id,
-    body?.tool_call?.id,
-    body?.message?.toolCallId,
-    body?.message?.toolCall?.id,
-    body?.call?.toolCallId,
+// Vapi sometimes wraps everything under body.message
+function unwrapPayload(body) {
+  if (body && typeof body === "object" && body.message && typeof body.message === "object") {
+    return body.message;
+  }
+  return body || {};
+}
 
-    // ✅ IMPORTANT: Vapi chat payload often includes toolCalls[]
-    body?.toolCalls?.[0]?.id,
-    body?.tool_calls?.[0]?.id
+function getTenantFromUrl(event) {
+  try {
+    const u = new URL(event.rawUrl || event.headers?.referer || "http://x/");
+    const tenant = u.searchParams.get("tenant");
+    return tenant && tenant.trim() ? tenant.trim() : null;
+  } catch {
+    const tenant = event.queryStringParameters?.tenant;
+    return tenant && String(tenant).trim() ? String(tenant).trim() : null;
+  }
+}
+
+function extractFirstToolCall(payload) {
+  // Vapi log shows payload.toolCalls exists inside message
+  const tc =
+    payload?.toolCalls?.[0] ||
+    payload?.toolCallList?.[0] ||
+    payload?.tool_call_list?.[0] ||
+    null;
+
+  // Sometimes it’s nested again under toolWithToolCallList[].toolCall
+  if (!tc && Array.isArray(payload?.toolWithToolCallList) && payload.toolWithToolCallList[0]?.toolCall) {
+    return payload.toolWithToolCallList[0].toolCall;
+  }
+
+  return tc;
+}
+
+function extractToolCallId(payload) {
+  const tc = extractFirstToolCall(payload);
+  return pickFirstString(
+    payload?.toolCallId,
+    payload?.tool_call_id,
+    tc?.id
   );
 }
 
-function extractQuery(body) {
-  // Try direct/common locations first
-  const direct = pickFirstString(
-    body?.query,
-    body?.input,
-    body?.text,
-    body?.arguments?.query,
-    body?.arguments?.input,
-    body?.params?.query,
-    body?.params?.input,
-    body?.toolCall?.arguments?.query,
-    body?.toolCall?.arguments?.input,
-    body?.message?.toolCall?.arguments?.query,
-    body?.message?.toolCall?.arguments?.input,
-    body?.tool_call?.arguments?.query,
-    body?.tool_call?.arguments?.input
-  );
-  if (direct) return direct;
+function extractQuery(payload) {
+  const tc = extractFirstToolCall(payload);
 
-  // ✅ IMPORTANT: Vapi often sends tool calls under toolCalls[]
-  // and arguments can be a STRING of JSON (as in your log).
-  const tc = body?.toolCalls?.[0] || body?.tool_calls?.[0] || null;
-  if (!tc) return null;
+  // direct common fields
+  const direct = pickFirstString(payload?.query, payload?.input, payload?.text);
+  if (direct) return direct;
 
   const args = tc?.function?.arguments;
 
-  // If args is an object already
+  // Your log shows arguments can be an OBJECT: { query: "..." }
   if (args && typeof args === "object") {
-    return pickFirstString(args.query, args.input, tc?.query, tc?.input);
+    return pickFirstString(args.query, args.input);
   }
 
-  // If args is a JSON string (your case)
+  // Or arguments could be a JSON string: "{\"query\":\"...\"}"
   if (typeof args === "string" && args.trim()) {
     try {
       const parsed = JSON.parse(args);
-      return pickFirstString(parsed?.query, parsed?.input);
+      return pickFirstString(parsed?.query, parsed?.input) || args.trim();
     } catch {
-      // As a fallback, if it’s just raw text, return it
       return args.trim();
     }
   }
 
-  // fallback
-  return pickFirstString(tc?.query, tc?.input);
+  return null;
 }
 
-function extractAssistantId(body) {
+function extractAssistantId(body, payload) {
+  // In your logs, assistant info is outside message: body.assistant.id
   return pickFirstString(
     body?.assistantId,
     body?.assistant_id,
@@ -150,21 +163,13 @@ function extractAssistantId(body) {
     body?.call?.assistantId,
     body?.call?.assistant?.id,
     body?.metadata?.assistantId,
-    body?.metadata?.assistant?.id
-  );
-}
+    body?.metadata?.assistant?.id,
 
-function getTenantFromUrl(event) {
-  try {
-    const u = new URL(event.rawUrl || event.headers?.referer || "http://x/");
-    // Netlify provides rawUrl in most environments
-    const tenant = u.searchParams.get("tenant");
-    return tenant && tenant.trim() ? tenant.trim() : null;
-  } catch {
-    // fallback parse from event.queryStringParameters
-    const tenant = event.queryStringParameters?.tenant;
-    return tenant && String(tenant).trim() ? String(tenant).trim() : null;
-  }
+    // sometimes can be inside message too
+    payload?.assistantId,
+    payload?.assistant_id,
+    payload?.assistant?.id
+  );
 }
 
 function formatKbResults(results, maxChars = 3500) {
@@ -172,13 +177,9 @@ function formatKbResults(results, maxChars = 3500) {
     return "No relevant knowledge base entries found.";
   }
 
-  // Build a compact single-line response the model can use.
-  // Keep it short enough to avoid truncation / tool limits.
   let out = "KB matches: ";
   for (const r of results) {
-    const part = `[${r.section || "KB"} | ${r.source || "source"}] ${
-      r.content || ""
-    }`;
+    const part = `[${r.section || "KB"} | ${r.source || "source"}] ${r.content || ""}`;
     const cleaned = singleLine(part);
 
     if (out.length + cleaned.length + 3 > maxChars) break;
@@ -187,6 +188,10 @@ function formatKbResults(results, maxChars = 3500) {
 
   return out.replace(/\s\|\|\s$/, "").trim();
 }
+
+/* =========================
+   HANDLER
+   ========================= */
 
 exports.handler = async (event) => {
   if (event.httpMethod === "OPTIONS") {
@@ -203,7 +208,6 @@ exports.handler = async (event) => {
 
   // Vapi expects POST
   if (event.httpMethod !== "POST") {
-    // Still return 200 with error envelope to keep Vapi happy
     return errVapi("call_unknown", "Method Not Allowed (POST required).");
   }
 
@@ -214,12 +218,17 @@ exports.handler = async (event) => {
     return errVapi("call_unknown", "Invalid JSON body.");
   }
 
+  // Unwrap Vapi message envelope
+  const payload = unwrapPayload(body);
+
+  // Logs (keep)
   console.log("VAPI_RAW_BODY:", JSON.stringify(body).slice(0, 5000));
   console.log("VAPI_QUERYSTRING:", event.queryStringParameters);
 
-  const toolCallId = extractToolCallId(body) || "call_unknown";
-  const query = extractQuery(body);
-  const assistantId = extractAssistantId(body);
+  // Extract tool call + query correctly from payload.message.*
+  const toolCallId = extractToolCallId(payload) || "call_unknown";
+  const query = extractQuery(payload);
+  const assistantId = extractAssistantId(body, payload);
 
   // Tenant resolution:
   // (A) assistantId -> tenant via assistant-map.json
@@ -229,7 +238,7 @@ exports.handler = async (event) => {
   if (!query) {
     return errVapi(
       toolCallId,
-      "Missing query. Ensure the Vapi tool has required parameter 'query' and the assistant is passing it."
+      "Missing query. Vapi did not supply arguments.query. Check tool schema required:['query'] and assistant tool call."
     );
   }
 
@@ -258,15 +267,10 @@ exports.handler = async (event) => {
   const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
   const EMBED_MODEL = process.env.EMBED_MODEL || "text-embedding-3-small";
 
-  if (!SUPABASE_URL)
-    return errVapi(toolCallId, "Server misconfig: Missing SUPABASE_URL.");
+  if (!SUPABASE_URL) return errVapi(toolCallId, "Server misconfig: Missing SUPABASE_URL.");
   if (!SUPABASE_SERVICE_ROLE_KEY)
-    return errVapi(
-      toolCallId,
-      "Server misconfig: Missing SUPABASE_SERVICE_ROLE_KEY."
-    );
-  if (!OPENAI_API_KEY)
-    return errVapi(toolCallId, "Server misconfig: Missing OPENAI_API_KEY.");
+    return errVapi(toolCallId, "Server misconfig: Missing SUPABASE_SERVICE_ROLE_KEY.");
+  if (!OPENAI_API_KEY) return errVapi(toolCallId, "Server misconfig: Missing OPENAI_API_KEY.");
 
   try {
     const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
@@ -293,10 +297,7 @@ exports.handler = async (event) => {
     });
 
     if (error) {
-      return errVapi(
-        toolCallId,
-        `Supabase RPC failed: ${singleLine(JSON.stringify(error))}`
-      );
+      return errVapi(toolCallId, `Supabase RPC failed: ${singleLine(JSON.stringify(error))}`);
     }
 
     const results = (data || []).map((r) => ({
@@ -310,9 +311,6 @@ exports.handler = async (event) => {
     const resultStr = formatKbResults(results);
     return okVapi(toolCallId, resultStr);
   } catch (e) {
-    return errVapi(
-      toolCallId,
-      `KB search failed: ${singleLine(e?.message || e)}`
-    );
+    return errVapi(toolCallId, `KB search failed: ${singleLine(e?.message || e)}`);
   }
 };
