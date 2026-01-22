@@ -1,12 +1,17 @@
 // netlify/functions/vapi-chat.js
 //
-// Multi-tenant KB retrieval + Vapi chat
-// Adds stable session support:
-// - Accepts client "sessionId" (preferred) OR "previousChatId" (legacy)
-// - Sends to Vapi as previousChatId
-// - Returns sessionId = Vapi response id (so client can persist it)
+// Multi-tenant KB retrieval + Vapi chat + OUR OWN SESSION CONTINUITY
 //
-// No extra dependencies: uses fetch only.
+// Key change:
+// - Vapi does NOT provide a stable session id for chat.
+// - We generate/accept our own sessionId and persist the returned Vapi chat id
+//   (data.id) against (tenantId, sessionId) in Supabase.
+// - On later requests we look up that stored vapi_chat_id and send as previousChatId.
+//
+// Requires Supabase table:
+// public.chat_session_links (tenant_id, session_id, vapi_chat_id, updated_at)
+//
+// Optional KB injection remains the same.
 
 const fs = require("fs");
 const path = require("path");
@@ -64,7 +69,6 @@ function resolveTenantId(rawTenantId, assistantId) {
       // ignore
     }
   }
-
   return null;
 }
 
@@ -127,20 +131,22 @@ async function createEmbedding({ apiKey, model, input }) {
   if (!Array.isArray(embedding) || embedding.length < 10) {
     throw new Error("OpenAI embeddings returned no embedding vector.");
   }
-
   return embedding;
 }
 
-async function supabaseRpcMatch({ supabaseUrl, serviceRoleKey, tenantId, embedding, matchCount }) {
+async function supabaseRpcMatch({
+  supabaseUrl,
+  serviceRoleKey,
+  tenantId,
+  embedding,
+  matchCount,
+}) {
   const endpoint = `${supabaseUrl.replace(/\/+$/, "")}/rest/v1/rpc/match_knowledge_chunks`;
 
-  // Your RPC expects:
-  // { query_embedding, match_count, tenant_filter }
-  // (This matches what your vapi-kb-tool.js is using.)
   const bodyArray = {
-    query_embedding: embedding,
-    match_count: matchCount,
-    tenant_filter: tenantId,
+    p_tenant_id: tenantId,
+    p_query_embedding: embedding,
+    p_match_count: matchCount,
   };
 
   const headers = {
@@ -149,7 +155,7 @@ async function supabaseRpcMatch({ supabaseUrl, serviceRoleKey, tenantId, embeddi
     "Content-Type": "application/json",
   };
 
-  // Attempt 1: send array
+  // Attempt 1: array
   let r = await fetch(endpoint, {
     method: "POST",
     headers,
@@ -166,11 +172,11 @@ async function supabaseRpcMatch({ supabaseUrl, serviceRoleKey, tenantId, embeddi
 
   if (r.ok) return data;
 
-  // Attempt 2: send vector literal string
+  // Attempt 2: vector literal string
   const bodyString = {
-    query_embedding: `[${embedding.join(",")}]`,
-    match_count: matchCount,
-    tenant_filter: tenantId,
+    p_tenant_id: tenantId,
+    p_query_embedding: `[${embedding.join(",")}]`,
+    p_match_count: matchCount,
   };
 
   r = await fetch(endpoint, {
@@ -202,6 +208,58 @@ async function supabaseRpcMatch({ supabaseUrl, serviceRoleKey, tenantId, embeddi
   return data;
 }
 
+/* =========================
+   SESSION LINK STORAGE (Supabase PostgREST)
+========================= */
+
+async function loadLinkedVapiChatId({ supabaseUrl, serviceRoleKey, tenantId, sessionId }) {
+  const endpoint = `${supabaseUrl.replace(/\/+$/, "")}/rest/v1/chat_session_links` +
+    `?tenant_id=eq.${encodeURIComponent(tenantId)}` +
+    `&session_id=eq.${encodeURIComponent(sessionId)}` +
+    `&select=vapi_chat_id`;
+
+  const r = await fetch(endpoint, {
+    method: "GET",
+    headers: {
+      apikey: serviceRoleKey,
+      Authorization: `Bearer ${serviceRoleKey}`,
+      "Content-Type": "application/json",
+    },
+  });
+
+  const raw = await r.text();
+  let data;
+  try { data = raw ? JSON.parse(raw) : []; } catch { data = []; }
+
+  if (!r.ok) return null;
+  const row = Array.isArray(data) ? data[0] : null;
+  const id = row?.vapi_chat_id;
+  return typeof id === "string" && id.trim() ? id.trim() : null;
+}
+
+async function upsertLinkedVapiChatId({ supabaseUrl, serviceRoleKey, tenantId, sessionId, vapiChatId }) {
+  const endpoint = `${supabaseUrl.replace(/\/+$/, "")}/rest/v1/chat_session_links`;
+
+  const r = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      apikey: serviceRoleKey,
+      Authorization: `Bearer ${serviceRoleKey}`,
+      "Content-Type": "application/json",
+      Prefer: "resolution=merge-duplicates,return=minimal",
+    },
+    body: JSON.stringify([{
+      tenant_id: tenantId,
+      session_id: sessionId,
+      vapi_chat_id: vapiChatId,
+      updated_at: new Date().toISOString(),
+    }]),
+  });
+
+  // We don’t care about body; just that it worked
+  return r.ok;
+}
+
 exports.handler = async (event) => {
   if (event.httpMethod === "OPTIONS") {
     return { statusCode: 204, headers: corsHeaders(), body: "" };
@@ -218,23 +276,16 @@ exports.handler = async (event) => {
       assistantId,
       tenantId: rawTenantId,
       input,
-
-      // ✅ accept BOTH (client can send either)
-      sessionId,
-      previousChatId,
+      sessionId: rawSessionId,     // ✅ our stable session key
+      previousChatId: rawPrevChatId // optional override
     } = body || {};
 
     if (!assistantId) return json(400, { error: "Missing assistantId" }, corsHeaders());
-    if (!input || typeof input !== "string")
-      return json(400, { error: "Missing input" }, corsHeaders());
+    if (!input || typeof input !== "string") return json(400, { error: "Missing input" }, corsHeaders());
 
     const tenantId = resolveTenantId(rawTenantId, assistantId);
     if (!tenantId) {
-      return json(
-        400,
-        { error: "Missing tenantId (not provided and assistantId not mapped)" },
-        corsHeaders()
-      );
+      return json(400, { error: "Missing tenantId (not provided and assistantId not mapped)" }, corsHeaders());
     }
 
     const allowedTenants = parseAllowedTenants(process.env.ALLOWED_TENANTS);
@@ -245,7 +296,6 @@ exports.handler = async (event) => {
     const VAPI_API_KEY = process.env.VAPI_API_KEY;
     if (!VAPI_API_KEY) return json(500, { error: "Missing VAPI_API_KEY on server" }, corsHeaders());
 
-    // KB env
     const SUPABASE_URL = process.env.SUPABASE_URL;
     const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
     const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
@@ -254,6 +304,28 @@ exports.handler = async (event) => {
     const EMBED_MODEL = process.env.EMBED_MODEL || "text-embedding-3-small";
     const KB_MATCH_COUNT = Number(process.env.KB_MATCH_COUNT || 5);
 
+    // ✅ sessionId: if client didn’t send one, generate a simple fallback.
+    // (Client SHOULD send one; this just prevents hard failure.)
+    const sessionId =
+      (typeof rawSessionId === "string" && rawSessionId.trim() ? rawSessionId.trim() : null) ||
+      `sess_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+
+    // ✅ Resolve previousChatId in priority order:
+    // 1) explicitly provided by client (rawPrevChatId)
+    // 2) load stored vapi_chat_id from Supabase via (tenantId, sessionId)
+    let previousChatId =
+      (typeof rawPrevChatId === "string" && rawPrevChatId.trim() ? rawPrevChatId.trim() : null);
+
+    if (!previousChatId && SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
+      previousChatId = await loadLinkedVapiChatId({
+        supabaseUrl: SUPABASE_URL,
+        serviceRoleKey: SUPABASE_SERVICE_ROLE_KEY,
+        tenantId,
+        sessionId,
+      });
+    }
+
+    // ==== KB retrieval (optional) ====
     let kbMatches = [];
     let kbContext = "";
 
@@ -280,7 +352,7 @@ exports.handler = async (event) => {
       ? [
           "You are a helpful council assistant.",
           "Answer using ONLY the knowledge base excerpts below when they contain the answer.",
-          "If the KB does not contain the answer, say you don’t have that information and suggest the best next step (e.g., contact council / check the website).",
+          "If the KB does not contain the answer, say you don’t have that information and suggest the best next step.",
           "",
           kbContext,
           "",
@@ -288,16 +360,10 @@ exports.handler = async (event) => {
         ].join("\n")
       : input.trim();
 
-    // ✅ session continuity:
-    // client sessionId is just our stable name for Vapi previousChatId
-    const continuityId =
-      (typeof sessionId === "string" && sessionId.trim() ? sessionId.trim() : null) ||
-      (typeof previousChatId === "string" && previousChatId.trim() ? previousChatId.trim() : null);
-
     const payload = {
       assistantId,
       input: injectedInput,
-      ...(continuityId ? { previousChatId: continuityId } : {}),
+      ...(previousChatId ? { previousChatId } : {}),
     };
 
     const r = await fetch("https://api.vapi.ai/chat", {
@@ -311,11 +377,7 @@ exports.handler = async (event) => {
 
     const raw = await r.text();
     let data;
-    try {
-      data = raw ? JSON.parse(raw) : {};
-    } catch {
-      data = { raw };
-    }
+    try { data = raw ? JSON.parse(raw) : {}; } catch { data = { raw }; }
 
     if (!r.ok) {
       return json(
@@ -328,34 +390,32 @@ exports.handler = async (event) => {
               ? data.raw
               : `Vapi request failed (${r.status})`),
           details: data,
+          sessionId, // return anyway for debugging
         },
         corsHeaders()
       );
     }
 
-    // ✅ IMPORTANT:
-    // Return a stable sessionId for the widget to store.
-    // Vapi returns `id` for the chat session.
-    const returnedSessionId = typeof data?.id === "string" && data.id.trim() ? data.id.trim() : null;
-
-    // Attach compatibility fields WITHOUT breaking the Vapi response shape your widget reads
-    if (returnedSessionId) {
-      data.sessionId = returnedSessionId;      // what your widget expects
-      data.previousChatId = returnedSessionId; // optional
+    // ✅ store Vapi chat id for next turn
+    const returnedVapiChatId = typeof data?.id === "string" && data.id.trim() ? data.id.trim() : null;
+    if (returnedVapiChatId && SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
+      await upsertLinkedVapiChatId({
+        supabaseUrl: SUPABASE_URL,
+        serviceRoleKey: SUPABASE_SERVICE_ROLE_KEY,
+        tenantId,
+        sessionId,
+        vapiChatId: returnedVapiChatId,
+      });
     }
 
-    // Optional debug KB info
+    // Helpful debug (safe)
+    data.sessionId = sessionId; // ✅ ALWAYS return our stable session id
     data.kb = {
       tenantId,
       used: Boolean(kbContext),
       matchCount: Array.isArray(kbMatches) ? kbMatches.length : 0,
-      matches: (kbMatches || []).map((m) => ({
-        id: m.id,
-        section: m.section,
-        source: m.source,
-        similarity: m.similarity,
-        priority: m.priority,
-      })),
+      previousChatIdSent: previousChatId || null,
+      vapiChatIdReturned: returnedVapiChatId || null,
     };
 
     return {
