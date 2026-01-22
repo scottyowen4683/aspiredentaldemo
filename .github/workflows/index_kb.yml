@@ -16,6 +16,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node 20
         uses: actions/setup-node@v4
@@ -24,14 +26,34 @@ jobs:
 
       - name: Install frontend dependencies
         working-directory: frontend
-        run: npm ci
+        run: npm install --no-audit --no-fund
 
       - name: Detect changed KB files
         id: changed
+        shell: bash
         run: |
-          echo "FILES<<EOF" >> $GITHUB_OUTPUT
-          git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep "^frontend/netlify/functions/kb/.*\.txt$" || true
-          echo "EOF" >> $GITHUB_OUTPUT
+          set -e
+
+          # Determine diff range safely for both push and manual runs
+          if [ "${{ github.event_name }}" = "push" ] && [ -n "${{ github.event.before }}" ]; then
+            RANGE="${{ github.event.before }}..${{ github.sha }}"
+          else
+            # For workflow_dispatch (or any case where before isn't available),
+            # compare the last commit to current.
+            RANGE="HEAD~1..HEAD"
+          fi
+
+          echo "Using diff range: $RANGE"
+
+          FILES=$(git diff --name-only "$RANGE" | grep "^frontend/netlify/functions/kb/.*\.txt$" || true)
+
+          echo "Detected files:"
+          echo "$FILES"
+
+          # Multiline output for GitHub Actions
+          echo "FILES<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$FILES" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
 
       - name: Index changed KB files
         if: steps.changed.outputs.FILES != ''
@@ -41,7 +63,10 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           EMBED_MODEL: text-embedding-3-small
+        shell: bash
         run: |
+          set -e
+
           echo "${{ steps.changed.outputs.FILES }}" | while read -r f; do
             if [ -n "$f" ]; then
               echo "Indexing: $f"
