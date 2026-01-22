@@ -174,12 +174,15 @@ exports.handler = async (event) => {
   }
 
   let body = {};
-  try {
-    body = event.body ? JSON.parse(event.body) : {};
-  } catch {
-    // If JSON parse fails, still respond in Vapi envelope
-    return errVapi("call_unknown", "Invalid JSON body.");
-  }
+try {
+  body = event.body ? JSON.parse(event.body) : {};
+} catch {
+  return errVapi("call_unknown", "Invalid JSON body.");
+}
+
+console.log("VAPI_RAW_BODY:", JSON.stringify(body).slice(0, 5000));
+console.log("VAPI_QUERYSTRING:", event.queryStringParameters);
+
 
   const toolCallId = extractToolCallId(body) || "call_unknown";
   const query = extractQuery(body);
