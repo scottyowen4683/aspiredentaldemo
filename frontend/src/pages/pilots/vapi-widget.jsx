@@ -3,31 +3,12 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 const DEFAULT_GREETING =
   "Hello — I’m the Aspire AI assistant. Ask me a question and I’ll do my best to help.";
 
-/**
- * Stable session + chat persistence:
- * - sessionId is OURS (stored in localStorage) so continuity survives refresh/reload
- * - chatId is Vapi's chat id (stored in localStorage) so we can always send previousChatId
- *
- * This is the key to fixing “new chat id created each time”.
- */
-
-function makeId(prefix = "sess") {
-  // good enough uniqueness for web session IDs
-  return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
-}
-
-function safeLowerTrim(s) {
-  return String(s || "").trim().toLowerCase();
-}
-
 export default function VapiWidget({
   assistantId,
   tenantId,
   brandUrl = "https://aspireexecutive.ai",
   title = "Aspire AI Chat",
   greeting = DEFAULT_GREETING,
-  // Optional: if you run multiple tenants on one domain, allow isolating storage
-  storageNamespace = "aspire_chat",
 }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -39,58 +20,30 @@ export default function VapiWidget({
 
   const scrollRef = useRef(null);
 
-  const effectiveTenantId = safeLowerTrim(tenantId || "moreton");
+  const effectiveTenantId = (tenantId || "moreton").trim().toLowerCase();
 
-  // Storage keys are tenant + assistant scoped so they don’t collide between council demo pages
-  const storageKeys = useMemo(() => {
-    const a = safeLowerTrim(assistantId || "no_assistant");
-    const t = safeLowerTrim(effectiveTenantId || "no_tenant");
-    const base = `${storageNamespace}::${t}::${a}`;
-    return {
-      sessionId: `${base}::sessionId`,
-      chatId: `${base}::chatId`,
-    };
-  }, [assistantId, effectiveTenantId, storageNamespace]);
+  const storageKey = useMemo(() => {
+    return `aspire:vapiSession:${effectiveTenantId}:${assistantId || "no_asst"}`;
+  }, [effectiveTenantId, assistantId]);
 
-  // Stable sessionId + persisted chatId (Vapi)
-  const [sessionId, setSessionId] = useState(null);
-  const [chatId, setChatId] = useState(null);
-
-  // Initialise persisted session/chat on mount + when tenant/assistant changes
-  useEffect(() => {
-    // Always reset message list to greeting when the tenant greeting changes
-    setMessages([{ role: "assistant", text: greeting }]);
-    setBusy(false);
-    setInput("");
-
-    // Create/restore session id
-    let sid = null;
+  const [sessionId, setSessionId] = useState(() => {
     try {
-      sid = window.localStorage.getItem(storageKeys.sessionId);
+      const v = localStorage.getItem(storageKey);
+      return v && v.trim() ? v.trim() : null;
     } catch {
-      sid = null;
+      return null;
     }
-    if (!sid) {
-      sid = makeId("sess");
-      try {
-        window.localStorage.setItem(storageKeys.sessionId, sid);
-      } catch {
-        // ignore
-      }
-    }
-    setSessionId(sid);
+  });
 
-    // Restore Vapi chat id if present
-    let cid = null;
-    try {
-      cid = window.localStorage.getItem(storageKeys.chatId);
-    } catch {
-      cid = null;
-    }
-    setChatId(cid || null);
-  }, [greeting, storageKeys]);
+  const canSend = useMemo(() => {
+    return (
+      Boolean(assistantId) &&
+      Boolean(effectiveTenantId) &&
+      input.trim().length > 0 &&
+      !busy
+    );
+  }, [assistantId, effectiveTenantId, input, busy]);
 
-  // Scroll to bottom
   useEffect(() => {
     if (!open) return;
     const el = scrollRef.current;
@@ -98,29 +51,18 @@ export default function VapiWidget({
     el.scrollTop = el.scrollHeight;
   }, [messages, open]);
 
-  const canSend = useMemo(() => {
-    return (
-      Boolean(assistantId) &&
-      Boolean(effectiveTenantId) &&
-      Boolean(sessionId) &&
-      input.trim().length > 0 &&
-      !busy
-    );
-  }, [assistantId, effectiveTenantId, sessionId, input, busy]);
+  useEffect(() => {
+    setMessages([{ role: "assistant", text: greeting }]);
+    setBusy(false);
+    setInput("");
+    // do NOT auto-clear sessionId here — greeting changes shouldn’t kill continuity unless you want that
+  }, [greeting]);
 
   function resetChat() {
-    // New session (ours) and clear vapi chat id
-    const newSid = makeId("sess");
-    setSessionId(newSid);
-    setChatId(null);
-
     try {
-      window.localStorage.setItem(storageKeys.sessionId, newSid);
-      window.localStorage.removeItem(storageKeys.chatId);
-    } catch {
-      // ignore
-    }
-
+      localStorage.removeItem(storageKey);
+    } catch {}
+    setSessionId(null);
     setMessages([{ role: "assistant", text: greeting }]);
     setBusy(false);
     setInput("");
@@ -150,16 +92,6 @@ export default function VapiWidget({
       return;
     }
 
-    if (!sessionId) {
-      setMessages((prev) => [
-        ...prev,
-        { role: "user", text },
-        { role: "assistant", text: "Missing sessionId (local session init failed)." },
-      ]);
-      setInput("");
-      return;
-    }
-
     setMessages((prev) => [...prev, { role: "user", text }]);
     setInput("");
     setBusy(true);
@@ -171,24 +103,8 @@ export default function VapiWidget({
         body: JSON.stringify({
           assistantId,
           tenantId: effectiveTenantId,
-
-          // ✅ THE FIX:
-          // Your own stable id, so your backend/tools can use it for memory
-          sessionId,
-
-          // ✅ Keep Vapi pinned to same thread
-          previousChatId: chatId || undefined,
-
-          // Message
           input: text,
-
-          // ✅ Extra: put session + tenant into metadata so downstream tools can also read it
-          // (safe even if vapi-chat ignores it)
-          metadata: {
-            tenantId: effectiveTenantId,
-            sessionId,
-            source: "aspire_widget",
-          },
+          sessionId: sessionId || undefined, // ✅ persist across refresh / reopen
         }),
       });
 
@@ -210,14 +126,13 @@ export default function VapiWidget({
         throw new Error(msg);
       }
 
-      // ✅ Persist chat id for continuity across reloads and Vapi forks
-      if (data?.id) {
-        setChatId(data.id);
+      // ✅ store returned sessionId (created by server if missing)
+      if (data?.sessionId && typeof data.sessionId === "string") {
+        const sid = data.sessionId.trim();
+        setSessionId(sid);
         try {
-          window.localStorage.setItem(storageKeys.chatId, data.id);
-        } catch {
-          // ignore
-        }
+          localStorage.setItem(storageKey, sid);
+        } catch {}
       }
 
       const reply =
@@ -253,7 +168,6 @@ export default function VapiWidget({
         </button>
       ) : (
         <div className="flex h-[540px] w-[380px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0A1020] shadow-[0_18px_70px_rgba(0,0,0,0.55)] ring-1 ring-white/10">
-          {/* Header */}
           <div className="flex items-center justify-between gap-3 border-b border-white/10 bg-[#0A1020]/90 px-4 py-3 backdrop-blur-xl">
             <div className="flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white text-black">
@@ -285,7 +199,6 @@ export default function VapiWidget({
             </div>
           </div>
 
-          {/* Messages */}
           <div
             ref={scrollRef}
             className="flex-1 overflow-auto bg-gradient-to-b from-[#0A1020] to-[#070A12] px-4 py-4"
@@ -294,10 +207,7 @@ export default function VapiWidget({
               {messages.map((m, i) => {
                 const isUser = m.role === "user";
                 return (
-                  <div
-                    key={i}
-                    className={`flex ${isUser ? "justify-end" : "justify-start"}`}
-                  >
+                  <div key={i} className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
                     <div
                       className={[
                         "max-w-[85%] whitespace-pre-wrap rounded-2xl px-4 py-3 text-sm leading-snug shadow-sm",
@@ -314,7 +224,6 @@ export default function VapiWidget({
             </div>
           </div>
 
-          {/* Input */}
           <div className="border-t border-white/10 bg-[#0A1020]/90 px-3 py-3 backdrop-blur-xl">
             <div className="flex items-center gap-2">
               <input
