@@ -1,12 +1,22 @@
 // netlify/functions/vapi-chat.js
 //
 // Multi-tenant KB retrieval + Vapi chat
-// - Reads tenantId from request body
+// - Resolves tenantId from (1) request body tenantId OR (2) assistantId -> tenants/assistant-map.json
 // - Creates embedding for the user query (OpenAI)
 // - Calls Supabase RPC: public.match_knowledge_chunks
 // - Injects top KB chunks into Vapi chat input
 //
 // No extra dependencies: uses fetch only.
+//
+// IMPORTANT:
+// - Put assistant-map.json at: netlify/functions/tenants/assistant-map.json
+//   Example:
+//   {
+//     "a2c1de9b-b358-486b-b9e6-a8b4f9e4385d": "moreton"
+//   }
+
+const fs = require("fs");
+const path = require("path");
 
 function json(statusCode, bodyObj, extraHeaders = {}) {
   return {
@@ -39,6 +49,32 @@ function parseAllowedTenants(envVal) {
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean);
   return list.length ? list : null;
+}
+
+function loadAssistantMap() {
+  const p = path.join(__dirname, "tenants", "assistant-map.json");
+  const raw = fs.readFileSync(p, "utf8");
+  return JSON.parse(raw);
+}
+
+function resolveTenantId(rawTenantId, assistantId) {
+  // 1) explicit tenantId wins (if provided by widget)
+  const direct = normaliseTenantId(rawTenantId);
+  if (direct) return direct;
+
+  // 2) fallback: assistantId -> tenant map
+  if (assistantId && typeof assistantId === "string") {
+    try {
+      const map = loadAssistantMap();
+      const mapped = map?.[assistantId];
+      const t = normaliseTenantId(mapped);
+      if (t) return t;
+    } catch {
+      // ignore; handled by returning null below
+    }
+  }
+
+  return null;
 }
 
 function buildKbContext(matches) {
@@ -211,9 +247,16 @@ exports.handler = async (event) => {
       return json(400, { error: "Missing input" }, corsHeaders());
     }
 
-    const tenantId = normaliseTenantId(rawTenantId);
+    // ✅ tenantId resolution:
+    // - Uses tenantId from body if present
+    // - Otherwise maps assistantId -> tenant via tenants/assistant-map.json
+    const tenantId = resolveTenantId(rawTenantId, assistantId);
     if (!tenantId) {
-      return json(400, { error: "Missing tenantId" }, corsHeaders());
+      return json(
+        400,
+        { error: "Missing tenantId (not provided and assistantId not mapped)" },
+        corsHeaders()
+      );
     }
 
     // Optional allow-list to prevent cross-tenant leakage
@@ -325,13 +368,11 @@ exports.handler = async (event) => {
       );
     }
 
-    // Keep response shape identical, but add optional debug KB info safely
-    // (does not affect widget parsing because widget reads output[].content/text)
+    // Optional debug KB info (safe)
     data.kb = {
       tenantId,
       used: Boolean(kbContext),
       matchCount: Array.isArray(kbMatches) ? kbMatches.length : 0,
-      // comment this out later if you don’t want metadata coming back
       matches: (kbMatches || []).map((m) => ({
         id: m.id,
         section: m.section,
@@ -348,10 +389,6 @@ exports.handler = async (event) => {
     };
   } catch (err) {
     console.error("[vapi-chat] error", err);
-    return json(
-      500,
-      { error: err?.message || "Server error" },
-      corsHeaders()
-    );
+    return json(500, { error: err?.message || "Server error" }, corsHeaders());
   }
 };
