@@ -1,14 +1,4 @@
 // frontend/netlify/functions/kb-search.js
-//
-// Vapi Custom Tool compatible KB search.
-// - Reads tenant from querystring (?tenant=moreton) OR from assistant-map via assistantId
-// - Embeds the query
-// - Calls Supabase RPC match_knowledge_chunks
-// - RETURNS VAPI REQUIRED FORMAT (HTTP 200 + results[] + toolCallId + single-line string)
-//
-// Security (optional but recommended):
-// - If ASPIRE_WEBHOOK_SECRET is set in Netlify env, requests must include header:
-//   x-aspire-webhook-secret: <value>
 
 const fs = require("fs");
 const path = require("path");
@@ -29,7 +19,6 @@ function singleLine(str) {
 }
 
 function vapiRespond(toolCallId, resultString, errorString) {
-  // Vapi requires HTTP 200 always. Errors go inside results[].error (string). :contentReference[oaicite:2]{index=2}
   const body = {
     results: [
       errorString
@@ -44,26 +33,77 @@ function vapiRespond(toolCallId, resultString, errorString) {
       "Content-Type": "application/json",
       "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Methods": "POST, OPTIONS",
-      "Access-Control-Allow-Headers":
-        "Content-Type, x-aspire-webhook-secret",
+      "Access-Control-Allow-Headers": "Content-Type, x-aspire-webhook-secret",
     },
     body: JSON.stringify(body),
   };
 }
 
 function httpJson(statusCode, bodyObj) {
-  // For non-Vapi callers (optional)
   return {
     statusCode,
     headers: {
       "Content-Type": "application/json",
       "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Methods": "POST, OPTIONS",
-      "Access-Control-Allow-Headers":
-        "Content-Type, x-aspire-webhook-secret",
+      "Access-Control-Allow-Headers": "Content-Type, x-aspire-webhook-secret",
     },
     body: JSON.stringify(bodyObj),
   };
+}
+
+/**
+ * Very light intent detection for “lookup” style questions.
+ * Keep it deterministic. No LLM here.
+ */
+function detectLookupType(q) {
+  const s = q.toLowerCase();
+
+  // bins / collection day
+  const binSignals = [
+    "bin day",
+    "bin collection",
+    "collection day",
+    "when is my bin",
+    "when is bin",
+    "general waste",
+    "recycling",
+    "green waste",
+    "green bin",
+    "wheelie",
+  ];
+  if (binSignals.some((x) => s.includes(x))) return "bins";
+
+  return null;
+}
+
+/**
+ * Extract a suburb-ish token.
+ * Works for common patterns:
+ * - "Griffin"
+ * - "bin day griffin"
+ * - "in Griffin"
+ * - "Griffin general waste bin day"
+ */
+function extractSuburb(q) {
+  const raw = String(q || "").trim();
+  if (!raw) return "";
+
+  // If it's a single word, treat as suburb candidate
+  if (/^[A-Za-z][A-Za-z\s'-]{1,40}$/.test(raw) && raw.split(/\s+/).length <= 3) {
+    // e.g. "Griffin", "North Lakes"
+    return raw;
+  }
+
+  // "in <suburb>"
+  const m = raw.match(/\bin\s+([A-Za-z][A-Za-z\s'-]{1,40})\b/i);
+  if (m && m[1]) return m[1].trim();
+
+  // Try last token group after common phrases
+  const m2 = raw.match(/(?:bin day|collection day|bin collection)\s+([A-Za-z][A-Za-z\s'-]{1,40})/i);
+  if (m2 && m2[1]) return m2[1].trim();
+
+  return "";
 }
 
 exports.handler = async (event) => {
@@ -73,8 +113,7 @@ exports.handler = async (event) => {
       headers: {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Methods": "POST, OPTIONS",
-        "Access-Control-Allow-Headers":
-          "Content-Type, x-aspire-webhook-secret",
+        "Access-Control-Allow-Headers": "Content-Type, x-aspire-webhook-secret",
       },
       body: "",
     };
@@ -84,9 +123,7 @@ exports.handler = async (event) => {
     return httpJson(405, { error: "Method Not Allowed" });
   }
 
-  // ---- Security gate (recommended) ----
-  // If you set ASPIRE_WEBHOOK_SECRET in Netlify env,
-  // then Vapi MUST send x-aspire-webhook-secret header.
+  // ---- Security gate ----
   const requiredSecret = process.env.ASPIRE_WEBHOOK_SECRET;
   if (requiredSecret) {
     const provided =
@@ -95,13 +132,8 @@ exports.handler = async (event) => {
       event.headers["x-aspire-webhook-secret".toLowerCase()];
 
     if (!provided || provided !== requiredSecret) {
-      // For Vapi, still respond 200 but with tool error
       const safeToolCallId = "unknown";
-      return vapiRespond(
-        safeToolCallId,
-        "",
-        "Unauthorized: missing or invalid webhook secret"
-      );
+      return vapiRespond(safeToolCallId, "", "Unauthorized: missing or invalid webhook secret");
     }
   }
 
@@ -112,43 +144,24 @@ exports.handler = async (event) => {
     body = {};
   }
 
-  // Vapi tool calls include toolCallId in the request context.
-  // If it isn't present, we still return something usable.
-  const toolCallId =
-    body?.toolCallId ||
-    body?.id ||
-    body?.tool_call_id ||
-    "unknown";
+  const toolCallId = body?.toolCallId || body?.id || body?.tool_call_id || "unknown";
 
   try {
-    // Accept query from body.query or body.input
     const query = body.query || body.input || "";
-
-    // Tenant can be provided via URL query param (?tenant=moreton)
     const qs = event.queryStringParameters || {};
     const tenantFromUrl = qs.tenant ? String(qs.tenant) : "";
 
-    // Or via assistantId -> tenant map (optional fallback)
     const assistantId = body.assistantId ? String(body.assistantId) : "";
     let tenant_id = tenantFromUrl;
 
     if (!tenant_id) {
       if (!assistantId) {
-        // Vapi will show "No result returned" unless we respond in wrapper format
-        return vapiRespond(
-          toolCallId,
-          "",
-          "Missing tenant (use ?tenant=...) and missing assistantId"
-        );
+        return vapiRespond(toolCallId, "", "Missing tenant (use ?tenant=...) and missing assistantId");
       }
       const map = loadAssistantMap();
       tenant_id = map[assistantId];
       if (!tenant_id) {
-        return vapiRespond(
-          toolCallId,
-          "",
-          `assistantId is not mapped to a tenant: ${assistantId}`
-        );
+        return vapiRespond(toolCallId, "", `assistantId is not mapped to a tenant: ${assistantId}`);
       }
     }
 
@@ -161,67 +174,22 @@ exports.handler = async (event) => {
     const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
     const EMBED_MODEL = process.env.EMBED_MODEL || "text-embedding-3-small";
 
-    if (!SUPABASE_URL)
-      return vapiRespond(toolCallId, "", "Missing SUPABASE_URL");
-    if (!SUPABASE_SERVICE_ROLE_KEY)
-      return vapiRespond(toolCallId, "", "Missing SUPABASE_SERVICE_ROLE_KEY");
-    if (!OPENAI_API_KEY)
-      return vapiRespond(toolCallId, "", "Missing OPENAI_API_KEY");
+    if (!SUPABASE_URL) return vapiRespond(toolCallId, "", "Missing SUPABASE_URL");
+    if (!SUPABASE_SERVICE_ROLE_KEY) return vapiRespond(toolCallId, "", "Missing SUPABASE_SERVICE_ROLE_KEY");
+    if (!OPENAI_API_KEY) return vapiRespond(toolCallId, "", "Missing OPENAI_API_KEY");
 
-    const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
       auth: { persistSession: false },
     });
 
     const topK = Number(body.topK || 6);
 
-    const emb = await openai.embeddings.create({
-      model: EMBED_MODEL,
-      input: query,
-    });
+    // -----------------------------
+    // 1) METADATA-FIRST LOOKUP
+    // -----------------------------
+    const lookupType = detectLookupType(query);
+    let rows = [];
 
-    const query_embedding = emb.data[0].embedding;
-
-    const { data, error } = await supabase.rpc("match_knowledge_chunks", {
-      query_embedding,
-      match_count: topK,
-      tenant_filter: tenant_id,
-    });
-
-    if (error) {
-      return vapiRespond(
-        toolCallId,
-        "",
-        `Supabase RPC failed: ${singleLine(JSON.stringify(error))}`
-      );
-    }
-
-    const rows = Array.isArray(data) ? data : [];
-    if (!rows.length) {
-      return vapiRespond(
-        toolCallId,
-        "",
-        `No KB matches found for tenant '${tenant_id}'`
-      );
-    }
-
-    // Build a compact single-line “evidence bundle” for the assistant.
-    // Keep it short-ish so it doesn’t bloat the tool response.
-    const evidence = rows
-      .slice(0, topK)
-      .map((r, idx) => {
-        const sec = r.section ? ` (${r.section})` : "";
-        const src = r.source ? ` [${r.source}]` : "";
-        const snippet = singleLine(r.content).slice(0, 380);
-        return `${idx + 1}.${src}${sec} ${snippet}`;
-      })
-      .join(" | ");
-
-    const result = `tenant=${tenant_id} | matches=${rows.length} | ${evidence}`;
-
-    // ✅ Vapi-required wrapper response (HTTP 200) :contentReference[oaicite:3]{index=3}
-    return vapiRespond(toolCallId, result, "");
-  } catch (err) {
-    return vapiRespond(toolCallId, "", err?.message || "Server error");
-  }
-};
+    if (lookupType === "bins") {
+      const suburb = extractSuburb(query);
+      // Only attempt metadata lookup if we have
