@@ -1,76 +1,72 @@
 // frontend/netlify/functions/vapi-kb-tool.js
 //
 // Vapi Custom Tool wrapper for your KB search.
-// IMPORTANT: Vapi requires this response shape:
-// { results: [ { toolCallId: "...", result: "..." } ] }
-//
-// This function:
-// - extracts toolCallId + assistantId + query from Vapi’s request (handles multiple shapes)
-// - maps assistantId -> tenant_id (assistant-map.json)
-// - embeds query (OpenAI embeddings)
-// - calls Supabase RPC match_knowledge_chunks
-// - returns a SINGLE-LINE string in Vapi’s required wrapper format
+// Vapi will ignore results if toolCallId doesn't EXACTLY match the call_... id.
+// This version finds toolCallId robustly by scanning the whole payload for call_...
 
 const fs = require("fs");
 const path = require("path");
 const OpenAI = require("openai");
 const { createClient } = require("@supabase/supabase-js");
 
-// ---- helpers ----
+// ---------- helpers ----------
 function loadAssistantMap() {
-  // This path is relative to the deployed function folder
   const p = path.join(__dirname, "tenants", "assistant-map.json");
   const raw = fs.readFileSync(p, "utf8");
   return JSON.parse(raw);
 }
 
-function vapiOk(toolCallId, result) {
-  // result MUST be a string and ideally single-line
-  const singleLine =
-    typeof result === "string"
-      ? result.replace(/\s+/g, " ").trim()
-      : JSON.stringify(result).replace(/\s+/g, " ").trim();
-
+function jsonResp(statusCode, obj) {
   return {
-    statusCode: 200,
+    statusCode,
     headers: {
       "Content-Type": "application/json",
       "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization",
+      "Access-Control-Allow-Methods": "POST, OPTIONS",
     },
-    body: JSON.stringify({
-      results: [
-        {
-          toolCallId: toolCallId || "unknown",
-          result: singleLine,
-        },
-      ],
-    }),
+    body: JSON.stringify(obj),
   };
 }
 
-function vapiErr(toolCallId, message) {
-  // Still return 200 with a result string (Vapi expects results wrapper even on error)
-  return vapiOk(toolCallId, `ERROR: ${message}`);
+// Vapi REQUIRED wrapper
+function vapiWrap(toolCallId, resultString) {
+  const s =
+    typeof resultString === "string"
+      ? resultString.replace(/\s+/g, " ").trim()
+      : JSON.stringify(resultString).replace(/\s+/g, " ").trim();
+
+  return jsonResp(200, {
+    results: [
+      {
+        toolCallId: toolCallId,
+        result: s,
+      },
+    ],
+  });
 }
 
-// Try to pull values from multiple possible shapes of Vapi payloads
-function extractFromVapi(body) {
-  const toolCallId =
-    body?.toolCallId ||
-    body?.message?.toolCallId ||
-    body?.tool_call_id ||
-    body?.id ||
-    body?.message?.id ||
-    null;
+// Find first "call_XXXX" anywhere in the body (most reliable)
+function sniffToolCallId(bodyObj) {
+  try {
+    const s = JSON.stringify(bodyObj);
+    const m = s.match(/call_[A-Za-z0-9]+/);
+    return m ? m[0] : null;
+  } catch {
+    return null;
+  }
+}
 
+// best-effort normal extraction too
+function extract(bodyObj) {
   const params =
-    body?.parameters ||
-    body?.toolInput ||
-    body?.tool_input ||
-    body?.arguments ||
-    body?.args ||
-    body?.input ||
-    body ||
+    bodyObj?.parameters ||
+    bodyObj?.toolInput ||
+    bodyObj?.tool_input ||
+    bodyObj?.arguments ||
+    bodyObj?.args ||
+    bodyObj?.input ||
+    bodyObj ||
     {};
 
   const query =
@@ -78,28 +74,29 @@ function extractFromVapi(body) {
     params?.question ||
     params?.text ||
     params?.input ||
-    body?.query ||
-    body?.input ||
+    bodyObj?.query ||
+    bodyObj?.input ||
     null;
 
   const assistantId =
     params?.assistantId ||
     params?.assistant_id ||
-    body?.assistantId ||
-    body?.assistant_id ||
-    body?.assistant?.id ||
-    body?.message?.assistantId ||
+    bodyObj?.assistantId ||
+    bodyObj?.assistant_id ||
+    bodyObj?.assistant?.id ||
+    bodyObj?.message?.assistantId ||
+    bodyObj?.message?.assistant_id ||
     null;
 
-  const topK = Number(params?.topK || body?.topK || 6);
+  const topK = Number(params?.topK || bodyObj?.topK || 6);
 
-  return { toolCallId, assistantId, query, topK };
+  return { query, assistantId, topK };
 }
 
-// Optional auth header protection (recommended)
+// Optional auth – if set, Vapi must send Authorization: Bearer <secret>
 function isAuthorised(event) {
   const secret = process.env.ASPIRE_WEBHOOK_SECRET;
-  if (!secret) return true; // if you haven’t set it, don’t block calls
+  if (!secret) return true;
 
   const auth =
     event.headers?.authorization ||
@@ -107,56 +104,53 @@ function isAuthorised(event) {
     event.headers?.AUTHORIZATION ||
     "";
 
-  // Support: "Bearer <secret>" or just "<secret>"
   const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : auth.trim();
   return token === secret;
 }
 
-// ---- handler ----
+// ---------- handler ----------
 exports.handler = async (event) => {
   if (event.httpMethod === "OPTIONS") {
-    return {
-      statusCode: 204,
-      headers: {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization",
-      },
-      body: "",
-    };
+    return jsonResp(204, {});
   }
 
+  // Always return Vapi wrapper even on wrong method (avoids silent failure)
   if (event.httpMethod !== "POST") {
-    // Vapi will only call POST; return wrapper anyway
-    return vapiOk("unknown", "ERROR: Method Not Allowed (use POST)");
+    return vapiWrap("call_unknown", "ERROR: Method Not Allowed (use POST)");
   }
 
-  if (!isAuthorised(event)) {
-    // Still return wrapper
-    const body = event.body ? safeJson(event.body) : {};
-    const { toolCallId } = extractFromVapi(body);
-    return vapiErr(toolCallId, "Unauthorised (bad or missing Authorization)");
-  }
-
-  let body;
+  let body = {};
   try {
     body = event.body ? JSON.parse(event.body) : {};
   } catch {
     body = {};
   }
 
-  const { toolCallId, assistantId, query, topK } = extractFromVapi(body);
+  // Critical: ensure toolCallId matches Vapi’s call_... id
+  const toolCallId =
+    body?.toolCallId ||
+    body?.message?.toolCallId ||
+    body?.tool_call_id ||
+    body?.id ||
+    sniffToolCallId(body) ||
+    "call_unknown";
+
+  // Auth check (if you set ASPIRE_WEBHOOK_SECRET)
+  if (!isAuthorised(event)) {
+    return vapiWrap(toolCallId, "ERROR: Unauthorised (missing/invalid Authorization)");
+  }
+
+  const { query, assistantId, topK } = extract(body);
 
   try {
-    if (!assistantId) {
-      return vapiErr(
-        toolCallId,
-        "Missing assistantId in tool request. Remove assistantId as a tool parameter and let Vapi pass it automatically (recommended), or ensure it’s included."
-      );
-    }
-
     if (!query || typeof query !== "string") {
-      return vapiErr(toolCallId, "Missing query");
+      return vapiWrap(toolCallId, "ERROR: Missing query");
+    }
+    if (!assistantId || typeof assistantId !== "string") {
+      return vapiWrap(
+        toolCallId,
+        "ERROR: Missing assistantId in tool request (Vapi payload didn’t include it)."
+      );
     }
 
     const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -164,18 +158,18 @@ exports.handler = async (event) => {
     const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
     const EMBED_MODEL = process.env.EMBED_MODEL || "text-embedding-3-small";
 
-    if (!SUPABASE_URL) return vapiErr(toolCallId, "Missing SUPABASE_URL");
+    if (!SUPABASE_URL) return vapiWrap(toolCallId, "ERROR: Missing SUPABASE_URL");
     if (!SUPABASE_SERVICE_ROLE_KEY)
-      return vapiErr(toolCallId, "Missing SUPABASE_SERVICE_ROLE_KEY");
-    if (!OPENAI_API_KEY) return vapiErr(toolCallId, "Missing OPENAI_API_KEY");
+      return vapiWrap(toolCallId, "ERROR: Missing SUPABASE_SERVICE_ROLE_KEY");
+    if (!OPENAI_API_KEY) return vapiWrap(toolCallId, "ERROR: Missing OPENAI_API_KEY");
 
     const map = loadAssistantMap();
     const tenant_id = map[assistantId];
 
     if (!tenant_id) {
-      return vapiErr(
+      return vapiWrap(
         toolCallId,
-        `assistantId is not mapped to a tenant (assistantId=${assistantId}). Check assistant-map.json`
+        `ERROR: assistantId not mapped to tenant (assistantId=${assistantId}). Check assistant-map.json.`
       );
     }
 
@@ -191,28 +185,24 @@ exports.handler = async (event) => {
 
     const query_embedding = emb.data?.[0]?.embedding;
     if (!query_embedding) {
-      return vapiErr(toolCallId, "Embedding failed (no embedding returned)");
+      return vapiWrap(toolCallId, "ERROR: Embedding failed (no embedding returned)");
     }
 
     const { data, error } = await supabase.rpc("match_knowledge_chunks", {
       query_embedding,
-      match_count: topK,
+      match_count: Number.isFinite(topK) ? topK : 6,
       tenant_filter: tenant_id,
     });
 
     if (error) {
-      return vapiErr(toolCallId, `Supabase RPC failed: ${error.message || ""}`);
+      return vapiWrap(toolCallId, `ERROR: Supabase RPC failed: ${error.message || "unknown"}`);
     }
 
     const rows = Array.isArray(data) ? data : [];
     if (!rows.length) {
-      return vapiOk(
-        toolCallId,
-        `No KB matches found for tenant '${tenant_id}' for query: ${query}`
-      );
+      return vapiWrap(toolCallId, `tenant=${tenant_id} | No KB matches found for: "${query}"`);
     }
 
-    // Build a compact single-line “snippets” string for the model to use
     const snippets = rows
       .slice(0, topK)
       .map((r, idx) => {
@@ -226,20 +216,11 @@ exports.handler = async (event) => {
       })
       .join(" | ");
 
-    return vapiOk(
+    return vapiWrap(
       toolCallId,
       `tenant=${tenant_id} | query="${query}" | matches=${rows.length} | ${snippets}`
     );
   } catch (err) {
-    return vapiErr(toolCallId, err?.message || "Server error");
+    return vapiWrap(toolCallId, `ERROR: ${err?.message || "Server error"}`);
   }
 };
-
-// small helper if you want it above
-function safeJson(s) {
-  try {
-    return JSON.parse(s);
-  } catch {
-    return {};
-  }
-}
