@@ -246,11 +246,11 @@ function verifySecret(event) {
 async function loadConversationSummary(supabase, tenant_id, sessionId) {
   try {
     const { data, error } = await supabase
-      .from("conversation_sessions")
+      .from("conversation_sessions")     // ✅ correct table
       .select("summary")
-      .eq("tenant_id", tenant_id)
       .eq("session_id", sessionId)
-      .single();
+      .eq("tenant_id", tenant_id)
+      .maybeSingle();                   // ✅ avoids hard error if not found
 
     if (error || !data?.summary) return null;
     return data.summary;
