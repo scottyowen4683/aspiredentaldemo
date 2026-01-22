@@ -22,10 +22,12 @@ export default function VapiWidget({
 
   const effectiveTenantId = (tenantId || "moreton").trim().toLowerCase();
 
+  // 🔐 Stable per-assistant + tenant storage key
   const storageKey = useMemo(() => {
     return `aspire:vapiSession:${effectiveTenantId}:${assistantId || "no_asst"}`;
   }, [effectiveTenantId, assistantId]);
 
+  // 🔁 Restore session from localStorage
   const [sessionId, setSessionId] = useState(() => {
     try {
       const v = localStorage.getItem(storageKey);
@@ -51,11 +53,11 @@ export default function VapiWidget({
     el.scrollTop = el.scrollHeight;
   }, [messages, open]);
 
+  // Greeting change resets messages but NOT the session
   useEffect(() => {
     setMessages([{ role: "assistant", text: greeting }]);
     setBusy(false);
     setInput("");
-    // do NOT auto-clear sessionId here — greeting changes shouldn’t kill continuity unless you want that
   }, [greeting]);
 
   function resetChat() {
@@ -72,31 +74,17 @@ export default function VapiWidget({
     const text = input.trim();
     if (!text || busy) return;
 
-    if (!assistantId) {
-      setMessages((prev) => [
-        ...prev,
-        { role: "user", text },
-        { role: "assistant", text: "Missing assistantId (page config)." },
-      ]);
-      setInput("");
-      return;
-    }
-
-    if (!effectiveTenantId) {
-      setMessages((prev) => [
-        ...prev,
-        { role: "user", text },
-        { role: "assistant", text: "Missing tenantId (page config)." },
-      ]);
-      setInput("");
-      return;
-    }
-
     setMessages((prev) => [...prev, { role: "user", text }]);
     setInput("");
     setBusy(true);
 
     try {
+      console.log("SENDING →", {
+        assistantId,
+        tenantId: effectiveTenantId,
+        sessionId,
+      });
+
       const res = await fetch("/.netlify/functions/vapi-chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -104,7 +92,7 @@ export default function VapiWidget({
           assistantId,
           tenantId: effectiveTenantId,
           input: text,
-          sessionId: sessionId || undefined, // ✅ persist across refresh / reopen
+          sessionId: sessionId || undefined,
         }),
       });
 
@@ -117,18 +105,17 @@ export default function VapiWidget({
       }
 
       if (!res.ok) {
-        const msg =
+        throw new Error(
           data?.error ||
-          data?.message ||
-          (typeof data?.raw === "string" && data.raw.trim()
-            ? data.raw
-            : `Request failed (${res.status})`);
-        throw new Error(msg);
+            data?.message ||
+            `Request failed (${res.status})`
+        );
       }
 
-      // ✅ store returned sessionId (created by server if missing)
+      // ✅ Persist returned sessionId
       if (data?.sessionId && typeof data.sessionId === "string") {
         const sid = data.sessionId.trim();
+        console.log("RECEIVED ← sessionId:", sid);
         setSessionId(sid);
         try {
           localStorage.setItem(storageKey, sid);
@@ -145,7 +132,7 @@ export default function VapiWidget({
       console.error(err);
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", text: `Error: ${err?.message || "Unknown error"}` },
+        { role: "assistant", text: `Error: ${err.message}` },
       ]);
     } finally {
       setBusy(false);
@@ -158,108 +145,62 @@ export default function VapiWidget({
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className="group inline-flex items-center gap-3 rounded-2xl bg-white px-4 py-3 text-sm font-semibold text-black shadow-[0_14px_45px_rgba(0,0,0,0.35)] ring-1 ring-white/10 transition hover:translate-y-[-1px] hover:bg-white/95"
-          aria-label="Open chat"
+          className="group inline-flex items-center gap-3 rounded-2xl bg-white px-4 py-3 text-sm font-semibold text-black shadow-[0_14px_45px_rgba(0,0,0,0.35)]"
         >
-          <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-black text-white shadow-sm">
-            💬
-          </span>
-          <span className="tracking-wide">Chat</span>
+          💬 Chat
         </button>
       ) : (
-        <div className="flex h-[540px] w-[380px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0A1020] shadow-[0_18px_70px_rgba(0,0,0,0.55)] ring-1 ring-white/10">
-          <div className="flex items-center justify-between gap-3 border-b border-white/10 bg-[#0A1020]/90 px-4 py-3 backdrop-blur-xl">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white text-black">
-                🤖
-              </div>
-              <div className="leading-tight">
-                <div className="text-sm font-semibold text-white">{title}</div>
-                <div className="text-xs text-white/60">
-                  {busy ? "Thinking..." : "Online"}
-                </div>
+        <div className="flex h-[540px] w-[380px] flex-col overflow-hidden rounded-2xl bg-[#0A1020] shadow-xl">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
+            <div>
+              <div className="text-sm font-semibold text-white">{title}</div>
+              <div className="text-xs text-white/60">
+                {busy ? "Thinking…" : "Online"}
               </div>
             </div>
-
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={resetChat}
-                className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-white/80 transition hover:bg-white/10 hover:text-white"
-              >
+            <div className="flex gap-2">
+              <button onClick={resetChat} className="text-xs text-white/70">
                 Reset
               </button>
-              <button
-                type="button"
-                onClick={() => setOpen(false)}
-                className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-white/80 transition hover:bg-white/10 hover:text-white"
-              >
+              <button onClick={() => setOpen(false)} className="text-xs text-white/70">
                 Close
               </button>
             </div>
           </div>
 
-          <div
-            ref={scrollRef}
-            className="flex-1 overflow-auto bg-gradient-to-b from-[#0A1020] to-[#070A12] px-4 py-4"
-          >
-            <div className="space-y-3">
-              {messages.map((m, i) => {
-                const isUser = m.role === "user";
-                return (
-                  <div key={i} className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
-                    <div
-                      className={[
-                        "max-w-[85%] whitespace-pre-wrap rounded-2xl px-4 py-3 text-sm leading-snug shadow-sm",
-                        isUser
-                          ? "bg-white text-black"
-                          : "bg-white/5 text-white ring-1 ring-white/10",
-                      ].join(" ")}
-                    >
-                      {m.text}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+          <div ref={scrollRef} className="flex-1 overflow-auto p-4 space-y-3">
+            {messages.map((m, i) => (
+              <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
+                <div className={`rounded-xl px-4 py-2 text-sm ${
+                  m.role === "user"
+                    ? "bg-white text-black"
+                    : "bg-white/10 text-white"
+                }`}>
+                  {m.text}
+                </div>
+              </div>
+            ))}
           </div>
 
-          <div className="border-t border-white/10 bg-[#0A1020]/90 px-3 py-3 backdrop-blur-xl">
-            <div className="flex items-center gap-2">
+          <div className="p-3 border-t border-white/10">
+            <div className="flex gap-2">
               <input
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") send();
-                }}
-                placeholder="Type your message..."
-                className="h-11 flex-1 rounded-2xl border border-white/10 bg-white/5 px-4 text-sm text-white placeholder:text-white/40 outline-none transition focus:border-white/20"
+                onKeyDown={(e) => e.key === "Enter" && send()}
+                className="flex-1 rounded-xl bg-white/10 px-3 text-white"
+                placeholder="Type your message…"
               />
               <button
-                type="button"
                 onClick={send}
                 disabled={!canSend}
-                className={[
-                  "h-11 rounded-2xl px-4 text-sm font-semibold transition",
-                  canSend
-                    ? "bg-white text-black hover:bg-white/95"
-                    : "cursor-not-allowed bg-white/20 text-white/60",
-                ].join(" ")}
+                className="rounded-xl bg-white px-4 font-semibold"
               >
                 Send
               </button>
             </div>
-
-            <div className="mt-2 px-1 text-[11px] text-white/50">
-              Powered by{" "}
-              <a
-                href={brandUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="text-white/70 underline decoration-white/30 underline-offset-2 hover:text-white"
-              >
-                Aspire Executive Solutions
-              </a>
+            <div className="mt-2 text-[11px] text-white/50">
+              Powered by <a href={brandUrl} target="_blank" rel="noreferrer">Aspire</a>
             </div>
           </div>
         </div>
