@@ -2,10 +2,13 @@ name: Index Council Knowledge Base
 
 on:
   push:
+    branches:
+      - moretonbaypilot
     paths:
       - "frontend/netlify/functions/kb/*.txt"
       - "frontend/scripts/index_kb_txt.js"
       - "frontend/netlify/functions/tenants/assistant-map.json"
+
   workflow_dispatch:
 
 jobs:
@@ -21,6 +24,7 @@ jobs:
         with:
           node-version: 20
 
+      # NOTE: npm ci requires a package-lock.json. You don’t have one, so we use npm install.
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm install
