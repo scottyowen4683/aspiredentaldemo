@@ -161,35 +161,48 @@ function chunkBlockText(bodyText) {
 
   const MAX_CHARS = 2200;
 
-const flush = () => {
-  const c = buf.trim();
-  if (!c) {
+  // Keep paragraphs split – this is what "paras" is.
+  const paras = text.split("\n\n");
+
+  const chunks = [];
+  let buf = "";
+
+  const flush = () => {
+    const c = buf.trim();
+    if (!c) {
+      buf = "";
+      return;
+    }
+    // Always emit the chunk (no MIN_CHARS gate)
+    chunks.push(c);
     buf = "";
-    return;
-  }
-
-  // Always emit the chunk.
-  // Headings define meaning, not size.
-  chunks.push(c);
-  buf = "";
-};
-
+  };
 
   for (const p of paras) {
-    const para = p.trim();
+    const para = (p || "").trim();
     if (!para) continue;
 
+    // If adding this paragraph would overflow, flush first.
     if ((buf + "\n\n" + para).length > MAX_CHARS) {
-      flush(true);
+      flush();
     }
-    buf += (buf ? "\n\n" : "") + para;
 
-    if (buf.length >= MAX_CHARS) flush(true);
+    // If a single paragraph is bigger than MAX_CHARS, hard-split it.
+    if (para.length > MAX_CHARS) {
+      flush();
+      for (let i = 0; i < para.length; i += MAX_CHARS) {
+        chunks.push(para.slice(i, i + MAX_CHARS));
+      }
+      continue;
+    }
+
+    buf = buf ? `${buf}\n\n${para}` : para;
   }
 
-  flush(true);
+  flush();
   return chunks;
 }
+
 
 /* =========================
    DERIVED LOOKUPS: BIN COLLECTION DAYS
