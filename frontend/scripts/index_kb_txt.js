@@ -34,8 +34,7 @@ for (const key of requiredEnv) {
   }
 }
 
-const EMBEDDING_MODEL =
-  process.env.EMBED_MODEL || "text-embedding-3-small";
+const EMBEDDING_MODEL = process.env.EMBED_MODEL || "text-embedding-3-small";
 
 /* =========================
    CLIENTS
@@ -75,17 +74,14 @@ function isHeading(line) {
 }
 
 function estimateTokens(text) {
-  // Rough but consistent estimate
   return Math.ceil(text.length / 4);
 }
 
 function inferPriority(section) {
   const s = (section || "").toLowerCase();
-
   if (s.includes("emergency") || s.includes("after hours")) return 1;
   if (s.includes("bin") || s.includes("waste") || s.includes("fees")) return 3;
   if (s.includes("appendix") || s.includes("glossary")) return 10;
-
   return 5;
 }
 
@@ -95,6 +91,10 @@ function inferPriority(section) {
 
 function chunkText(rawText) {
   const text = normaliseText(rawText);
+
+  // If the file is empty after normalisation, we must know immediately.
+  if (!text) return [];
+
   const lines = text.split("\n");
 
   const chunks = [];
@@ -110,6 +110,8 @@ function chunkText(rawText) {
       buffer = "";
       return;
     }
+
+    // If not forced and too small, keep accumulating
     if (!force && content.length < MIN_CHARS) return;
 
     chunks.push({
@@ -125,7 +127,7 @@ function chunkText(rawText) {
       flush(true);
 
       if (!/^[-=]{4,}$/.test(line.trim())) {
-        currentSection = line.replace(/:\s*$/, "").trim();
+        currentSection = line.replace(/:\s*$/, "").trim() || "General";
       }
 
       buffer += line + "\n";
@@ -158,6 +160,11 @@ async function embed(text) {
 }
 
 async function insertChunks(chunks) {
+  if (!chunks.length) {
+    console.log("No chunks to insert (chunks.length = 0).");
+    return;
+  }
+
   const rows = [];
 
   for (let i = 0; i < chunks.length; i++) {
@@ -177,20 +184,14 @@ async function insertChunks(chunks) {
     });
 
     if (rows.length >= 25) {
-      const { error } = await supabase
-        .from("knowledge_chunks")
-        .insert(rows);
-
+      const { error } = await supabase.from("knowledge_chunks").insert(rows);
       if (error) throw error;
       rows.length = 0;
     }
   }
 
   if (rows.length) {
-    const { error } = await supabase
-      .from("knowledge_chunks")
-      .insert(rows);
-
+    const { error } = await supabase.from("knowledge_chunks").insert(rows);
     if (error) throw error;
   }
 }
@@ -207,7 +208,16 @@ async function main() {
   }
 
   const absolutePath = path.resolve(inputFile);
+
   const rawText = fs.readFileSync(absolutePath, "utf8");
+
+  // DEBUG LOGS (critical)
+  const rawLen = rawText.length;
+  const preview = rawText.slice(0, 400).replace(/\n/g, "\\n");
+
+  console.log(`Loaded file: ${absolutePath}`);
+  console.log(`Raw text length: ${rawLen}`);
+  console.log(`Preview (first 400 chars): ${preview}`);
 
   const chunks = chunkText(rawText);
 
@@ -222,4 +232,3 @@ main().catch((err) => {
   console.error("Indexing failed:", err);
   process.exit(1);
 });
-
