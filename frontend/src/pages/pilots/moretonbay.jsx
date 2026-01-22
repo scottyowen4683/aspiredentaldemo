@@ -4,6 +4,8 @@ import VapiWidget from "./vapi-widget.jsx";
 const assistantId = import.meta.env.VITE_VAPI_ASSISTANT_MORETON;
 
 export default function MoretonBayPilot() {
+  const isConfigured = Boolean(assistantId);
+
   return (
     <div className="min-h-screen bg-[#070A12] text-white">
       <div className="pointer-events-none fixed inset-0 opacity-60">
@@ -140,19 +142,20 @@ export default function MoretonBayPilot() {
             </ul>
 
             <div className="mt-6 rounded-2xl border border-white/10 bg-white/[0.02] p-5">
-              <div className="text-sm font-semibold">Assistant ID check</div>
-              <div className="mt-2 text-xs text-white/60">
-                Env var:{" "}
-                <span className="font-mono text-white/80">
-                  VITE_VAPI_ASSISTANT_MORETON
-                </span>
-              </div>
+              <div className="text-sm font-semibold">Assistant status</div>
               <div className="mt-2 text-xs text-white/60">
                 Status:{" "}
-                <span className={assistantId ? "text-emerald-300" : "text-amber-300"}>
-                  {assistantId ? "Configured" : "Missing — set in Netlify env vars"}
+                <span className={isConfigured ? "text-emerald-300" : "text-amber-300"}>
+                  {isConfigured ? "Configured" : "Not configured"}
                 </span>
               </div>
+
+              {!isConfigured && (
+                <div className="mt-2 text-xs text-white/55 leading-relaxed">
+                  The assistant is not available because the environment variable
+                  is not set in this deployment.
+                </div>
+              )}
             </div>
           </aside>
         </main>
@@ -160,7 +163,7 @@ export default function MoretonBayPilot() {
         <VapiWidget
           assistantId={assistantId}
           title="Moreton Bay • Aspire AI Chat Pilot"
-          greeting="Hi — I’m the Aspire AI assistant. How can I help you today? For urgent matters, please use Council’s official channels."
+          greeting="Hi — I’m the City of Moreton bay AI assistant. How can I help you today? For urgent matters, please use Council’s official channels."
           brandUrl="https://aspireexecutive.ai"
         />
       </div>
