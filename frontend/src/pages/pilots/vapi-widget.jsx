@@ -3,19 +3,35 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 const DEFAULT_GREETING =
   "Hello — I’m the Aspire AI assistant. Ask me a question and I’ll do my best to help.";
 
+/**
+ * Stable session + chat persistence:
+ * - sessionId is OURS (stored in localStorage) so continuity survives refresh/reload
+ * - chatId is Vapi's chat id (stored in localStorage) so we can always send previousChatId
+ *
+ * This is the key to fixing “new chat id created each time”.
+ */
+
+function makeId(prefix = "sess") {
+  // good enough uniqueness for web session IDs
+  return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function safeLowerTrim(s) {
+  return String(s || "").trim().toLowerCase();
+}
+
 export default function VapiWidget({
   assistantId,
-  tenantId, // ✅ ADD
+  tenantId,
   brandUrl = "https://aspireexecutive.ai",
   title = "Aspire AI Chat",
   greeting = DEFAULT_GREETING,
+  // Optional: if you run multiple tenants on one domain, allow isolating storage
+  storageNamespace = "aspire_chat",
 }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [input, setInput] = useState("");
-
-  // Fresh every visit: keep in memory only
-  const [chatId, setChatId] = useState(null);
 
   const [messages, setMessages] = useState(() => [
     { role: "assistant", text: greeting },
@@ -23,18 +39,58 @@ export default function VapiWidget({
 
   const scrollRef = useRef(null);
 
-  // ✅ Optional: pilot-safe fallback so it never breaks if tenantId isn't passed
-  const effectiveTenantId = (tenantId || "moreton").trim().toLowerCase();
+  const effectiveTenantId = safeLowerTrim(tenantId || "moreton");
 
-  const canSend = useMemo(() => {
-    return (
-      Boolean(assistantId) &&
-      Boolean(effectiveTenantId) &&
-      input.trim().length > 0 &&
-      !busy
-    );
-  }, [assistantId, effectiveTenantId, input, busy]);
+  // Storage keys are tenant + assistant scoped so they don’t collide between council demo pages
+  const storageKeys = useMemo(() => {
+    const a = safeLowerTrim(assistantId || "no_assistant");
+    const t = safeLowerTrim(effectiveTenantId || "no_tenant");
+    const base = `${storageNamespace}::${t}::${a}`;
+    return {
+      sessionId: `${base}::sessionId`,
+      chatId: `${base}::chatId`,
+    };
+  }, [assistantId, effectiveTenantId, storageNamespace]);
 
+  // Stable sessionId + persisted chatId (Vapi)
+  const [sessionId, setSessionId] = useState(null);
+  const [chatId, setChatId] = useState(null);
+
+  // Initialise persisted session/chat on mount + when tenant/assistant changes
+  useEffect(() => {
+    // Always reset message list to greeting when the tenant greeting changes
+    setMessages([{ role: "assistant", text: greeting }]);
+    setBusy(false);
+    setInput("");
+
+    // Create/restore session id
+    let sid = null;
+    try {
+      sid = window.localStorage.getItem(storageKeys.sessionId);
+    } catch {
+      sid = null;
+    }
+    if (!sid) {
+      sid = makeId("sess");
+      try {
+        window.localStorage.setItem(storageKeys.sessionId, sid);
+      } catch {
+        // ignore
+      }
+    }
+    setSessionId(sid);
+
+    // Restore Vapi chat id if present
+    let cid = null;
+    try {
+      cid = window.localStorage.getItem(storageKeys.chatId);
+    } catch {
+      cid = null;
+    }
+    setChatId(cid || null);
+  }, [greeting, storageKeys]);
+
+  // Scroll to bottom
   useEffect(() => {
     if (!open) return;
     const el = scrollRef.current;
@@ -42,16 +98,29 @@ export default function VapiWidget({
     el.scrollTop = el.scrollHeight;
   }, [messages, open]);
 
-  // If greeting prop changes (e.g. council changes), reset default opening line
-  useEffect(() => {
-    setMessages([{ role: "assistant", text: greeting }]);
-    setChatId(null);
-    setBusy(false);
-    setInput("");
-  }, [greeting]);
+  const canSend = useMemo(() => {
+    return (
+      Boolean(assistantId) &&
+      Boolean(effectiveTenantId) &&
+      Boolean(sessionId) &&
+      input.trim().length > 0 &&
+      !busy
+    );
+  }, [assistantId, effectiveTenantId, sessionId, input, busy]);
 
   function resetChat() {
+    // New session (ours) and clear vapi chat id
+    const newSid = makeId("sess");
+    setSessionId(newSid);
     setChatId(null);
+
+    try {
+      window.localStorage.setItem(storageKeys.sessionId, newSid);
+      window.localStorage.removeItem(storageKeys.chatId);
+    } catch {
+      // ignore
+    }
+
     setMessages([{ role: "assistant", text: greeting }]);
     setBusy(false);
     setInput("");
@@ -81,6 +150,16 @@ export default function VapiWidget({
       return;
     }
 
+    if (!sessionId) {
+      setMessages((prev) => [
+        ...prev,
+        { role: "user", text },
+        { role: "assistant", text: "Missing sessionId (local session init failed)." },
+      ]);
+      setInput("");
+      return;
+    }
+
     setMessages((prev) => [...prev, { role: "user", text }]);
     setInput("");
     setBusy(true);
@@ -91,9 +170,25 @@ export default function VapiWidget({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           assistantId,
-          tenantId: effectiveTenantId, // ✅ ADD (THIS fixes the 400)
-          input: text,
+          tenantId: effectiveTenantId,
+
+          // ✅ THE FIX:
+          // Your own stable id, so your backend/tools can use it for memory
+          sessionId,
+
+          // ✅ Keep Vapi pinned to same thread
           previousChatId: chatId || undefined,
+
+          // Message
+          input: text,
+
+          // ✅ Extra: put session + tenant into metadata so downstream tools can also read it
+          // (safe even if vapi-chat ignores it)
+          metadata: {
+            tenantId: effectiveTenantId,
+            sessionId,
+            source: "aspire_widget",
+          },
         }),
       });
 
@@ -115,7 +210,15 @@ export default function VapiWidget({
         throw new Error(msg);
       }
 
-      if (data?.id) setChatId(data.id);
+      // ✅ Persist chat id for continuity across reloads and Vapi forks
+      if (data?.id) {
+        setChatId(data.id);
+        try {
+          window.localStorage.setItem(storageKeys.chatId, data.id);
+        } catch {
+          // ignore
+        }
+      }
 
       const reply =
         data?.output?.[0]?.content ||
