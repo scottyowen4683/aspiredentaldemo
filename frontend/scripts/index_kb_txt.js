@@ -7,8 +7,10 @@
  * - Create embeddings
  * - Store chunks in Supabase (pgvector)
  *
- * This script is NOT part of the frontend build.
- * It is intended to be run via GitHub Actions only.
+ * Run via GitHub Actions.
+ *
+ * Tenant/source are derived from filename:
+ * - moreton_kb.txt => tenant_id: "moreton", source: "moreton_kb.txt"
  */
 
 import fs from "fs";
@@ -20,13 +22,7 @@ import { createClient } from "@supabase/supabase-js";
    ENVIRONMENT VALIDATION
    ========================= */
 
-const requiredEnv = [
-  "SUPABASE_URL",
-  "SUPABASE_SERVICE_ROLE_KEY",
-  "OPENAI_API_KEY",
-  "TENANT_ID",
-  "SOURCE_NAME"
-];
+const requiredEnv = ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "OPENAI_API_KEY"];
 
 for (const key of requiredEnv) {
   if (!process.env[key]) {
@@ -40,16 +36,12 @@ const EMBEDDING_MODEL = process.env.EMBED_MODEL || "text-embedding-3-small";
    CLIENTS
    ========================= */
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
-});
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY,
-  {
-    auth: { persistSession: false }
-  }
+  { auth: { persistSession: false } }
 );
 
 /* =========================
@@ -85,24 +77,29 @@ function inferPriority(section) {
   return 5;
 }
 
+// Tenant from filename: "moreton_kb.txt" -> "moreton"
+function tenantFromFilename(filePath) {
+  const base = path.basename(filePath).toLowerCase();
+  const noExt = base.replace(/\.txt$/i, "");
+  return noExt.replace(/_kb$/i, "");
+}
+
 /* =========================
    CHUNKING LOGIC
    ========================= */
 
 function chunkText(rawText) {
   const text = normaliseText(rawText);
-
-  // If the file is empty after normalisation, we must know immediately.
   if (!text) return [];
 
   const lines = text.split("\n");
-
   const chunks = [];
+
   let buffer = "";
   let currentSection = "General";
 
-  const MIN_CHARS = 1200;
-  const MAX_CHARS = 2800;
+  const MIN_CHARS = 900;
+  const MAX_CHARS = 2600;
 
   function flush(force = false) {
     const content = buffer.trim();
@@ -110,15 +107,9 @@ function chunkText(rawText) {
       buffer = "";
       return;
     }
-
-    // If not forced and too small, keep accumulating
     if (!force && content.length < MIN_CHARS) return;
 
-    chunks.push({
-      section: currentSection,
-      content
-    });
-
+    chunks.push({ section: currentSection, content });
     buffer = "";
   }
 
@@ -127,7 +118,7 @@ function chunkText(rawText) {
       flush(true);
 
       if (!/^[-=]{4,}$/.test(line.trim())) {
-        currentSection = line.replace(/:\s*$/, "").trim() || "General";
+        currentSection = line.replace(/:\s*$/, "").trim();
       }
 
       buffer += line + "\n";
@@ -135,14 +126,10 @@ function chunkText(rawText) {
     }
 
     buffer += line + "\n";
-
-    if (buffer.length >= MAX_CHARS) {
-      flush(true);
-    }
+    if (buffer.length >= MAX_CHARS) flush(true);
   }
 
   flush(true);
-
   return chunks;
 }
 
@@ -155,11 +142,10 @@ async function embed(text) {
     model: EMBEDDING_MODEL,
     input: text
   });
-
   return response.data[0].embedding;
 }
 
-async function insertChunks(chunks) {
+async function insertChunks({ tenant_id, source, chunks }) {
   if (!chunks.length) {
     console.log("No chunks to insert (chunks.length = 0).");
     return;
@@ -169,12 +155,11 @@ async function insertChunks(chunks) {
 
   for (let i = 0; i < chunks.length; i++) {
     const { section, content } = chunks[i];
-
     const embedding = await embed(content);
 
     rows.push({
-      tenant_id: process.env.TENANT_ID,
-      source: process.env.SOURCE_NAME,
+      tenant_id,
+      source,
       section,
       content,
       embedding,
@@ -203,27 +188,21 @@ async function insertChunks(chunks) {
 async function main() {
   const inputFile = process.argv[2];
 
-  if (!inputFile) {
-    throw new Error("TXT file path argument is required");
-  }
+  if (!inputFile) throw new Error("TXT file path argument is required");
 
   const absolutePath = path.resolve(inputFile);
-
   const rawText = fs.readFileSync(absolutePath, "utf8");
 
-  // DEBUG LOGS (critical)
-  const rawLen = rawText.length;
-  const preview = rawText.slice(0, 400).replace(/\n/g, "\\n");
+  console.log("Loaded file:", absolutePath);
+  console.log("Raw text length:", rawText.length);
+  console.log("Preview (first 400 chars):", JSON.stringify(rawText.slice(0, 400)));
 
-  console.log(`Loaded file: ${absolutePath}`);
-  console.log(`Raw text length: ${rawLen}`);
-  console.log(`Preview (first 400 chars): ${preview}`);
+  const tenant_id = tenantFromFilename(absolutePath);
+  const source = path.basename(absolutePath);
 
   const chunks = chunkText(rawText);
-
   console.log(`Prepared ${chunks.length} chunks`);
-
-  await insertChunks(chunks);
+  await insertChunks({ tenant_id, source, chunks });
 
   console.log("KB indexing complete");
 }
