@@ -5,6 +5,7 @@ const DEFAULT_GREETING =
 
 export default function VapiWidget({
   assistantId,
+  tenantId, // ✅ NEW (e.g. "moreton_bay")
   brandUrl = "https://aspireexecutive.ai",
   title = "Aspire AI Chat",
   greeting = DEFAULT_GREETING,
@@ -58,6 +59,21 @@ export default function VapiWidget({
       return;
     }
 
+    // tenantId is required for multi-council retrieval
+    if (!tenantId) {
+      setMessages((prev) => [
+        ...prev,
+        { role: "user", text },
+        {
+          role: "assistant",
+          text:
+            "Error: tenantId is missing. Pass tenantId (e.g. moreton_bay) into the VapiWidget component.",
+        },
+      ]);
+      setInput("");
+      return;
+    }
+
     setMessages((prev) => [...prev, { role: "user", text }]);
     setInput("");
     setBusy(true);
@@ -68,6 +84,7 @@ export default function VapiWidget({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           assistantId,
+          tenantId, // ✅ NEW: tells backend which council KB to use
           input: text,
           previousChatId: chatId || undefined,
         }),
