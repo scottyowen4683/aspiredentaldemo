@@ -550,7 +550,7 @@ exports.handler = async (event) => {
     const injectedInput = kbContext
       ? [
           "You are a helpful council assistant.",
-          "Answer using ONLY the knowledge base excerpts below when they contain the answer.",
+          "Answer using the knowledge base excerpts below as the primary source. You may apply reasonable interpretation where timing or intent is explicit.",
           "If the KB does not contain the answer, say you don’t have that information and suggest the best next step.",
           "",
           conversationSummary
