@@ -6,8 +6,8 @@
 // - result/error MUST be a single-line string (no \n)
 //
 // Function behavior:
-// - Extracts toolCallId from Vapi payload
-// - Extracts query from Vapi payload
+// - Extracts toolCallId from Vapi payload (including toolCalls[0].id)
+// - Extracts query from Vapi payload (including toolCalls[0].function.arguments JSON string)
 // - Resolves tenant via (1) assistantId mapping OR (2) URL ?tenant=moreton fallback
 // - Embeds query and queries Supabase RPC match_knowledge_chunks
 // - Returns a single-line string summary of top KB chunks
@@ -79,7 +79,8 @@ function pickFirstString(...vals) {
 }
 
 function extractToolCallId(body) {
-  // Vapi may send this in different shapes
+  // Vapi may send this in different shapes.
+  // Your log shows: body.toolCalls[0].id
   return pickFirstString(
     body?.toolCallId,
     body?.tool_call_id,
@@ -87,13 +88,17 @@ function extractToolCallId(body) {
     body?.tool_call?.id,
     body?.message?.toolCallId,
     body?.message?.toolCall?.id,
-    body?.call?.toolCallId
+    body?.call?.toolCallId,
+
+    // ✅ IMPORTANT: Vapi chat payload often includes toolCalls[]
+    body?.toolCalls?.[0]?.id,
+    body?.tool_calls?.[0]?.id
   );
 }
 
 function extractQuery(body) {
-  // Your tool parameter is "query" in Vapi, but it often arrives nested.
-  return pickFirstString(
+  // Try direct/common locations first
+  const direct = pickFirstString(
     body?.query,
     body?.input,
     body?.text,
@@ -108,6 +113,33 @@ function extractQuery(body) {
     body?.tool_call?.arguments?.query,
     body?.tool_call?.arguments?.input
   );
+  if (direct) return direct;
+
+  // ✅ IMPORTANT: Vapi often sends tool calls under toolCalls[]
+  // and arguments can be a STRING of JSON (as in your log).
+  const tc = body?.toolCalls?.[0] || body?.tool_calls?.[0] || null;
+  if (!tc) return null;
+
+  const args = tc?.function?.arguments;
+
+  // If args is an object already
+  if (args && typeof args === "object") {
+    return pickFirstString(args.query, args.input, tc?.query, tc?.input);
+  }
+
+  // If args is a JSON string (your case)
+  if (typeof args === "string" && args.trim()) {
+    try {
+      const parsed = JSON.parse(args);
+      return pickFirstString(parsed?.query, parsed?.input);
+    } catch {
+      // As a fallback, if it’s just raw text, return it
+      return args.trim();
+    }
+  }
+
+  // fallback
+  return pickFirstString(tc?.query, tc?.input);
 }
 
 function extractAssistantId(body) {
@@ -144,7 +176,9 @@ function formatKbResults(results, maxChars = 3500) {
   // Keep it short enough to avoid truncation / tool limits.
   let out = "KB matches: ";
   for (const r of results) {
-    const part = `[${r.section || "KB"} | ${r.source || "source"}] ${r.content || ""}`;
+    const part = `[${r.section || "KB"} | ${r.source || "source"}] ${
+      r.content || ""
+    }`;
     const cleaned = singleLine(part);
 
     if (out.length + cleaned.length + 3 > maxChars) break;
@@ -174,15 +208,14 @@ exports.handler = async (event) => {
   }
 
   let body = {};
-try {
-  body = event.body ? JSON.parse(event.body) : {};
-} catch {
-  return errVapi("call_unknown", "Invalid JSON body.");
-}
+  try {
+    body = event.body ? JSON.parse(event.body) : {};
+  } catch {
+    return errVapi("call_unknown", "Invalid JSON body.");
+  }
 
-console.log("VAPI_RAW_BODY:", JSON.stringify(body).slice(0, 5000));
-console.log("VAPI_QUERYSTRING:", event.queryStringParameters);
-
+  console.log("VAPI_RAW_BODY:", JSON.stringify(body).slice(0, 5000));
+  console.log("VAPI_QUERYSTRING:", event.queryStringParameters);
 
   const toolCallId = extractToolCallId(body) || "call_unknown";
   const query = extractQuery(body);
@@ -225,10 +258,15 @@ console.log("VAPI_QUERYSTRING:", event.queryStringParameters);
   const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
   const EMBED_MODEL = process.env.EMBED_MODEL || "text-embedding-3-small";
 
-  if (!SUPABASE_URL) return errVapi(toolCallId, "Server misconfig: Missing SUPABASE_URL.");
+  if (!SUPABASE_URL)
+    return errVapi(toolCallId, "Server misconfig: Missing SUPABASE_URL.");
   if (!SUPABASE_SERVICE_ROLE_KEY)
-    return errVapi(toolCallId, "Server misconfig: Missing SUPABASE_SERVICE_ROLE_KEY.");
-  if (!OPENAI_API_KEY) return errVapi(toolCallId, "Server misconfig: Missing OPENAI_API_KEY.");
+    return errVapi(
+      toolCallId,
+      "Server misconfig: Missing SUPABASE_SERVICE_ROLE_KEY."
+    );
+  if (!OPENAI_API_KEY)
+    return errVapi(toolCallId, "Server misconfig: Missing OPENAI_API_KEY.");
 
   try {
     const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
@@ -255,7 +293,10 @@ console.log("VAPI_QUERYSTRING:", event.queryStringParameters);
     });
 
     if (error) {
-      return errVapi(toolCallId, `Supabase RPC failed: ${singleLine(JSON.stringify(error))}`);
+      return errVapi(
+        toolCallId,
+        `Supabase RPC failed: ${singleLine(JSON.stringify(error))}`
+      );
     }
 
     const results = (data || []).map((r) => ({
@@ -269,6 +310,9 @@ console.log("VAPI_QUERYSTRING:", event.queryStringParameters);
     const resultStr = formatKbResults(results);
     return okVapi(toolCallId, resultStr);
   } catch (e) {
-    return errVapi(toolCallId, `KB search failed: ${singleLine(e?.message || e)}`);
+    return errVapi(
+      toolCallId,
+      `KB search failed: ${singleLine(e?.message || e)}`
+    );
   }
 };
