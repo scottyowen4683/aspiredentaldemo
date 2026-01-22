@@ -1,12 +1,16 @@
 // frontend/netlify/functions/vapi-kb-tool.js
 //
-// Vapi-friendly wrapper for KB search.
-// - Accepts Vapi's various request body shapes
-// - Extracts { query } (required) and { assistantId } (required)
-// - Maps assistantId -> tenant_id (assistant-map.json)
-// - Embeds query (OpenAI embeddings)
-// - Calls Supabase RPC match_knowledge_chunks
-// - Returns a clean JSON payload (always non-empty)
+// Vapi Custom Tool Webhook (STRICT FORMAT):
+// - Always returns HTTP 200
+// - Always returns { results: [ { toolCallId, result|error } ] }
+// - result/error MUST be a single-line string (no \n)
+//
+// Function behavior:
+// - Extracts toolCallId from Vapi payload
+// - Extracts query from Vapi payload
+// - Resolves tenant via (1) assistantId mapping OR (2) URL ?tenant=moreton fallback
+// - Embeds query and queries Supabase RPC match_knowledge_chunks
+// - Returns a single-line string summary of top KB chunks
 
 const fs = require("fs");
 const path = require("path");
@@ -19,16 +23,51 @@ function loadAssistantMap() {
   return JSON.parse(raw);
 }
 
-function json(statusCode, body) {
+function singleLine(str) {
+  if (str == null) return "";
+  return String(str)
+    .replace(/\r?\n|\r/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function okVapi(toolCallId, resultStr) {
   return {
-    statusCode,
+    statusCode: 200,
     headers: {
       "Content-Type": "application/json",
       "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Methods": "POST, OPTIONS",
       "Access-Control-Allow-Headers": "Content-Type, Authorization",
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify({
+      results: [
+        {
+          toolCallId: String(toolCallId || "call_unknown"),
+          result: singleLine(resultStr || ""),
+        },
+      ],
+    }),
+  };
+}
+
+function errVapi(toolCallId, errorStr) {
+  return {
+    statusCode: 200, // IMPORTANT: Vapi requires 200 even on error
+    headers: {
+      "Content-Type": "application/json",
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    },
+    body: JSON.stringify({
+      results: [
+        {
+          toolCallId: String(toolCallId || "call_unknown"),
+          error: singleLine(errorStr || "Unknown error"),
+        },
+      ],
+    }),
   };
 }
 
@@ -39,8 +78,21 @@ function pickFirstString(...vals) {
   return null;
 }
 
+function extractToolCallId(body) {
+  // Vapi may send this in different shapes
+  return pickFirstString(
+    body?.toolCallId,
+    body?.tool_call_id,
+    body?.toolCall?.id,
+    body?.tool_call?.id,
+    body?.message?.toolCallId,
+    body?.message?.toolCall?.id,
+    body?.call?.toolCallId
+  );
+}
+
 function extractQuery(body) {
-  // Try all common places Vapi / tool runners may put args
+  // Your tool parameter is "query" in Vapi, but it often arrives nested.
   return pickFirstString(
     body?.query,
     body?.input,
@@ -54,26 +106,52 @@ function extractQuery(body) {
     body?.message?.toolCall?.arguments?.query,
     body?.message?.toolCall?.arguments?.input,
     body?.tool_call?.arguments?.query,
-    body?.tool_call?.arguments?.input,
-    body?.payload?.query,
-    body?.payload?.input
+    body?.tool_call?.arguments?.input
   );
 }
 
 function extractAssistantId(body) {
-  // Your Vapi tool SHOULD send assistantId, but in practice it may be nested.
   return pickFirstString(
     body?.assistantId,
     body?.assistant_id,
     body?.assistant?.id,
-    body?.assistant?.assistantId,
     body?.call?.assistantId,
     body?.call?.assistant?.id,
     body?.metadata?.assistantId,
-    body?.metadata?.assistant?.id,
-    body?.request?.assistantId,
-    body?.request?.assistant?.id
+    body?.metadata?.assistant?.id
   );
+}
+
+function getTenantFromUrl(event) {
+  try {
+    const u = new URL(event.rawUrl || event.headers?.referer || "http://x/");
+    // Netlify provides rawUrl in most environments
+    const tenant = u.searchParams.get("tenant");
+    return tenant && tenant.trim() ? tenant.trim() : null;
+  } catch {
+    // fallback parse from event.queryStringParameters
+    const tenant = event.queryStringParameters?.tenant;
+    return tenant && String(tenant).trim() ? String(tenant).trim() : null;
+  }
+}
+
+function formatKbResults(results, maxChars = 3500) {
+  if (!Array.isArray(results) || results.length === 0) {
+    return "No relevant knowledge base entries found.";
+  }
+
+  // Build a compact single-line response the model can use.
+  // Keep it short enough to avoid truncation / tool limits.
+  let out = "KB matches: ";
+  for (const r of results) {
+    const part = `[${r.section || "KB"} | ${r.source || "source"}] ${r.content || ""}`;
+    const cleaned = singleLine(part);
+
+    if (out.length + cleaned.length + 3 > maxChars) break;
+    out += cleaned + " || ";
+  }
+
+  return out.replace(/\s\|\|\s$/, "").trim();
 }
 
 exports.handler = async (event) => {
@@ -89,73 +167,72 @@ exports.handler = async (event) => {
     };
   }
 
+  // Vapi expects POST
   if (event.httpMethod !== "POST") {
-    return json(405, { error: "Method Not Allowed" });
+    // Still return 200 with error envelope to keep Vapi happy
+    return errVapi("call_unknown", "Method Not Allowed (POST required).");
   }
 
+  let body = {};
   try {
-    const body = event.body ? JSON.parse(event.body) : {};
+    body = event.body ? JSON.parse(event.body) : {};
+  } catch {
+    // If JSON parse fails, still respond in Vapi envelope
+    return errVapi("call_unknown", "Invalid JSON body.");
+  }
 
-    // Extract query + assistantId robustly
-    const query = extractQuery(body);
-    const assistantId = extractAssistantId(body);
+  const toolCallId = extractToolCallId(body) || "call_unknown";
+  const query = extractQuery(body);
+  const assistantId = extractAssistantId(body);
 
-    // Optional topK
-    const topK = Number(
-      body?.topK ??
-        body?.top_k ??
-        body?.arguments?.topK ??
-        body?.arguments?.top_k ??
-        6
+  // Tenant resolution:
+  // (A) assistantId -> tenant via assistant-map.json
+  // (B) fallback: URL query param ?tenant=moreton
+  const tenantFromUrl = getTenantFromUrl(event);
+
+  if (!query) {
+    return errVapi(
+      toolCallId,
+      "Missing query. Ensure the Vapi tool has required parameter 'query' and the assistant is passing it."
     );
+  }
 
-    if (!query) {
-      return json(400, {
-        error: "Missing query",
-        hint:
-          "Ensure your Vapi tool has a parameter named 'query' and the assistant is passing it.",
-        receivedKeys: Object.keys(body || {}),
-      });
+  const map = (() => {
+    try {
+      return loadAssistantMap();
+    } catch {
+      return {};
     }
+  })();
 
-    if (!assistantId) {
-      return json(400, {
-        error: "Missing assistantId",
-        hint:
-          "Vapi must include assistantId in the tool call context. If it doesn't, we can hardcode tenant via URL param as a fallback.",
-        receivedKeys: Object.keys(body || {}),
-      });
-    }
+  let tenant_id = null;
+  if (assistantId && map[assistantId]) tenant_id = map[assistantId];
+  if (!tenant_id && tenantFromUrl) tenant_id = tenantFromUrl;
 
-    const SUPABASE_URL = process.env.SUPABASE_URL;
-    const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+  if (!tenant_id) {
+    return errVapi(
+      toolCallId,
+      `Missing tenant id. assistantId not mapped and no ?tenant= provided. assistantId=${assistantId || "null"}`
+    );
+  }
 
-    if (!SUPABASE_URL) return json(500, { error: "Missing SUPABASE_URL" });
-    if (!SUPABASE_SERVICE_ROLE_KEY)
-      return json(500, { error: "Missing SUPABASE_SERVICE_ROLE_KEY" });
-    if (!OPENAI_API_KEY) return json(500, { error: "Missing OPENAI_API_KEY" });
+  // Env vars
+  const SUPABASE_URL = process.env.SUPABASE_URL;
+  const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+  const EMBED_MODEL = process.env.EMBED_MODEL || "text-embedding-3-small";
 
-    const EMBED_MODEL = process.env.EMBED_MODEL || "text-embedding-3-small";
+  if (!SUPABASE_URL) return errVapi(toolCallId, "Server misconfig: Missing SUPABASE_URL.");
+  if (!SUPABASE_SERVICE_ROLE_KEY)
+    return errVapi(toolCallId, "Server misconfig: Missing SUPABASE_SERVICE_ROLE_KEY.");
+  if (!OPENAI_API_KEY) return errVapi(toolCallId, "Server misconfig: Missing OPENAI_API_KEY.");
 
-    // Map assistantId -> tenant
-    const map = loadAssistantMap();
-    const tenant_id = map[assistantId];
-
-    if (!tenant_id) {
-      return json(403, {
-        error: "assistantId is not mapped to a tenant",
-        assistantId,
-      });
-    }
-
+  try {
     const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
-
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
       auth: { persistSession: false },
     });
 
-    // Embed query
     const emb = await openai.embeddings.create({
       model: EMBED_MODEL,
       input: query,
@@ -163,10 +240,11 @@ exports.handler = async (event) => {
 
     const query_embedding = emb.data?.[0]?.embedding;
     if (!query_embedding) {
-      return json(500, { error: "Failed to generate query embedding" });
+      return errVapi(toolCallId, "Embedding failed: no embedding returned.");
     }
 
-    // Search via RPC
+    const topK = 6;
+
     const { data, error } = await supabase.rpc("match_knowledge_chunks", {
       query_embedding,
       match_count: topK,
@@ -174,7 +252,7 @@ exports.handler = async (event) => {
     });
 
     if (error) {
-      return json(500, { error: "Supabase RPC failed", details: error });
+      return errVapi(toolCallId, `Supabase RPC failed: ${singleLine(JSON.stringify(error))}`);
     }
 
     const results = (data || []).map((r) => ({
@@ -185,16 +263,9 @@ exports.handler = async (event) => {
       similarity: r.similarity,
     }));
 
-    // IMPORTANT: Always return a non-empty object (Vapi hates empty/undefined)
-    return json(200, {
-      ok: true,
-      tenant_id,
-      assistantId,
-      query,
-      topK,
-      results,
-    });
-  } catch (err) {
-    return json(500, { error: err?.message || "Server error" });
+    const resultStr = formatKbResults(results);
+    return okVapi(toolCallId, resultStr);
+  } catch (e) {
+    return errVapi(toolCallId, `KB search failed: ${singleLine(e?.message || e)}`);
   }
 };
