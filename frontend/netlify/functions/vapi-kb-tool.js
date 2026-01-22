@@ -244,23 +244,21 @@ function verifySecret(event) {
 
 // 3.2 READ: load summary from conversation_sessions
 async function loadConversationSummary(supabase, tenant_id, sessionId) {
-  if (!CFG.enableMemoryRead) return null;
-
   try {
     const { data, error } = await supabase
-      .from(CFG.memoryTable)
+      .from("conversation_sessions")
       .select("summary")
       .eq("tenant_id", tenant_id)
       .eq("session_id", sessionId)
-      .maybeSingle();
+      .single();
 
     if (error || !data?.summary) return null;
     return data.summary;
   } catch {
-    // fail open: if table missing or query fails, just proceed without memory
     return null;
   }
 }
+
 
 // Phase 3.3 (optional): update summary via GPT and upsert to conversation_sessions
 async function updateConversationSummary({
