@@ -30,8 +30,51 @@
 // - public.chat_conversations (for message history)
 // - public.conversation_sessions (for optional summary)
 
-const fs = require("fs");
-const path = require("path");
+/* =========================
+   ASSISTANT CONFIGURATIONS
+========================= */
+
+// Multi-tenant assistant configurations
+// Add new clients here - no file system access needed
+const ASSISTANT_CONFIGS = {
+  moreton: {
+    name: "Moreton Bay Council Assistant",
+    tenantId: "moreton",
+    systemPrompt: `You are a helpful AI assistant for the City of Moreton Bay Council. Your role is to assist residents with common, low-risk enquiries about council services.
+
+You should:
+- Provide clear, accurate information based on the knowledge base provided
+- Maintain a professional, friendly, and calm tone
+- Stay within the scope of informational enquiries (e.g., bins, complaints, opening hours, general guidance)
+- Escalate or stop when a request is outside your scope
+- Not handle: payments, account-specific actions, formal determinations, or access to internal Council systems
+- For urgent matters, direct users to Council's official channels
+- Avoid making decisions or formal determinations
+
+When answering:
+1. Use the knowledge base excerpts as your primary source of truth
+2. If the KB doesn't contain the answer, politely say you don't have that information and suggest the best next step
+3. Be concise but complete
+4. If uncertain, err on the side of escalation to Council staff
+
+Remember: You are designed to handle routine informational queries and escalate appropriately.`,
+    model: "gpt-4o-mini",
+    temperature: 0.3,
+    maxTokens: 500,
+    kbEnabled: true,
+    kbMatchCount: 5,
+  },
+  default: {
+    name: "Aspire AI Assistant",
+    tenantId: "default",
+    systemPrompt: "You are a helpful AI assistant powered by Aspire Executive Solutions. You provide accurate, helpful information based on the knowledge base provided to you. If you don't know the answer, say so clearly and suggest next steps.",
+    model: "gpt-4o-mini",
+    temperature: 0.3,
+    maxTokens: 500,
+    kbEnabled: true,
+    kbMatchCount: 5,
+  },
+};
 
 /* =========================
    BASIC HELPERS
@@ -75,13 +118,15 @@ function makeSessionId() {
    CONFIG LOADER
 ========================= */
 
-function loadAssistantConfig(tenantId) {
-  const configPath = path.join(__dirname, "config", "assistants.json");
-  const raw = fs.readFileSync(configPath, "utf8");
-  const configs = JSON.parse(raw);
+// Assistant ID to tenant mapping
+// Add new mappings here when creating new assistants
+const ASSISTANT_MAP = {
+  "a2c1de9b-b358-486b-b9e6-a8b4f9e4385d": "moreton",
+};
 
+function loadAssistantConfig(tenantId) {
   // Try to find config for this tenant, fall back to default
-  const config = configs[tenantId] || configs.default || null;
+  const config = ASSISTANT_CONFIGS[tenantId] || ASSISTANT_CONFIGS.default || null;
   if (!config) {
     throw new Error(`No configuration found for tenant: ${tenantId}`);
   }
@@ -90,9 +135,7 @@ function loadAssistantConfig(tenantId) {
 }
 
 function loadAssistantMap() {
-  const p = path.join(__dirname, "tenants", "assistant-map.json");
-  const raw = fs.readFileSync(p, "utf8");
-  return JSON.parse(raw);
+  return ASSISTANT_MAP;
 }
 
 function resolveTenantId(rawTenantId, assistantId) {
