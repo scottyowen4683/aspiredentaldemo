@@ -616,7 +616,15 @@ async function executeEmailTool(args, tenantId, baseUrl) {
   }
 
   const refNumber = data.referenceNumber || "N/A";
-  return `Email sent successfully. Reference number: ${refNumber}. Council staff will follow up within the expected timeframe. Tell the user their reference number clearly.`;
+
+  // Return detailed info so AI can craft accurate response
+  return `SUCCESS: Email sent to council staff.
+Reference Number: ${refNumber}
+Request Type: ${args.requestType}
+Issue: ${args.details}
+Resident: ${args.residentName}
+
+IMPORTANT: Tell the user their request for "${args.details}" has been submitted with reference number ${refNumber}. Council staff will follow up within the expected timeframe.`;
 }
 
 /* =========================
@@ -860,10 +868,14 @@ exports.handler = async (event) => {
 
     // Handle function calling
     if (toolCalls && toolCalls.length > 0 && CFG.ENABLE_EMAIL_TOOL) {
-      const toolCall = toolCalls[0]; // Handle first tool call
+      // IMPORTANT: Only handle the FIRST tool call, ignore duplicates
+      // Sometimes AI makes multiple identical calls - we only execute once
+      const toolCall = toolCalls[0];
+      console.log(`[ai-chat] Handling tool call: ${toolCall.function.name} (${toolCalls.length} calls received, using first only)`);
 
       if (toolCall.function.name === "send_council_request_email") {
         const args = JSON.parse(toolCall.function.arguments);
+        console.log("[ai-chat] Tool arguments:", JSON.stringify(args, null, 2));
 
         // Execute the email tool
         const baseUrl = process.env.URL || "https://moretonbaypilot.netlify.app";
