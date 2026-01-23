@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Test Email Function</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 600px;
+      margin: 50px auto;
+      padding: 20px;
+    }
+    button {
+      background: #2563eb;
+      color: white;
+      padding: 10px 20px;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 16px;
+    }
+    button:hover {
+      background: #1d4ed8;
+    }
+    #result {
+      margin-top: 20px;
+      padding: 15px;
+      border-radius: 5px;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+    .success {
+      background: #dcfce7;
+      border: 1px solid #86efac;
+      color: #166534;
+    }
+    .error {
+      background: #fee2e2;
+      border: 1px solid #fca5a5;
+      color: #991b1b;
+    }
+  </style>
+</head>
+<body>
+  <h1>Test Email Function</h1>
+  <p>Click the button to test sending an email via the send-council-email function.</p>
+
+  <button onclick="testEmail()">Send Test Email</button>
+
+  <div id="result"></div>
+
+  <script>
+    async function testEmail() {
+      const resultDiv = document.getElementById('result');
+      resultDiv.textContent = 'Sending test email...';
+      resultDiv.className = '';
+
+      try {
+        const response = await fetch('/.netlify/functions/send-council-email', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            tenantId: 'moreton',
+            requestType: 'Test Request',
+            residentName: 'Test User',
+            residentPhone: '0400000000',
+            residentEmail: 'test@example.com',
+            address: '123 Test Street',
+            preferredContactMethod: 'phone',
+            urgency: 'Normal',
+            details: 'This is a test email sent at ' + new Date().toLocaleString(),
+          }),
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+          resultDiv.className = 'success';
+          resultDiv.textContent =
+            '✅ SUCCESS!\n\n' +
+            'Message ID: ' + (data.messageId || 'N/A') + '\n' +
+            'Reference Number: ' + (data.referenceNumber || 'N/A') + '\n' +
+            'Sent to: ' + (data.recipientEmail || 'N/A') + '\n\n' +
+            'Check your email at: ' + (data.recipientEmail || 'scott@aspireexecutive.com.au');
+        } else {
+          resultDiv.className = 'error';
+          resultDiv.textContent =
+            '❌ ERROR:\n\n' +
+            (data.error || 'Unknown error') + '\n\n' +
+            'Full response:\n' + JSON.stringify(data, null, 2);
+        }
+      } catch (error) {
+        resultDiv.className = 'error';
+        resultDiv.textContent =
+          '❌ NETWORK ERROR:\n\n' +
+          error.message + '\n\n' +
+          'The function might not be deployed or there\'s a network issue.';
+      }
+    }
+  </script>
+</body>
+</html>
