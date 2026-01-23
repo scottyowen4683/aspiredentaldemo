@@ -67,11 +67,12 @@ RESPONSE GUIDELINES:
 1. Knowledge Base First: Always use the provided knowledge base excerpts as your primary (and only) source of truth
 2. If Uncertain: If the knowledge base doesn't contain the answer, say: "I don't have that specific information in my knowledge base. For accurate details, please contact Council directly at [insert contact from KB if available]"
 3. Be Concise: Keep responses focused and under 3-4 sentences when possible
-4. Escalate Gracefully: When a request is outside your scope, politely explain why and provide the best next step (phone number, email, or official channel)
+4. Escalate Gracefully: When a request is outside your scope, politely explain why and provide the best next step (phone number, email, or web form)
 5. Never Guess: If you're unsure, always err on the side of escalation rather than providing potentially incorrect information
+6. Chat-Only Medium: You are a text chat assistant only. Never offer to transfer calls, send SMS, or make phone calls. Direct residents to contact methods appropriate for chat (phone numbers to call, email addresses, web forms)
 
 URGENT MATTERS:
-For urgent issues or emergencies, immediately direct residents to call Council directly using the official phone number from the knowledge base.
+For urgent issues or emergencies, immediately direct residents to call Council directly using the official phone number from the knowledge base. Do not offer to transfer or connect calls - you are chat-only.
 
 TONE & STYLE:
 - Professional but approachable
@@ -520,6 +521,93 @@ async function updateRollingSummary({ openaiKey, model, maxChars, previousSummar
 }
 
 /* =========================
+   FUNCTION CALLING TOOLS
+========================= */
+
+// OpenAI Function/Tool definitions for the AI to use
+const AVAILABLE_TOOLS = [
+  {
+    type: "function",
+    function: {
+      name: "send_council_request_email",
+      description: "Sends a structured email to council staff for requests that require official handling, follow-up, or are outside the scope of immediate chat assistance. Use this when a resident needs official assistance with: service requests requiring action, complaints needing investigation, complex inquiries requiring specialist response, or requests for callbacks. DO NOT use for: general information queries (answer those directly), or simple questions answerable from the knowledge base.",
+      parameters: {
+        type: "object",
+        properties: {
+          requestType: {
+            type: "string",
+            description: "Type of request (e.g., 'Service Request', 'Complaint', 'General Inquiry', 'Callback Request')",
+          },
+          residentName: {
+            type: "string",
+            description: "Name of the resident making the request",
+          },
+          residentPhone: {
+            type: "string",
+            description: "Contact phone number",
+          },
+          residentEmail: {
+            type: "string",
+            description: "Contact email address (optional)",
+          },
+          address: {
+            type: "string",
+            description: "Resident's address (optional)",
+          },
+          preferredContactMethod: {
+            type: "string",
+            description: "How they prefer to be contacted (phone, email)",
+          },
+          urgency: {
+            type: "string",
+            enum: ["Low", "Normal", "High", "Urgent"],
+            description: "Urgency level of the request",
+          },
+          details: {
+            type: "string",
+            description: "Detailed description of the request/issue",
+          },
+        },
+        required: ["requestType", "residentName", "residentPhone", "details"],
+      },
+    },
+  },
+];
+
+/* =========================
+   FUNCTION EXECUTION
+========================= */
+
+async function executeEmailTool(args, tenantId, baseUrl) {
+  // Call the send-council-email Netlify function
+  const emailEndpoint = `${baseUrl}/.netlify/functions/send-council-email`;
+
+  const response = await fetch(emailEndpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      tenantId,
+      requestType: args.requestType,
+      residentName: args.residentName,
+      residentPhone: args.residentPhone,
+      residentEmail: args.residentEmail || "",
+      address: args.address || "",
+      preferredContactMethod: args.preferredContactMethod || "phone",
+      urgency: args.urgency || "Normal",
+      details: args.details,
+    }),
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    return `Error sending email: ${data.error || "Unknown error"}`;
+  }
+
+  return `Email sent successfully to council staff (pilot mode - sent to ${data.recipientEmail}). The request has been logged and someone will follow up within the expected timeframe.`;
+}
+
+/* =========================
    CONFIG (ENV)
 ========================= */
 
@@ -532,6 +620,8 @@ const CFG = {
   ENABLE_MEMORY_WRITE: String(process.env.ENABLE_MEMORY_WRITE || "true").toLowerCase() === "true",
   MEMORY_MAX_CHARS: Number(process.env.MEMORY_MAX_CHARS || 1200),
   MEMORY_SUMMARY_MODEL: process.env.MEMORY_SUMMARY_MODEL || "gpt-4o-mini",
+
+  ENABLE_EMAIL_TOOL: String(process.env.ENABLE_EMAIL_TOOL || "true").toLowerCase() === "true",
 };
 
 /* =========================
@@ -667,8 +757,21 @@ exports.handler = async (event) => {
     });
 
     /* =========================
-       Call OpenAI
+       Call OpenAI (with function calling support)
     ========================= */
+
+    const openaiPayload = {
+      model: assistantConfig.model || "gpt-4o-mini",
+      messages,
+      temperature: assistantConfig.temperature || 0.3,
+      max_tokens: assistantConfig.maxTokens || 500,
+    };
+
+    // Add tools if email functionality is enabled
+    if (CFG.ENABLE_EMAIL_TOOL) {
+      openaiPayload.tools = AVAILABLE_TOOLS;
+      openaiPayload.tool_choice = "auto"; // Let AI decide when to use tools
+    }
 
     const openaiResp = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
@@ -676,12 +779,7 @@ exports.handler = async (event) => {
         Authorization: `Bearer ${OPENAI_API_KEY}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        model: assistantConfig.model || "gpt-4o-mini",
-        messages,
-        temperature: assistantConfig.temperature || 0.3,
-        max_tokens: assistantConfig.maxTokens || 500,
-      }),
+      body: JSON.stringify(openaiPayload),
     });
 
     const raw = await openaiResp.text();
@@ -709,7 +807,61 @@ exports.handler = async (event) => {
       );
     }
 
-    const assistantMessage = data?.choices?.[0]?.message?.content || "I apologize, but I couldn't generate a response. Please try again.";
+    const choice = data?.choices?.[0];
+    const message = choice?.message;
+
+    // Check if AI wants to call a function
+    const toolCalls = message?.tool_calls;
+    let assistantMessage = message?.content || "";
+
+    // Handle function calling
+    if (toolCalls && toolCalls.length > 0 && CFG.ENABLE_EMAIL_TOOL) {
+      const toolCall = toolCalls[0]; // Handle first tool call
+
+      if (toolCall.function.name === "send_council_request_email") {
+        const args = JSON.parse(toolCall.function.arguments);
+
+        // Execute the email tool
+        const baseUrl = process.env.URL || "https://moretonbaypilot.netlify.app";
+        const toolResult = await executeEmailTool(args, tenantId, baseUrl);
+
+        // Add tool call to messages
+        messages.push({
+          role: "assistant",
+          content: null,
+          tool_calls: [toolCall],
+        });
+
+        messages.push({
+          role: "tool",
+          tool_call_id: toolCall.id,
+          content: toolResult,
+        });
+
+        // Make another OpenAI call to get final response
+        const followUpResp = await fetch("https://api.openai.com/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${OPENAI_API_KEY}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: assistantConfig.model || "gpt-4o-mini",
+            messages,
+            temperature: assistantConfig.temperature || 0.3,
+            max_tokens: assistantConfig.maxTokens || 500,
+          }),
+        });
+
+        const followUpData = await followUpResp.json();
+        assistantMessage = followUpData?.choices?.[0]?.message?.content || "Email has been sent to council staff. They will follow up with you shortly.";
+      }
+    }
+
+    // Fallback if no content
+    if (!assistantMessage) {
+      assistantMessage = "I apologize, but I couldn't generate a response. Please try again.";
+    }
 
     // Save messages to conversation history
     await saveMessage({

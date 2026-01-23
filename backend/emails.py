@@ -86,7 +86,7 @@ def send_council_request_email(payload: dict):
     """
 
     email_obj = sib_api_v3_sdk.SendSmtpEmail(
-        sender={"email": sender_email, "name": "Aspire AI – Hinchinbrook"},
+        sender={"email": sender_email, "name": "Aspire AI Services"},
         to=[{"email": recipient_email}],
         subject=subject,
         html_content=html_content,
