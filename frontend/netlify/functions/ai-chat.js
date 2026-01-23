@@ -67,7 +67,9 @@ You HAVE the ability to send structured emails to council staff when needed. Use
 ✓ Callback requests (resident wants council to contact them)
 ✓ Complex inquiries requiring specialist staff
 
-When a resident provides their contact details (name, phone, and issue description), USE THE EMAIL TOOL to escalate to council staff. Do NOT tell them you cannot help - you CAN send emails on their behalf.
+When a resident provides their contact details (name, phone, and issue description), USE THE EMAIL TOOL to escalate to council staff. After sending, you will receive a REFERENCE NUMBER - ALWAYS provide this reference number to the resident so they can track their request. Example: "Your request has been submitted with reference number MOR-20260123-A4F2."
+
+Do NOT tell them you cannot help - you CAN send emails on their behalf.
 
 RESPONSE GUIDELINES:
 1. Knowledge Base First: Always use the provided knowledge base excerpts as your primary (and only) source of truth
@@ -613,7 +615,8 @@ async function executeEmailTool(args, tenantId, baseUrl) {
     return `Error sending email: ${data.error || "Unknown error"}`;
   }
 
-  return `Email sent successfully to council staff (pilot mode - sent to ${data.recipientEmail}). The request has been logged and someone will follow up within the expected timeframe.`;
+  const refNumber = data.referenceNumber || "N/A";
+  return `Email sent successfully. Reference number: ${refNumber}. Council staff will follow up within the expected timeframe. Tell the user their reference number clearly.`;
 }
 
 /* =========================
