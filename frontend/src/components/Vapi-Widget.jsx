@@ -14,8 +14,15 @@ export default function VapiWidget({
   const [busy, setBusy] = useState(false);
   const [input, setInput] = useState("");
 
-  // Fresh every visit: keep in memory only
-  const [chatId, setChatId] = useState(null);
+  // Session management with localStorage persistence
+  const sessionStorageKey = `aspire:aiSession:${tenantId}:${assistantId}`;
+
+  const [sessionId, setSessionId] = useState(() => {
+    if (typeof window !== "undefined" && tenantId && assistantId) {
+      return localStorage.getItem(sessionStorageKey) || null;
+    }
+    return null;
+  });
 
   const [messages, setMessages] = useState(() => [
     { role: "assistant", text: greeting },
@@ -40,7 +47,11 @@ export default function VapiWidget({
   }, [messages, open]);
 
   function resetChat() {
-    setChatId(null);
+    // Clear session from localStorage
+    if (typeof window !== "undefined") {
+      localStorage.removeItem(sessionStorageKey);
+    }
+    setSessionId(null);
     setMessages([{ role: "assistant", text: greeting }]);
     setBusy(false);
     setInput("");
@@ -69,14 +80,14 @@ export default function VapiWidget({
     setBusy(true);
 
     try {
-      const res = await fetch("/.netlify/functions/vapi-chat", {
+      const res = await fetch("/.netlify/functions/ai-chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           assistantId,
-          tenantId, // ← THIS IS THE KEY LINE
+          tenantId,
           input: text,
-          previousChatId: chatId || undefined,
+          sessionId: sessionId || undefined,
         }),
       });
 
@@ -98,7 +109,13 @@ export default function VapiWidget({
         throw new Error(msg);
       }
 
-      if (data?.id) setChatId(data.id);
+      // Store session ID
+      if (data?.sessionId) {
+        setSessionId(data.sessionId);
+        if (typeof window !== "undefined") {
+          localStorage.setItem(sessionStorageKey, data.sessionId);
+        }
+      }
 
       const reply =
         data?.output?.[0]?.content ||

@@ -1,7 +1,8 @@
 import React from "react";
-import VapiWidget from "./vapi-widget.jsx";
+import VapiWidget from "../../components/Vapi-Widget.jsx";
 
 const assistantId = import.meta.env.VITE_VAPI_ASSISTANT_MORETON;
+const tenantId = "moreton";
 
 export default function MoretonBayPilot() {
   const isConfigured = Boolean(assistantId);
@@ -162,8 +163,9 @@ export default function MoretonBayPilot() {
 
         <VapiWidget
           assistantId={assistantId}
+          tenantId={tenantId}
           title="Moreton Bay • Aspire AI Chat Pilot"
-          greeting="Hi — I’m the City of Moreton bay AI assistant. How can I help you today? For urgent matters, please use Council’s official channels."
+          greeting="Hi — I'm the City of Moreton bay AI assistant. How can I help you today? For urgent matters, please use Council's official channels."
           brandUrl="https://aspireexecutive.ai"
         />
       </div>
