@@ -102,8 +102,8 @@ const ASSISTANT_CONFIGS = {
     tenantId: "moreton",
     councilName: "the City of Moreton Bay Council",
     model: "gpt-4o-mini",
-    temperature: 0.3,
-    maxTokens: 500,
+    temperature: 0.5,  // Increased from 0.3 for better tool use
+    maxTokens: 800,    // Increased from 500 for tool calling
     kbEnabled: true,
     kbMatchCount: 5,
   },
@@ -782,8 +782,28 @@ exports.handler = async (event) => {
     // Add tools if email functionality is enabled
     if (CFG.ENABLE_EMAIL_TOOL) {
       openaiPayload.tools = AVAILABLE_TOOLS;
-      openaiPayload.tool_choice = "auto"; // Let AI decide when to use tools
-      console.log("[ai-chat] Email tool enabled, tools added to request");
+
+      // Check if this looks like a service request based on keywords
+      const userMessage = input.toLowerCase();
+      const serviceKeywords = ['missed bin', 'report', 'fallen tree', 'pothole', 'broken', 'complaint', 'issue', 'problem', 'callback', 'call me', 'contact me'];
+      const hasServiceRequest = serviceKeywords.some(keyword => userMessage.includes(keyword));
+
+      // Check if user provided contact details (name + phone pattern)
+      const hasContactDetails = conversationHistory.some(msg =>
+        msg.role === 'user' && /\d{4}/.test(msg.content)
+      ) || /\d{4}/.test(userMessage);
+
+      if (hasServiceRequest && hasContactDetails) {
+        // Force tool use when we detect service request + contact info
+        openaiPayload.tool_choice = {
+          type: "function",
+          function: { name: "send_council_request_email" }
+        };
+        console.log("[ai-chat] Service request detected - FORCING email tool use");
+      } else {
+        openaiPayload.tool_choice = "auto"; // Let AI decide
+        console.log("[ai-chat] Email tool enabled (auto mode)");
+      }
     } else {
       console.log("[ai-chat] Email tool DISABLED");
     }
