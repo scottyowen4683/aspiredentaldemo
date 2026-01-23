@@ -2,9 +2,9 @@
 import express from 'express';
 import twilio from 'twilio';
 import logger from '../services/logger.js';
+import supabaseService from '../services/supabase-service.js';
 
 const router = express.Router();
-
 const VoiceResponse = twilio.twiml.VoiceResponse;
 
 // POST /api/voice/incoming
@@ -13,36 +13,169 @@ router.post('/incoming', async (req, res) => {
   try {
     const { From, To, CallSid } = req.body;
 
-    logger.info('Incoming voice call', { From, To, CallSid });
+    logger.info('Incoming voice call', {
+      from: From,
+      to: To,
+      callSid: CallSid
+    });
 
+    // Look up assistant by phone number
+    const assistant = await supabaseService.getAssistantByPhoneNumber(To);
+
+    if (!assistant) {
+      logger.warn('No assistant found for phone number:', To);
+
+      const response = new VoiceResponse();
+      response.say({
+        voice: 'Polly.Joanna'
+      }, 'Sorry, this number is not configured. Please contact support.');
+      response.hangup();
+
+      res.type('text/xml');
+      res.send(response.toString());
+      return;
+    }
+
+    logger.info('Assistant found', {
+      assistantId: assistant.id,
+      assistantName: assistant.friendly_name
+    });
+
+    // Create TwiML response
     const response = new VoiceResponse();
 
-    // Greeting
-    response.say({
-      voice: 'Polly.Nicole-Neural'
-    }, 'Thank you for calling. The voice assistant is being set up. Please check back soon.');
+    // Optional: Play greeting (first_message from assistant)
+    if (assistant.first_message) {
+      response.say({
+        voice: 'Polly.Joanna'
+      }, assistant.first_message);
+    }
 
-    // TODO: Connect to WebSocket stream
-    // const connect = response.connect();
-    // connect.stream({
-    //   url: `wss://${req.headers.host}/voice/stream`,
-    //   parameters: {
-    //     callSid: CallSid,
-    //     phoneNumber: To
-    //   }
-    // });
+    // Connect to WebSocket Media Stream
+    const connect = response.connect();
+    const stream = connect.stream({
+      url: `wss://${req.headers.host}/voice/stream`
+    });
+
+    // Pass assistant ID as custom parameter
+    stream.parameter({
+      name: 'assistantId',
+      value: assistant.id
+    });
+
+    // Set status callback for call completion
+    response.on('callCompleted', {
+      url: `https://${req.headers.host}/api/voice/status`,
+      method: 'POST'
+    });
 
     res.type('text/xml');
     res.send(response.toString());
 
+    logger.info('TwiML response sent', {
+      assistantId: assistant.id,
+      streamUrl: `wss://${req.headers.host}/voice/stream`
+    });
+
   } catch (error) {
     logger.error('Voice incoming error:', error);
-    res.status(500).send('Error handling call');
+
+    const response = new VoiceResponse();
+    response.say({
+      voice: 'Polly.Joanna'
+    }, 'Sorry, there was an error processing your call. Please try again later.');
+    response.hangup();
+
+    res.type('text/xml');
+    res.send(response.toString());
   }
 });
 
-// TODO: Implement voice stream handler
-// TODO: Implement TTS endpoint
-// TODO: Implement STT endpoint
+// POST /api/voice/status
+// Twilio status callback
+router.post('/status', async (req, res) => {
+  try {
+    const { CallSid, CallStatus, CallDuration } = req.body;
+
+    logger.info('Call status update', {
+      callSid: CallSid,
+      status: CallStatus,
+      duration: CallDuration
+    });
+
+    // Additional status tracking can be added here
+    res.sendStatus(200);
+
+  } catch (error) {
+    logger.error('Voice status callback error:', error);
+    res.sendStatus(500);
+  }
+});
+
+// POST /api/voice/outbound
+// Make outbound call
+router.post('/outbound', async (req, res) => {
+  try {
+    const { assistantId, toNumber, fromNumber } = req.body;
+
+    if (!assistantId || !toNumber) {
+      return res.status(400).json({
+        error: 'Missing required fields: assistantId, toNumber'
+      });
+    }
+
+    // Get assistant
+    const assistant = await supabaseService.getAssistant(assistantId);
+    if (!assistant) {
+      return res.status(404).json({ error: 'Assistant not found' });
+    }
+
+    // Use assistant's phone number or provided fromNumber
+    const callFromNumber = fromNumber || assistant.phone_number;
+
+    if (!callFromNumber) {
+      return res.status(400).json({
+        error: 'No phone number configured for assistant'
+      });
+    }
+
+    // Initialize Twilio client
+    const twilioClient = twilio(
+      process.env.TWILIO_ACCOUNT_SID,
+      process.env.TWILIO_AUTH_TOKEN
+    );
+
+    // Make call
+    const call = await twilioClient.calls.create({
+      from: callFromNumber,
+      to: toNumber,
+      url: `https://${req.headers.host}/api/voice/incoming`,
+      method: 'POST',
+      statusCallback: `https://${req.headers.host}/api/voice/status`,
+      statusCallbackMethod: 'POST',
+      statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed']
+    });
+
+    logger.info('Outbound call initiated', {
+      callSid: call.sid,
+      assistantId,
+      to: toNumber,
+      from: callFromNumber
+    });
+
+    res.json({
+      success: true,
+      callSid: call.sid,
+      status: call.status
+    });
+
+  } catch (error) {
+    logger.error('Outbound call error:', error);
+    res.status(500).json({
+      error: 'Failed to initiate call',
+      message: error.message
+    });
+  }
+});
 
 export default router;

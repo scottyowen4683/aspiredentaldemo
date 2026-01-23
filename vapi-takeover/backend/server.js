@@ -6,6 +6,7 @@ import { WebSocketServer } from 'ws';
 import dotenv from 'dotenv';
 import logger from './services/logger.js';
 import supabaseService from './services/supabase-service.js';
+import VoiceHandler from './ai/voice-handler.js';
 
 // Routes
 import chatRouter from './routes/chat.js';
@@ -51,7 +52,7 @@ app.use('/api/admin', adminRouter);
 wss.on('connection', async (ws, req) => {
   logger.info('WebSocket connection established');
 
-  let callState = null;
+  let voiceHandler = null;
 
   ws.on('message', async (message) => {
     try {
@@ -64,17 +65,55 @@ wss.on('connection', async (ws, req) => {
             callSid: data.start.callSid
           });
 
-          callState = {
-            streamSid: data.streamSid,
-            callSid: data.start.callSid,
-            customParameters: data.start.customParameters
-          };
+          // Get assistant ID from custom parameters (set by Twilio webhook)
+          const assistantId = data.start.customParameters?.assistantId;
 
-          // TODO: Initialize voice handler
+          if (!assistantId) {
+            logger.error('No assistantId in call parameters');
+            ws.close();
+            return;
+          }
+
+          // Initialize voice handler
+          voiceHandler = new VoiceHandler(data.start.callSid, assistantId);
+
+          try {
+            await voiceHandler.initialize();
+
+            // Set speech end callback
+            voiceHandler.audioBuffer.onSpeechEnd(async () => {
+              try {
+                const result = await voiceHandler.onSpeechEnd();
+
+                if (result) {
+                  // Send audio response back to Twilio
+                  const audioBase64 = result.audioStream.toString('base64');
+
+                  ws.send(JSON.stringify({
+                    event: 'media',
+                    streamSid: data.streamSid,
+                    media: {
+                      payload: audioBase64
+                    }
+                  }));
+                }
+              } catch (error) {
+                logger.error('Error processing speech:', error);
+              }
+            });
+
+            logger.info('Voice handler initialized');
+          } catch (error) {
+            logger.error('Failed to initialize voice handler:', error);
+            ws.close();
+          }
           break;
 
         case 'media':
-          // TODO: Handle incoming audio
+          // Incoming audio from user
+          if (voiceHandler && data.media?.payload) {
+            await voiceHandler.processAudioChunk(data.media.payload);
+          }
           break;
 
         case 'stop':
@@ -82,7 +121,10 @@ wss.on('connection', async (ws, req) => {
             streamSid: data.streamSid
           });
 
-          // TODO: Cleanup
+          if (voiceHandler) {
+            await voiceHandler.endCall('completed');
+            voiceHandler = null;
+          }
           break;
 
         default:
@@ -93,9 +135,13 @@ wss.on('connection', async (ws, req) => {
     }
   });
 
-  ws.on('close', () => {
+  ws.on('close', async () => {
     logger.info('WebSocket connection closed');
-    // TODO: Cleanup
+
+    if (voiceHandler) {
+      await voiceHandler.endCall('disconnected');
+      voiceHandler = null;
+    }
   });
 
   ws.on('error', (error) => {
