@@ -53,7 +53,7 @@ export default function MoretonBayPilot() {
             <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5">
               <div className="text-sm font-semibold">Scope</div>
               <div className="mt-1 text-sm text-white/65">
-                Informational enquiries only (e.g. bins, rates dates, opening
+                Informational enquiries only (e.g. bins, complaints, opening
                 hours, general guidance).
               </div>
             </div>
@@ -79,7 +79,7 @@ export default function MoretonBayPilot() {
               For any queries or escalations, please contact{" "}
               <span className="font-semibold text-white">Scott</span> on{" "}
               <a
-                href="tel:0408062129"
+                href="tel:0408 062 129"
                 className="font-semibold text-white underline decoration-white/30 underline-offset-4 hover:decoration-white/60"
               >
                 0408 062 129
@@ -106,9 +106,9 @@ export default function MoretonBayPilot() {
             <div className="mt-5 grid gap-3 md:grid-cols-2">
               {[
                 "What day is my bin collected?",
-                "When are rates due?",
+                "Who is my local councillor?",
                 "Where can I find Council opening hours?",
-                "How do I apply for a permit?",
+                "What is the cost for dog registration?",
                 "How do I report an issue?",
                 "What are the contact options for support?",
               ].map((q) => (
