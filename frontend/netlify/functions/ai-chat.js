@@ -783,6 +783,9 @@ exports.handler = async (event) => {
     if (CFG.ENABLE_EMAIL_TOOL) {
       openaiPayload.tools = AVAILABLE_TOOLS;
       openaiPayload.tool_choice = "auto"; // Let AI decide when to use tools
+      console.log("[ai-chat] Email tool enabled, tools added to request");
+    } else {
+      console.log("[ai-chat] Email tool DISABLED");
     }
 
     const openaiResp = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -825,6 +828,15 @@ exports.handler = async (event) => {
     // Check if AI wants to call a function
     const toolCalls = message?.tool_calls;
     let assistantMessage = message?.content || "";
+
+    // DEBUG: Log what OpenAI returned
+    console.log("[ai-chat] OpenAI response:", {
+      hasToolCalls: !!toolCalls,
+      toolCallsLength: toolCalls?.length || 0,
+      hasContent: !!message?.content,
+      emailToolEnabled: CFG.ENABLE_EMAIL_TOOL,
+      firstToolCall: toolCalls?.[0]?.function?.name || null,
+    });
 
     // Handle function calling
     if (toolCalls && toolCalls.length > 0 && CFG.ENABLE_EMAIL_TOOL) {
