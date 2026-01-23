@@ -181,9 +181,23 @@ This maps frontend assistant IDs to tenant identifiers in the config.
 ## Adding a New Client
 
 ### Step 1: Add Knowledge Base Content
-1. Upload knowledge base documents to Supabase `knowledge_chunks` table
-2. Use tenant_id matching your configuration
-3. Ensure embeddings are created (use existing ingestion process)
+1. Create file: `/frontend/netlify/functions/kb/newclient_kb.txt`
+2. Use the heading block format:
+   ```
+   ------------------------------------------------------------
+   SECTION HEADING IN ALL CAPS
+   ------------------------------------------------------------
+   Content here...
+   ```
+3. Commit and push to GitHub
+4. GitHub workflow automatically:
+   - ✅ Parses the file
+   - ✅ Creates chunks and embeddings
+   - ✅ Uploads to Supabase with tenant_id "newclient"
+
+**Filename drives tenant_id:** `goldcoast_kb.txt` → "goldcoast"
+
+See `KB_FILE_FORMAT.md` for complete format guide.
 
 ### Step 2: Create Assistant Configuration
 Add to `/frontend/netlify/functions/config/assistants.json`:

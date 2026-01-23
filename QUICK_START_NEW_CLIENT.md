@@ -11,13 +11,39 @@ This is a simplified checklist for onboarding new clients to the AI chat platfor
 
 ## 5-Step Process
 
-### 1️⃣ Upload Knowledge Base
-Upload to Supabase `knowledge_chunks` table with `tenant_id` matching your client.
+### 1️⃣ Add Knowledge Base File
+Create a `.txt` file in `/frontend/netlify/functions/kb/` with naming: `{tenant}_kb.txt`
 
-**Via Supabase Dashboard:**
-- Go to Table Editor → knowledge_chunks
-- Import CSV or use existing ingestion script
-- Ensure `tenant_id` matches your chosen identifier (e.g., "goldcoast")
+**Example:** `goldcoast_kb.txt` → Creates tenant_id "goldcoast"
+
+**File Format:**
+```txt
+============================================================
+YOUR CLIENT NAME – KNOWLEDGE BASE
+Description here
+============================================================
+
+------------------------------------------------------------
+SECTION HEADING IN ALL CAPS
+------------------------------------------------------------
+
+Section content goes here...
+
+------------------------------------------------------------
+ANOTHER SECTION HEADING
+------------------------------------------------------------
+
+More content...
+```
+
+**What happens automatically:**
+1. ✅ GitHub workflow detects the new .txt file
+2. ✅ Parses heading blocks (divider + ALL CAPS + divider)
+3. ✅ Chunks content (max 2200 chars per chunk)
+4. ✅ Creates embeddings via OpenAI
+5. ✅ Uploads to Supabase with correct tenant_id
+
+**No manual upload needed!** Just commit and push the file.
 
 ---
 
