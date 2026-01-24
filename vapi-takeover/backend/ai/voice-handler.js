@@ -4,6 +4,7 @@ import logger from '../services/logger.js';
 import supabaseService from '../services/supabase-service.js';
 import { streamElevenLabsAudio } from './elevenlabs.js';
 import { BufferManager } from '../audio/buffer-manager.js';
+import { scoreConversation } from './rubric-scorer.js';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
@@ -305,6 +306,11 @@ class VoiceHandler {
       // Increment assistant interaction count
       await supabaseService.incrementInteractions(this.assistantId);
 
+      // Auto-score conversation if enabled (optimized for government compliance)
+      if (this.assistant.auto_score !== false && this.conversation) {
+        await this.scoreConversation();
+      }
+
       logger.info('Call ended', {
         callSid: this.callSid,
         duration: `${duration}s`,
@@ -314,6 +320,86 @@ class VoiceHandler {
 
     } catch (error) {
       logger.error('Error ending call:', error);
+    }
+  }
+
+  async scoreConversation() {
+    try {
+      // Get full conversation transcript
+      const history = await supabaseService.getConversationHistory(this.sessionId);
+
+      if (!history || history.length === 0) {
+        logger.info('No conversation to score');
+        return;
+      }
+
+      // Format transcript for scoring
+      const transcript = history
+        .map(msg => `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content}`)
+        .join('\n');
+
+      // Get organization for rubric
+      const organization = await supabaseService.client
+        .from('organizations')
+        .select('name, default_rubric')
+        .eq('id', this.assistant.org_id)
+        .single();
+
+      // Use assistant-specific rubric, or fallback to org default
+      const rubric = this.assistant.rubric || organization.data?.default_rubric || null;
+
+      logger.info('Scoring voice conversation:', {
+        conversationId: this.conversation.id,
+        assistantId: this.assistantId,
+        hasCustomRubric: !!rubric
+      });
+
+      // Score using optimized GPT-4o-mini scorer (96% cost savings)
+      const scoringResult = await scoreConversation({
+        transcript,
+        rubric,
+        conversationType: 'voice',
+        organizationName: organization.data?.name || 'Unknown',
+        assistantName: this.assistant.friendly_name
+      });
+
+      // Add scoring cost to total
+      this.costs.scoring = scoringResult.metadata.cost.total;
+      this.costs.total += scoringResult.metadata.cost.total;
+
+      // Save score to database
+      await supabaseService.client
+        .from('conversation_scores')
+        .insert({
+          conversation_id: this.conversation.id,
+          overall_score: scoringResult.overallScore,
+          dimension_scores: scoringResult.dimensions,
+          flags: scoringResult.flags,
+          feedback: scoringResult.feedback,
+          cost: scoringResult.metadata.cost.total,
+          model_used: 'gpt-4o-mini',
+          scoring_type: 'voice'
+        });
+
+      // Update conversation with score
+      await supabaseService.client
+        .from('chat_conversations')
+        .update({
+          score: scoringResult.overallScore,
+          scored_at: new Date().toISOString()
+        })
+        .eq('id', this.conversation.id);
+
+      logger.info('Voice conversation scored:', {
+        conversationId: this.conversation.id,
+        score: scoringResult.overallScore,
+        flags: scoringResult.flags.length,
+        scoringCost: scoringResult.metadata.cost.total
+      });
+
+    } catch (error) {
+      logger.error('Conversation scoring failed:', error);
+      // Don't throw - scoring failure shouldn't break call end
     }
   }
 }

@@ -4,6 +4,7 @@ import OpenAI from 'openai';
 import { v4 as uuidv4 } from 'uuid';
 import supabaseService from '../services/supabase-service.js';
 import logger from '../services/logger.js';
+import { scoreConversation } from '../ai/rubric-scorer.js';
 
 const router = express.Router();
 
@@ -177,6 +178,90 @@ router.post('/', async (req, res) => {
   }
 });
 
+// Score a completed chat conversation (optimized for government compliance)
+async function scoreChatConversation(sessionId, conversationId, assistantId) {
+  try {
+    // Get assistant configuration
+    const assistant = await supabaseService.getAssistant(assistantId);
+    if (!assistant || assistant.auto_score === false) {
+      logger.info('Auto-scoring disabled for assistant', { assistantId });
+      return;
+    }
+
+    // Get full conversation transcript
+    const history = await supabaseService.getConversationHistory(sessionId);
+    if (!history || history.length === 0) {
+      logger.info('No conversation to score');
+      return;
+    }
+
+    // Format transcript for scoring
+    const transcript = history
+      .map(msg => `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content}`)
+      .join('\n');
+
+    // Get organization for rubric
+    const organization = await supabaseService.client
+      .from('organizations')
+      .select('name, default_rubric')
+      .eq('id', assistant.org_id)
+      .single();
+
+    // Use assistant-specific rubric, or fallback to org default
+    const rubric = assistant.rubric || organization.data?.default_rubric || null;
+
+    logger.info('Scoring chat conversation:', {
+      conversationId,
+      assistantId,
+      hasCustomRubric: !!rubric
+    });
+
+    // Score using optimized GPT-4o-mini scorer (96% cost savings vs GPT-4o)
+    const scoringResult = await scoreConversation({
+      transcript,
+      rubric,
+      conversationType: 'chat',
+      organizationName: organization.data?.name || 'Unknown',
+      assistantName: assistant.friendly_name
+    });
+
+    // Save score to database
+    await supabaseService.client
+      .from('conversation_scores')
+      .insert({
+        conversation_id: conversationId,
+        overall_score: scoringResult.overallScore,
+        dimension_scores: scoringResult.dimensions,
+        flags: scoringResult.flags,
+        feedback: scoringResult.feedback,
+        cost: scoringResult.metadata.cost.total,
+        model_used: 'gpt-4o-mini',
+        scoring_type: 'chat'
+      });
+
+    // Update conversation with score
+    await supabaseService.client
+      .from('chat_conversations')
+      .update({
+        score: scoringResult.overallScore,
+        scored_at: new Date().toISOString(),
+        total_cost: (await supabaseService.getConversation(sessionId)).total_cost + scoringResult.metadata.cost.total
+      })
+      .eq('id', conversationId);
+
+    logger.info('Chat conversation scored:', {
+      conversationId,
+      score: scoringResult.overallScore,
+      flags: scoringResult.flags.length,
+      scoringCost: scoringResult.metadata.cost.total
+    });
+
+  } catch (error) {
+    logger.error('Conversation scoring failed:', error);
+    // Don't throw - scoring failure shouldn't break session end
+  }
+}
+
 // Handle session timeout
 async function handleSessionTimeout(sessionId, conversationId, assistantId) {
   logger.info('Session timeout', { sessionId });
@@ -202,6 +287,9 @@ async function handleSessionTimeout(sessionId, conversationId, assistantId) {
 
     // Increment assistant interaction count
     await supabaseService.incrementInteractions(assistantId);
+
+    // Auto-score conversation for government compliance
+    await scoreChatConversation(sessionId, conversationId, assistantId);
 
     // Cleanup
     activeSessions.delete(sessionId);
@@ -248,6 +336,9 @@ router.post('/end', async (req, res) => {
 
       // Increment interactions
       await supabaseService.incrementInteractions(session.assistantId);
+
+      // Auto-score conversation for government compliance
+      await scoreChatConversation(sessionId, conversation.id, session.assistantId);
     }
 
     // Cleanup
