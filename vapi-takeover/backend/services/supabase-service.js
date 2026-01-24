@@ -248,6 +248,58 @@ class SupabaseService {
     }
   }
 
+  /**
+   * Log an interaction for billing tracking
+   * @param {Object} params - Interaction parameters
+   * @param {string} params.orgId - Organization ID
+   * @param {string} params.assistantId - Assistant ID
+   * @param {string} params.interactionType - Type: sms_inbound, sms_outbound, call_inbound, call_outbound, chat_session
+   * @param {string} [params.conversationId] - Conversation ID
+   * @param {string} [params.sessionId] - Session ID
+   * @param {string} [params.contactNumber] - Phone number or identifier
+   * @param {number} [params.durationSeconds] - Duration for calls
+   * @param {number} [params.messageCount] - Message count for chat
+   * @param {number} [params.cost] - Actual API cost
+   * @param {string} [params.campaignId] - Campaign ID for outbound calls
+   */
+  async logInteraction(params) {
+    const {
+      orgId,
+      assistantId,
+      interactionType,
+      conversationId = null,
+      sessionId = null,
+      contactNumber = null,
+      durationSeconds = null,
+      messageCount = null,
+      cost = 0,
+      campaignId = null
+    } = params;
+
+    const { error } = await supabase.rpc('increment_interaction', {
+      p_org_id: orgId,
+      p_assistant_id: assistantId,
+      p_interaction_type: interactionType,
+      p_conversation_id: conversationId,
+      p_session_id: sessionId,
+      p_contact_number: contactNumber,
+      p_duration_seconds: durationSeconds,
+      p_message_count: messageCount,
+      p_cost: cost,
+      p_campaign_id: campaignId
+    });
+
+    if (error) {
+      logger.error('Error logging interaction:', error);
+    } else {
+      logger.info('Interaction logged:', {
+        orgId,
+        interactionType,
+        conversationId
+      });
+    }
+  }
+
   // ===========================================================================
   // AUDIT LOGGING
   // ===========================================================================

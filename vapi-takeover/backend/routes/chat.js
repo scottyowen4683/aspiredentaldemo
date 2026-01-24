@@ -285,8 +285,20 @@ async function handleSessionTimeout(sessionId, conversationId, assistantId) {
       costs: {} // Costs already tracked during conversation
     });
 
-    // Increment assistant interaction count
-    await supabaseService.incrementInteractions(assistantId);
+    // Get assistant for org_id
+    const assistant = await supabaseService.getAssistant(assistantId);
+
+    // Log interaction for billing tracking
+    await supabaseService.logInteraction({
+      orgId: assistant.org_id,
+      assistantId,
+      interactionType: 'chat_session',
+      conversationId,
+      sessionId,
+      messageCount: conversation.tokens_in && conversation.tokens_out ?
+        Math.ceil((conversation.tokens_in + conversation.tokens_out) / 100) : 1,
+      cost: conversation.total_cost || 0
+    });
 
     // Auto-score conversation for government compliance
     await scoreChatConversation(sessionId, conversationId, assistantId);
@@ -334,8 +346,20 @@ router.post('/end', async (req, res) => {
         costs: {}
       });
 
-      // Increment interactions
-      await supabaseService.incrementInteractions(session.assistantId);
+      // Get assistant for org_id
+      const assistant = await supabaseService.getAssistant(session.assistantId);
+
+      // Log interaction for billing tracking
+      await supabaseService.logInteraction({
+        orgId: assistant.org_id,
+        assistantId: session.assistantId,
+        interactionType: 'chat_session',
+        conversationId: conversation.id,
+        sessionId,
+        messageCount: conversation.tokens_in && conversation.tokens_out ?
+          Math.ceil((conversation.tokens_in + conversation.tokens_out) / 100) : 1,
+        cost: conversation.total_cost || 0
+      });
 
       // Auto-score conversation for government compliance
       await scoreChatConversation(sessionId, conversation.id, session.assistantId);

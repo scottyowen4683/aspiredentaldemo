@@ -12,6 +12,7 @@ import VoiceHandler from './ai/voice-handler.js';
 import chatRouter from './routes/chat.js';
 import voiceRouter from './routes/voice.js';
 import adminRouter from './routes/admin.js';
+import campaignsRouter from './routes/campaigns.js';
 
 dotenv.config();
 
@@ -47,6 +48,7 @@ app.get('/health', (req, res) => {
 app.use('/api/chat', chatRouter);
 app.use('/api/voice', voiceRouter);
 app.use('/api/admin', adminRouter);
+app.use('/api/campaigns', campaignsRouter);
 
 // WebSocket handler for Twilio Media Streams
 wss.on('connection', async (ws, req) => {

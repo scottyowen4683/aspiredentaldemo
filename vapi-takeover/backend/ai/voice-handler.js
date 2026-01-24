@@ -303,8 +303,18 @@ class VoiceHandler {
         }
       });
 
-      // Increment assistant interaction count
-      await supabaseService.incrementInteractions(this.assistantId);
+      // Log interaction for billing tracking
+      await supabaseService.logInteraction({
+        orgId: this.assistant.org_id,
+        assistantId: this.assistantId,
+        interactionType: 'call_inbound', // TODO: Detect if outbound from campaign
+        conversationId: this.conversation.id,
+        sessionId: this.sessionId,
+        contactNumber: null, // TODO: Pass caller number from stream params
+        durationSeconds: duration,
+        cost: this.costs.total,
+        campaignId: null // TODO: Pass campaign ID if outbound campaign call
+      });
 
       // Auto-score conversation if enabled (optimized for government compliance)
       if (this.assistant.auto_score !== false && this.conversation) {

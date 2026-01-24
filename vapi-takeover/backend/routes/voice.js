@@ -51,16 +51,30 @@ router.post('/incoming', async (req, res) => {
       }, assistant.first_message);
     }
 
+    // Enable call recording
+    response.record({
+      recordingStatusCallback: `https://${req.headers.host}/api/voice/recording`,
+      recordingStatusCallbackMethod: 'POST',
+      recordingStatusCallbackEvent: ['completed'],
+      transcribe: false, // We use Whisper instead
+      trim: 'trim-silence'
+    });
+
     // Connect to WebSocket Media Stream
     const connect = response.connect();
     const stream = connect.stream({
       url: `wss://${req.headers.host}/voice/stream`
     });
 
-    // Pass assistant ID as custom parameter
+    // Pass assistant ID and caller number as custom parameters
     stream.parameter({
       name: 'assistantId',
       value: assistant.id
+    });
+
+    stream.parameter({
+      name: 'callerNumber',
+      value: From
     });
 
     // Set status callback for call completion
@@ -112,6 +126,50 @@ router.post('/status', async (req, res) => {
   }
 });
 
+// POST /api/voice/recording
+// Twilio recording callback
+router.post('/recording', async (req, res) => {
+  try {
+    const {
+      CallSid,
+      RecordingSid,
+      RecordingUrl,
+      RecordingStatus,
+      RecordingDuration
+    } = req.body;
+
+    logger.info('Recording callback', {
+      callSid: CallSid,
+      recordingSid: RecordingSid,
+      status: RecordingStatus,
+      duration: RecordingDuration
+    });
+
+    if (RecordingStatus === 'completed' && RecordingUrl) {
+      // Save recording URL to conversation
+      await supabaseService.client
+        .from('chat_conversations')
+        .update({
+          recording_url: RecordingUrl,
+          recording_sid: RecordingSid,
+          recording_duration: parseInt(RecordingDuration)
+        })
+        .eq('session_id', CallSid);
+
+      logger.info('Recording URL saved to conversation', {
+        callSid: CallSid,
+        recordingUrl: RecordingUrl
+      });
+    }
+
+    res.sendStatus(200);
+
+  } catch (error) {
+    logger.error('Recording callback error:', error);
+    res.sendStatus(500);
+  }
+});
+
 // POST /api/voice/outbound
 // Make outbound call
 router.post('/outbound', async (req, res) => {
@@ -145,7 +203,7 @@ router.post('/outbound', async (req, res) => {
       process.env.TWILIO_AUTH_TOKEN
     );
 
-    // Make call
+    // Make call with recording enabled
     const call = await twilioClient.calls.create({
       from: callFromNumber,
       to: toNumber,
@@ -153,7 +211,10 @@ router.post('/outbound', async (req, res) => {
       method: 'POST',
       statusCallback: `https://${req.headers.host}/api/voice/status`,
       statusCallbackMethod: 'POST',
-      statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed']
+      statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
+      record: true,
+      recordingStatusCallback: `https://${req.headers.host}/api/voice/recording`,
+      recordingStatusCallbackMethod: 'POST'
     });
 
     logger.info('Outbound call initiated', {
