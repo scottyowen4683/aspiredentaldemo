@@ -31,7 +31,7 @@ const upload = multer({
 // POST /api/admin/organizations - Create new organization
 router.post('/organizations', async (req, res) => {
   try {
-    const { name, slug, monthly_interaction_limit, price_per_interaction, default_rubric } = req.body;
+    const { name, slug, flat_rate_fee, included_interactions, overage_rate_per_1000, default_rubric } = req.body;
 
     // Validation
     if (!name || !slug) {
@@ -47,8 +47,9 @@ router.post('/organizations', async (req, res) => {
       .insert({
         name,
         slug,
-        monthly_interaction_limit: monthly_interaction_limit || 1000,
-        price_per_interaction: price_per_interaction || 0.50,
+        flat_rate_fee: flat_rate_fee || 500.00,
+        included_interactions: included_interactions || 5000,
+        overage_rate_per_1000: overage_rate_per_1000 || 50.00,
         default_rubric: default_rubric || null
       })
       .select()
@@ -133,6 +134,69 @@ router.get('/organizations/:id', async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to fetch organization'
+    });
+  }
+});
+
+// GET /api/admin/usage/:org_id - Get organization usage data
+router.get('/usage/:org_id', async (req, res) => {
+  try {
+    const { org_id } = req.params;
+
+    // Get organization details
+    const { data: org, error: orgError } = await supabaseService.client
+      .from('organizations')
+      .select('*')
+      .eq('id', org_id)
+      .single();
+
+    if (orgError) throw orgError;
+
+    if (!org) {
+      return res.status(404).json({
+        success: false,
+        error: 'Organization not found'
+      });
+    }
+
+    // Get usage summary from view
+    const { data: usage, error: usageError } = await supabaseService.client
+      .from('organization_usage_summary')
+      .select('*')
+      .eq('org_id', org_id)
+      .single();
+
+    if (usageError && usageError.code !== 'PGRST116') {
+      throw usageError;
+    }
+
+    // Combine organization data with usage data
+    const usageData = {
+      org_id: org.id,
+      org_name: org.name,
+      flat_rate_fee: org.flat_rate_fee,
+      included_interactions: org.included_interactions,
+      overage_rate_per_1000: org.overage_rate_per_1000,
+      current_period_start: org.current_period_start,
+      current_period_end: org.current_period_end,
+      current_period_interactions: org.current_period_interactions,
+      total_interactions: org.total_interactions,
+      overage_interactions: usage?.overage_interactions || 0,
+      overage_cost: usage?.overage_cost || 0,
+      total_cost_this_period: usage?.total_cost_this_period || org.flat_rate_fee,
+      remaining_interactions: usage?.remaining_interactions || org.included_interactions
+    };
+
+    res.json({
+      success: true,
+      usage: usageData
+    });
+
+  } catch (error) {
+    logger.error('Usage fetch error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch usage data'
     });
   }
 });
