@@ -1,19 +1,55 @@
-# Dockerfile for Fly.io Sydney Deployment
-# Optimized for Node.js 20 and production use
+# Multi-stage Dockerfile for Aspire AI Platform
+# Stage 1: Build React frontend
+# Stage 2: Run Node.js backend with built frontend
 
-FROM node:20-alpine
+# ============================================
+# Stage 1: Build the React Frontend
+# ============================================
+FROM node:20-alpine AS frontend-builder
 
-# Set working directory
+WORKDIR /app/frontend
+
+# Copy frontend package files
+COPY frontend/package*.json ./
+
+# Install all dependencies (including devDependencies for build)
+RUN npm install
+
+# Copy frontend source code
+COPY frontend/ ./
+
+# Build arguments for Supabase config (passed at build time)
+ARG VITE_SUPABASE_URL
+ARG VITE_SUPABASE_ANON_KEY
+
+# Set environment variables for Vite build
+ENV VITE_SUPABASE_URL=$VITE_SUPABASE_URL
+ENV VITE_SUPABASE_ANON_KEY=$VITE_SUPABASE_ANON_KEY
+
+# Build the React app (outputs to ../public which is /app/public)
+RUN npm run build
+
+# ============================================
+# Stage 2: Production Node.js Backend
+# ============================================
+FROM node:20-alpine AS production
+
 WORKDIR /app
 
-# Copy package files first (for better caching)
+# Copy backend package files
 COPY package*.json ./
 
 # Install production dependencies only
 RUN npm install --omit=dev
 
-# Copy application code
+# Copy backend source code
 COPY . .
+
+# Remove the frontend source (we only need the built files)
+RUN rm -rf frontend
+
+# Copy built frontend from Stage 1
+COPY --from=frontend-builder /app/public ./public
 
 # Expose port (Fly.io sets PORT env var to 8080)
 EXPOSE 8080

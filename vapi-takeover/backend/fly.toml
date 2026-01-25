@@ -8,6 +8,13 @@ primary_region = "syd"  # Sydney, Australia
 [build]
   dockerfile = "Dockerfile"
 
+  # Build arguments for React frontend (Supabase config)
+  # These are PUBLIC keys (safe to expose) - used in browser
+  # IMPORTANT: Replace these with your actual Supabase project values!
+  [build.args]
+    VITE_SUPABASE_URL = "YOUR_SUPABASE_URL"
+    VITE_SUPABASE_ANON_KEY = "YOUR_SUPABASE_ANON_KEY"
+
 # Environment variables (non-secret)
 [env]
   PORT = "8080"
@@ -35,10 +42,10 @@ primary_region = "syd"  # Sydney, Australia
     method = "GET"
     path = "/health"
 
-# VM configuration - shared-cpu-1x is perfect for starter ($7/month)
+# VM configuration - shared-cpu-1x with 512MB for Node.js + React serving
 [[vm]]
-  size = "shared-cpu-1x"  # 256MB RAM, 1 shared CPU
-  memory = "256mb"
+  size = "shared-cpu-1x"
+  memory = "512mb"
 
 # TCP service for WebSocket support (needed for Twilio Media Streams)
 [[services]]

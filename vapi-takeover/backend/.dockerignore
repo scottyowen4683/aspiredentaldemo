@@ -1,5 +1,6 @@
-# Dependencies
+# Dependencies (both backend and frontend)
 node_modules/
+frontend/node_modules/
 
 # Development files
 .env
@@ -11,10 +12,13 @@ node_modules/
 .gitignore
 
 # Docs
-*.md
+ADMIN_PORTAL_GUIDE.md
+GOVERNMENT_RUBRIC_GUIDE.md
 
-# Tests
+# Test files
 test-*.html
+*.test.js
+*.spec.js
 
 # IDE
 .vscode/
