@@ -25,6 +25,13 @@ class ErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundaryStat
 
   render() {
     if (this.state.hasError) {
+      const error = this.state.error;
+      // Extract as much info as possible from the error
+      const errorName = error?.name || 'Unknown';
+      const errorMessage = error?.message || 'No message';
+      const errorStack = error?.stack || 'No stack trace';
+      const errorString = String(error);
+
       return (
         <div style={{
           padding: '20px',
@@ -34,6 +41,17 @@ class ErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundaryStat
           fontFamily: 'monospace'
         }}>
           <h1 style={{ color: '#ff6b6b' }}>Something went wrong</h1>
+          <div style={{
+            backgroundColor: '#0f0f1a',
+            padding: '15px',
+            borderRadius: '8px',
+            overflow: 'auto',
+            marginBottom: '15px'
+          }}>
+            <p><strong>Name:</strong> {errorName}</p>
+            <p><strong>Message:</strong> {errorMessage}</p>
+            <p><strong>String:</strong> {errorString}</p>
+          </div>
           <pre style={{
             backgroundColor: '#0f0f1a',
             padding: '15px',
@@ -42,9 +60,7 @@ class ErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundaryStat
             whiteSpace: 'pre-wrap',
             wordBreak: 'break-word'
           }}>
-            {this.state.error?.toString()}
-            {'\n\n'}
-            {this.state.error?.stack}
+            {errorStack}
           </pre>
           <button
             onClick={() => window.location.reload()}

@@ -17,5 +17,7 @@ export default defineConfig(({ mode }) => ({
   build: {
     outDir: "../public",
     emptyOutDir: true,
+    minify: false, // Disable minification for debugging
+    sourcemap: true,
   },
 }));
