@@ -10,10 +10,9 @@ primary_region = "syd"  # Sydney, Australia
 
   # Build arguments for React frontend (Supabase config)
   # These are PUBLIC keys (safe to expose) - used in browser
-  # IMPORTANT: Replace these with your actual Supabase project values!
   [build.args]
-    VITE_SUPABASE_URL = "YOUR_SUPABASE_URL"
-    VITE_SUPABASE_ANON_KEY = "YOUR_SUPABASE_ANON_KEY"
+    VITE_SUPABASE_URL = "https://zykdlsvtofzojgojmkdg.supabase.co"
+    VITE_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp5a2Rsc3Z0b2Z6b2pnb2pta2RnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njg5OTkzMDksImV4cCI6MjA4NDU3NTMwOX0.J_xF_wrCo8S3E7NDKYJdHGNfgAAr7IJA9GGbQNdPaMQ"
 
 # Environment variables (non-secret)
 [env]
