@@ -49,16 +49,17 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Serve static files from public folder
-app.use(express.static(join(__dirname, 'public')));
+// Debug: Check if public folder exists and list files
+import { existsSync, readdirSync } from 'fs';
+const publicPath = join(__dirname, 'public');
+logger.info(`Public folder path: ${publicPath}`);
+logger.info(`Public folder exists: ${existsSync(publicPath)}`);
+if (existsSync(publicPath)) {
+  logger.info(`Public folder contents: ${readdirSync(publicPath).join(', ')}`);
+}
 
-// Serve admin portal at root
-app.get('/', (req, res) => {
-  res.sendFile(join(__dirname, 'public', 'index.html'));
-});
-
 // Serve static files from public folder
-app.use(express.static(join(__dirname, 'public')));
+app.use(express.static(publicPath));
 
 // API Routes
 app.use('/api/chat', chatRouter);
