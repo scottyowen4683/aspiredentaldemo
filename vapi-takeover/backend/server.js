@@ -51,8 +51,11 @@ app.get('/health', (req, res) => {
 
 // Serve test chat UI at root
 app.get('/', (req, res) => {
-  res.sendFile(join(__dirname, 'test-chat.html'));
+  res.sendFile(join(__dirname, 'public', 'index.html'));
 });
+
+// Serve static files from public folder
+app.use(express.static(join(__dirname, 'public')));
 
 // API Routes
 app.use('/api/chat', chatRouter);
