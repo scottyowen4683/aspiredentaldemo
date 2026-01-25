@@ -49,7 +49,10 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Serve test chat UI at root
+// Serve static files from public folder
+app.use(express.static(join(__dirname, 'public')));
+
+// Serve admin portal at root
 app.get('/', (req, res) => {
   res.sendFile(join(__dirname, 'public', 'index.html'));
 });
