@@ -3,8 +3,7 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import { useState, useEffect } from "react";
-import { supabase } from "./supabaseClient";
+import { useEffect } from "react";
 
 // Import Context
 import { UserProvider } from "./context/UserContext";
@@ -31,6 +30,9 @@ import Users from "./pages/Users";
 import AuditLogs from "./pages/AuditLogs";
 import EnrollMFA from "./components/MFA/EnrollMFA";
 import AuthMFA from "./components/MFA/AuthMFA";
+
+// Debug flag - set to true to use minimal app for testing
+const DEBUG_MINIMAL_APP = false;
 
 const queryClient = new QueryClient();
 
@@ -268,4 +270,25 @@ const App = () => {
   );
 };
 
-export default App;
+// Minimal app for debugging
+const MinimalApp = () => {
+  return (
+    <div style={{
+      padding: '40px',
+      backgroundColor: '#0f172a',
+      minHeight: '100vh',
+      color: 'white',
+      fontFamily: 'system-ui, sans-serif'
+    }}>
+      <h1 style={{ marginBottom: '20px' }}>Debug Mode: App is Loading</h1>
+      <p>If you see this, the basic React rendering is working.</p>
+      <p style={{ marginTop: '20px' }}>
+        <a href="/auth" style={{ color: '#60a5fa', textDecoration: 'underline' }}>
+          Go to Auth Page (with full app)
+        </a>
+      </p>
+    </div>
+  );
+};
+
+export default DEBUG_MINIMAL_APP ? MinimalApp : App;
