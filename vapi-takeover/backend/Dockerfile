@@ -45,11 +45,14 @@ RUN npm install --omit=dev
 # Copy backend source code
 COPY . .
 
-# Remove the frontend source (we only need the built files)
-RUN rm -rf frontend
+# Remove the frontend source and any existing public folder
+RUN rm -rf frontend public
 
 # Copy built frontend from Stage 1
 COPY --from=frontend-builder /app/public ./public
+
+# Debug: List what's in public folder
+RUN ls -la ./public/ && head -20 ./public/index.html
 
 # Expose port (Fly.io sets PORT env var to 8080)
 EXPOSE 8080
