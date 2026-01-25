@@ -49,10 +49,8 @@ export default function AuthMFA() {
         description: "You have successfully logged in.",
       });
 
-      // Small delay to ensure context is updated
-      setTimeout(() => {
-        navigate("/dashboard");
-      }, 100);
+      // Force full page reload to refresh all context
+      window.location.href = "/dashboard";
     } catch (err: any) {
       setError(err.message);
     }

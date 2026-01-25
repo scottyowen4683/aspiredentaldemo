@@ -138,18 +138,13 @@ useEffect(() => {
         description: "You have successfully enabled Multi-Factor Authentication.",
       });
 
-      // Refresh user data after MFA enrollment
-      await refreshUser();
-
       toast({
         title: "Welcome back!",
         description: "You have successfully logged in.",
       });
 
-      // Small delay to ensure context is updated
-      setTimeout(() => {
-        navigate("/dashboard");
-      }, 100);
+      // Force full page reload to refresh all context
+      window.location.href = "/dashboard";
     } catch (err: any) {
       setError(err.message);
     }
