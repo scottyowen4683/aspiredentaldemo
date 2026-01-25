@@ -33,6 +33,7 @@ import AuthMFA from "./components/MFA/AuthMFA";
 import Campaigns from "./pages/Campaigns";
 import KnowledgeBase from "./pages/KnowledgeBase";
 import Settings from "./pages/Settings";
+import Billing from "./pages/Billing";
 
 // Debug flag - set to true to use minimal app for testing
 const DEBUG_MINIMAL_APP = false;
@@ -257,6 +258,14 @@ const App = () => {
                 element={
                   <ProtectedRoute allowedRoles={["super_admin"]}>
                     <Settings />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/billing"
+                element={
+                  <ProtectedRoute allowedRoles={["super_admin"]}>
+                    <Billing />
                   </ProtectedRoute>
                 }
               />

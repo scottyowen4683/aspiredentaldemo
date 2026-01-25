@@ -34,7 +34,9 @@ import {
   Scale,
   ClipboardCheck,
   Timer,
-  Gauge
+  Gauge,
+  UserX,
+  PhoneForwarded
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
@@ -55,6 +57,7 @@ import {
   getCallProfile,
   getTrendData,
   getOrganizations,
+  getTopDeferralReasons,
   AnalyticsMetrics
 } from "@/services/analyticsService";
 
@@ -220,6 +223,13 @@ export default function Analytics() {
           : 100,
       };
     },
+    refetchInterval: 60000,
+  });
+
+  // Fetch top deferral reasons (why AI transfers to humans)
+  const { data: deferralReasons = [], isLoading: deferralLoading } = useQuery({
+    queryKey: ["deferral-reasons", queryOrgId, selectedPeriod],
+    queryFn: () => getTopDeferralReasons(queryOrgId, selectedPeriod),
     refetchInterval: 60000,
   });
 
@@ -665,12 +675,12 @@ export default function Analytics() {
             </Card>
           </div>
 
-          {/* Top 10 Questions & Call Profile */}
+          {/* Top 10 Questions & Top 10 Deferral Rates */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Top 10 Questions */}
             <Card>
               <CardHeader>
-                <CardTitle className="text-lg">Top 10 Questions (30 Days)</CardTitle>
+                <CardTitle className="text-lg">Top 10 Questions ({selectedPeriod === "7d" ? "7 Days" : selectedPeriod === "90d" ? "90 Days" : "30 Days"})</CardTitle>
                 <CardDescription>Most frequently asked questions and trends</CardDescription>
               </CardHeader>
               <CardContent>
@@ -716,6 +726,79 @@ export default function Analytics() {
               </CardContent>
             </Card>
 
+            {/* Top 10 Deferral Rates */}
+            <Card className="border-orange-500/20">
+              <CardHeader>
+                <div className="flex items-center gap-2">
+                  <PhoneForwarded className="h-5 w-5 text-orange-500" />
+                  <CardTitle className="text-lg">Top 10 Deferral Reasons ({selectedPeriod === "7d" ? "7 Days" : selectedPeriod === "90d" ? "90 Days" : "30 Days"})</CardTitle>
+                </div>
+                <CardDescription>Why AI transfers conversations to human agents</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {deferralLoading ? (
+                  <div className="space-y-3">
+                    {Array.from({ length: 10 }).map((_, i) => (
+                      <div key={i} className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
+                        <div className="flex items-center space-x-3">
+                          <Skeleton className="h-4 w-6" />
+                          <div className="flex-1 space-y-1">
+                            <Skeleton className="h-4 w-48" />
+                            <Skeleton className="h-3 w-32" />
+                          </div>
+                        </div>
+                        <Skeleton className="h-6 w-12" />
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {deferralReasons.length > 0 ? (
+                      deferralReasons.map((item, index) => (
+                        <Tooltip key={index}>
+                          <TooltipTrigger asChild>
+                            <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg hover:bg-muted/70 transition-colors cursor-help">
+                              <div className="flex items-center space-x-3">
+                                <div className="text-sm font-bold text-orange-500">#{index + 1}</div>
+                                <div className="flex-1">
+                                  <div className="text-sm font-medium">{item.reason}</div>
+                                  <div className="text-xs text-muted-foreground">{item.count} occurrences</div>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Badge variant="secondary" className="bg-orange-100 text-orange-700 dark:bg-orange-950 dark:text-orange-300">
+                                  {item.percentage}%
+                                </Badge>
+                              </div>
+                            </div>
+                          </TooltipTrigger>
+                          <TooltipContent side="left" className="max-w-xs">
+                            <p>{item.description}</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      ))
+                    ) : (
+                      <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
+                        <CheckCircle className="h-8 w-8 mb-2 text-green-500" />
+                        <p className="text-sm font-medium">No Deferrals</p>
+                        <p className="text-xs text-center">AI is successfully handling all conversations without escalation</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+                {deferralReasons.length > 0 && (
+                  <div className="mt-4 p-3 bg-orange-50 dark:bg-orange-950/20 rounded-lg">
+                    <div className="text-sm">
+                      <strong>Insight:</strong> Understanding deferral patterns helps improve AI training and reduce human intervention costs.
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Call Profile */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Call Profile */}
             <Card>
               <CardHeader>

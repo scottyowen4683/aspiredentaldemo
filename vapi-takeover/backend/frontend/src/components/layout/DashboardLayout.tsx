@@ -16,6 +16,7 @@ import {
   FileText,
   Phone,
   BookOpen,
+  CreditCard,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState, useEffect, useRef } from "react";
@@ -95,6 +96,7 @@ export function DashboardLayout({ children, userRole = "org_admin", userName = "
     // Invites: only visible to super_admin
     { name: "Invites", href: "/invites", icon: Flag, roles: ["super_admin"] },
     { name: "Analytics", href: "/analytics", icon: BarChart3, roles: ["super_admin", "org_admin"] },
+    { name: "Billing", href: "/billing", icon: CreditCard, roles: ["super_admin"] },
     { name: "Users", href: "/users", icon: Users, roles: ["super_admin"] },
     // Audit Logs: only visible to super_admin
     { name: "Audit Logs", href: "/audit-logs", icon: FileText, roles: ["super_admin"] },

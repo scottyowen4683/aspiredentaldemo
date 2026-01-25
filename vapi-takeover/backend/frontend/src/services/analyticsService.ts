@@ -63,6 +63,13 @@ export interface Organization {
   name: string;
 }
 
+export interface DeferralReason {
+  reason: string;
+  count: number;
+  percentage: number;
+  description: string;
+}
+
 /**
  * Get key performance metrics for analytics dashboard
  */
@@ -771,6 +778,112 @@ export async function getTrendData(
 
   } catch (error) {
     console.error("Error in getTrendData:", error);
+    return [];
+  }
+}
+
+/**
+ * Get top deferral/escalation reasons (why AI transfers to humans)
+ */
+export async function getTopDeferralReasons(
+  orgId?: string,
+  period: string = "30d",
+  limit: number = 10
+): Promise<DeferralReason[]> {
+  try {
+    const days = period === "7d" ? 7 : period === "90d" ? 90 : 30;
+    const dateFrom = new Date();
+    dateFrom.setDate(dateFrom.getDate() - days);
+
+    // Query conversations with their scores to find escalation reasons
+    let query = supabase
+      .from("conversations")
+      .select(`
+        id,
+        escalation,
+        end_reason,
+        scores(flags, feedback, is_used)
+      `)
+      .gte("created_at", dateFrom.toISOString());
+
+    if (orgId && orgId !== "all") {
+      query = query.eq("org_id", orgId);
+    }
+
+    const { data: conversations, error } = await query;
+
+    if (error) {
+      console.error("Error fetching deferral reasons:", error);
+      throw error;
+    }
+
+    // Map of deferral reasons with descriptions
+    const reasonDescriptions: Record<string, string> = {
+      "requires_escalation": "Complex issue requiring human expertise",
+      "policy_violation": "Potential policy or compliance violation detected",
+      "privacy_breach": "Sensitive information or privacy concern",
+      "resident_complaint": "Customer expressed dissatisfaction",
+      "incomplete_resolution": "AI could not fully resolve the request",
+      "compliance_risk": "Potential regulatory or compliance issue",
+      "technical_limitation": "Request beyond AI capabilities",
+      "customer_request": "Customer requested human agent",
+      "low_confidence": "AI had low confidence in response accuracy",
+      "sensitive_topic": "Topic requires human judgment",
+      "high_value_customer": "VIP or high-priority customer",
+      "billing_dispute": "Financial or billing related escalation",
+      "legal_inquiry": "Legal or contractual matter",
+      "emotional_distress": "Customer showing signs of distress",
+      "other": "Other reasons requiring human review"
+    };
+
+    // Count deferral reasons
+    const reasonCounts: Record<string, number> = {};
+    let totalEscalations = 0;
+
+    conversations?.forEach(conv => {
+      // Check if conversation was escalated
+      const wasEscalated = conv.escalation === true ||
+                          conv.end_reason === 'escalated' ||
+                          conv.end_reason === 'transferred';
+
+      // Check flags in scores
+      conv.scores?.forEach(score => {
+        if (score.is_used && score.flags) {
+          const flags = typeof score.flags === 'object' ? score.flags : {};
+
+          // Count each active flag as a reason
+          Object.entries(flags).forEach(([flag, isActive]) => {
+            if (isActive === true) {
+              const reason = flag;
+              reasonCounts[reason] = (reasonCounts[reason] || 0) + 1;
+              totalEscalations++;
+            }
+          });
+        }
+      });
+
+      // If escalated but no specific flag, count as 'other'
+      if (wasEscalated && conv.scores?.every(s => !s.flags || Object.values(s.flags).every(v => !v))) {
+        reasonCounts['other'] = (reasonCounts['other'] || 0) + 1;
+        totalEscalations++;
+      }
+    });
+
+    // Convert to array and sort by count
+    const sortedReasons = Object.entries(reasonCounts)
+      .map(([reason, count]) => ({
+        reason: reason.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+        count,
+        percentage: totalEscalations > 0 ? Math.round((count / totalEscalations) * 1000) / 10 : 0,
+        description: reasonDescriptions[reason] || "Escalation reason"
+      }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, limit);
+
+    return sortedReasons;
+
+  } catch (error) {
+    console.error("Error in getTopDeferralReasons:", error);
     return [];
   }
 }
