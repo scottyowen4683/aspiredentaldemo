@@ -1,4 +1,4 @@
-// server.js - Main Express + WebSocket server for Aspire AI Platform
+// server.js - Main Express + WebSocket server for VAPI Takeover
 import express from 'express';
 import cors from 'cors';
 import { createServer } from 'http';
@@ -49,23 +49,22 @@ app.get('/health', (req, res) => {
   });
 });
 
-// API Routes (must come before static file serving for SPA)
+// Serve static files from public folder
+app.use(express.static(join(__dirname, 'public')));
+
+// Serve admin portal at root
+app.get('/', (req, res) => {
+  res.sendFile(join(__dirname, 'public', 'index.html'));
+});
+
+// Serve static files from public folder
+app.use(express.static(join(__dirname, 'public')));
+
+// API Routes
 app.use('/api/chat', chatRouter);
 app.use('/api/voice', voiceRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/campaigns', campaignsRouter);
-
-// Serve static files from public folder (React build output)
-app.use(express.static(join(__dirname, 'public')));
-
-// SPA fallback - serve index.html for all non-API routes (React Router handles client-side routing)
-app.get('*', (req, res) => {
-  // Don't serve index.html for API routes or WebSocket paths
-  if (req.path.startsWith('/api/') || req.path.startsWith('/voice/')) {
-    return res.status(404).json({ error: 'Not found' });
-  }
-  res.sendFile(join(__dirname, 'public', 'index.html'));
-});
 
 // WebSocket handler for Twilio Media Streams
 wss.on('connection', async (ws, req) => {
@@ -180,7 +179,7 @@ app.use((err, req, res, next) => {
 // Start server
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  logger.info(`🚀 Aspire AI Platform running on port ${PORT}`);
+  logger.info(`🚀 VAPI Takeover server running on port ${PORT}`);
   logger.info(`   Environment: ${process.env.NODE_ENV}`);
   logger.info(`   WebSocket endpoint: ws://localhost:${PORT}/voice/stream`);
   logger.info(`   API endpoint: http://localhost:${PORT}/api`);

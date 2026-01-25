@@ -1,6 +1,5 @@
-# Dependencies (both backend and frontend)
+# Dependencies
 node_modules/
-frontend/node_modules/
 
 # Development files
 .env
@@ -12,13 +11,9 @@ frontend/node_modules/
 .gitignore
 
 # Docs
-ADMIN_PORTAL_GUIDE.md
-GOVERNMENT_RUBRIC_GUIDE.md
+*.md
 
-# Test files
-test-*.html
-*.test.js
-*.spec.js
+# Keep test-chat.html - it's the UI
 
 # IDE
 .vscode/

@@ -4,7 +4,7 @@
 app = "aspire-ai-platform"
 primary_region = "syd"  # Sydney, Australia
 
-# Build configuration - explicitly reference Dockerfile
+# Build configuration
 [build]
   dockerfile = "Dockerfile"
 
@@ -41,7 +41,7 @@ primary_region = "syd"  # Sydney, Australia
     method = "GET"
     path = "/health"
 
-# VM configuration - shared-cpu-1x with 512MB for Node.js + React serving
+# VM configuration - 512MB for Node.js + React serving
 [[vm]]
   size = "shared-cpu-1x"
   memory = "512mb"
