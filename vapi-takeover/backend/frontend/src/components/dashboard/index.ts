@@ -12,6 +12,6 @@ export { AddAssistantModal } from './AddAssistantModal';
 export { AddOrganizationModal } from './AddOrganizationModal';
 export { AssistantRubricModal } from './AssistantRubricModal';
 export { EditOrganizationModal } from './EditOrganizationModal';
-export { GHLAgentSyncModal } from './GHLAgentSyncModal';
+// GHLAgentSyncModal removed - Aspire AI Platform uses native assistant management
 export { ManageOrganizationModal } from './ManageOrganizationModal';
 export { OrganizationRubricModal } from './OrganizationRubricModal';
