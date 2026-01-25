@@ -4,8 +4,9 @@
 app = "aspire-ai-platform"
 primary_region = "syd"  # Sydney, Australia
 
-# Build configuration
+# Build configuration - explicitly reference Dockerfile
 [build]
+  dockerfile = "Dockerfile"
 
 # Environment variables (non-secret)
 [env]
