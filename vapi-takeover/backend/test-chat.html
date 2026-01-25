@@ -260,7 +260,7 @@
     let messageCount = 0;
     let totalLatency = 0;
 
-    const API_URL = 'https://aspiredentaldemo.onrender.com/api/chat';
+    const API_URL = window.location.origin + '/api/chat';
 
     function addMessage(role, content, meta = {}) {
       const chatContainer = document.getElementById('chatContainer');
