@@ -1,9 +1,74 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, Component, ErrorInfo, ReactNode } from "react";
 import { supabase } from './supabaseClient';
 import App from "./App";
 import AuthMFA from "./components/MFA/AuthMFA";
 
-export default function AppWithMFA() {
+// Error Boundary to catch React errors
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
+
+class ErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundaryState> {
+  constructor(props: { children: ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.error('React Error Boundary caught an error:', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{
+          padding: '20px',
+          backgroundColor: '#1a1a2e',
+          color: 'white',
+          minHeight: '100vh',
+          fontFamily: 'monospace'
+        }}>
+          <h1 style={{ color: '#ff6b6b' }}>Something went wrong</h1>
+          <pre style={{
+            backgroundColor: '#0f0f1a',
+            padding: '15px',
+            borderRadius: '8px',
+            overflow: 'auto',
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word'
+          }}>
+            {this.state.error?.toString()}
+            {'\n\n'}
+            {this.state.error?.stack}
+          </pre>
+          <button
+            onClick={() => window.location.reload()}
+            style={{
+              marginTop: '20px',
+              padding: '10px 20px',
+              backgroundColor: '#667eea',
+              color: 'white',
+              border: 'none',
+              borderRadius: '5px',
+              cursor: 'pointer'
+            }}
+          >
+            Reload Page
+          </button>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
+function AppWithMFAInner() {
   const [readyToShow, setReadyToShow] = useState(false);
   const [showMFAScreen, setShowMFAScreen] = useState(false);
 
@@ -55,4 +120,12 @@ export default function AppWithMFA() {
   if (showMFAScreen) return <AuthMFA onSuccess={() => setShowMFAScreen(false)} />;
 
   return <App />;
+}
+
+export default function AppWithMFA() {
+  return (
+    <ErrorBoundary>
+      <AppWithMFAInner />
+    </ErrorBoundary>
+  );
 }
