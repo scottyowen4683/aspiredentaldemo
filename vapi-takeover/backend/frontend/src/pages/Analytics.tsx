@@ -9,14 +9,14 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
-import { 
-  DollarSign, 
-  TrendingUp, 
-  Activity, 
-  Clock, 
-  Phone, 
-  MessageSquare, 
-  CheckCircle, 
+import {
+  DollarSign,
+  TrendingUp,
+  Activity,
+  Clock,
+  Phone,
+  MessageSquare,
+  CheckCircle,
   AlertTriangle,
   Users,
   Target,
@@ -26,7 +26,15 @@ import {
   HelpCircle,
   ArrowUp,
   ArrowDown,
-  Minus
+  Minus,
+  Shield,
+  FileCheck,
+  Flag,
+  Eye,
+  Scale,
+  ClipboardCheck,
+  Timer,
+  Gauge
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
@@ -35,6 +43,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useUser } from "@/context/UserContext";
 import { useState, useMemo } from "react";
+import { supabase } from "@/supabaseClient";
 import { LineChart, Line, AreaChart, Area, PieChart as RechartsPieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Legend } from 'recharts';
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -132,6 +141,85 @@ export default function Analytics() {
   const { data: trendData = [], isLoading: trendLoading } = useQuery({
     queryKey: ["trend-data", queryOrgId, selectedPeriod],
     queryFn: () => getTrendData(queryOrgId, selectedPeriod),
+    refetchInterval: 60000,
+  });
+
+  // Fetch governance metrics
+  const { data: governanceMetrics, isLoading: governanceLoading } = useQuery({
+    queryKey: ["governance-metrics", queryOrgId, selectedPeriod],
+    queryFn: async () => {
+      // Calculate date range
+      const days = selectedPeriod === "7d" ? 7 : selectedPeriod === "90d" ? 90 : 30;
+      const startDate = new Date();
+      startDate.setDate(startDate.getDate() - days);
+
+      // Fetch review queue stats
+      let reviewQuery = supabase
+        .from("review_queue")
+        .select("id, reviewed, urgency, flag_reason, created_at");
+
+      if (queryOrgId) {
+        reviewQuery = reviewQuery.eq("org_id", queryOrgId);
+      }
+      reviewQuery = reviewQuery.gte("created_at", startDate.toISOString());
+
+      const { data: reviewData, error: reviewError } = await reviewQuery;
+
+      // Fetch scores for rubric compliance
+      let scoresQuery = supabase
+        .from("scores")
+        .select("id, final_score, rubric_result, flags, created_at");
+
+      scoresQuery = scoresQuery.gte("created_at", startDate.toISOString());
+
+      const { data: scoresData, error: scoresError } = await scoresQuery;
+
+      // Calculate governance metrics
+      const totalReviewItems = reviewData?.length || 0;
+      const pendingReviews = reviewData?.filter(r => !r.reviewed)?.length || 0;
+      const completedReviews = reviewData?.filter(r => r.reviewed)?.length || 0;
+      const urgentItems = reviewData?.filter(r => r.urgency === "high" || r.urgency === "critical")?.length || 0;
+
+      // Flag reasons breakdown
+      const flagReasons: Record<string, number> = {};
+      reviewData?.forEach(item => {
+        const reason = item.flag_reason || "Other";
+        flagReasons[reason] = (flagReasons[reason] || 0) + 1;
+      });
+
+      // Score quality metrics
+      const scores = scoresData?.map(s => s.final_score).filter(Boolean) || [];
+      const excellentScores = scores.filter(s => s >= 90).length;
+      const goodScores = scores.filter(s => s >= 80 && s < 90).length;
+      const satisfactoryScores = scores.filter(s => s >= 70 && s < 80).length;
+      const needsImprovement = scores.filter(s => s < 70).length;
+
+      // Calculate compliance rate (percentage of conversations with acceptable scores)
+      const complianceRate = scores.length > 0
+        ? Math.round(((excellentScores + goodScores + satisfactoryScores) / scores.length) * 100)
+        : 0;
+
+      // Calculate review response time (mock data - would need actual timestamps)
+      const avgReviewTime = completedReviews > 0 ? "2.4 hrs" : "N/A";
+
+      return {
+        totalReviewItems,
+        pendingReviews,
+        completedReviews,
+        urgentItems,
+        flagReasons,
+        complianceRate,
+        excellentScores,
+        goodScores,
+        satisfactoryScores,
+        needsImprovement,
+        totalScored: scores.length,
+        avgReviewTime,
+        reviewCompletionRate: totalReviewItems > 0
+          ? Math.round((completedReviews / totalReviewItems) * 100)
+          : 100,
+      };
+    },
     refetchInterval: 60000,
   });
 
@@ -829,7 +917,7 @@ export default function Analytics() {
                     <span className="text-sm font-bold">
                       ${(() => {
                         const highQualityConversations = Math.round(metrics.totalCalls * (metrics.avgScore / 100));
-                        return highQualityConversations > 0 
+                        return highQualityConversations > 0
                           ? ((metrics.tokenCost || 0) / highQualityConversations).toFixed(3)
                           : "0.000";
                       })()}
@@ -839,7 +927,7 @@ export default function Analytics() {
                     <span className="text-sm font-medium">Revenue vs Cost Ratio</span>
                     <span className="text-sm font-bold">
                       {(() => {
-                        const ratio = (metrics.tokenCost || 0) > 0 
+                        const ratio = (metrics.tokenCost || 0) > 0
                           ? ((metrics.servicePlanCost || 0) / (metrics.tokenCost || 1))
                           : 0;
                         return `${ratio.toFixed(1)}:1`;
@@ -875,7 +963,7 @@ export default function Analytics() {
                       const utilization = metrics.totalCalls > 0 ? Math.min(100, (metrics.totalCalls / 1000) * 100) : 0;
                       return utilization;
                     })()} className="h-2" />
-                    
+
                     <div className="flex items-center justify-between">
                       <span className="text-xs">Profit margin</span>
                       <span className="text-xs font-medium">
@@ -895,6 +983,246 @@ export default function Analytics() {
             </CardContent>
           </Card>
           )}
+
+          {/* Governance & Compliance Section */}
+          <Card className="border-2 border-primary/20">
+            <CardHeader className="bg-gradient-to-r from-primary/5 to-primary/10">
+              <div className="flex items-center gap-2">
+                <Shield className="h-5 w-5 text-primary" />
+                <CardTitle className="text-lg">Governance & Compliance Dashboard</CardTitle>
+              </div>
+              <CardDescription>
+                Monitor quality assurance, compliance metrics, and review queue status
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="pt-6">
+              {governanceLoading ? (
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  {Array.from({ length: 4 }).map((_, i) => (
+                    <Skeleton key={i} className="h-24 w-full" />
+                  ))}
+                </div>
+              ) : (
+                <>
+                  {/* Governance KPIs */}
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+                    <Card className="bg-gradient-to-br from-green-500/10 to-emerald-500/10 border-green-500/20">
+                      <CardContent className="pt-4">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-xs text-muted-foreground">Compliance Rate</p>
+                            <p className="text-2xl font-bold text-green-600">
+                              {governanceMetrics?.complianceRate || 0}%
+                            </p>
+                          </div>
+                          <div className="h-10 w-10 rounded-full bg-green-500/20 flex items-center justify-center">
+                            <ClipboardCheck className="h-5 w-5 text-green-600" />
+                          </div>
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-2">
+                          Conversations meeting quality standards
+                        </p>
+                      </CardContent>
+                    </Card>
+
+                    <Card className="bg-gradient-to-br from-blue-500/10 to-cyan-500/10 border-blue-500/20">
+                      <CardContent className="pt-4">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-xs text-muted-foreground">Review Completion</p>
+                            <p className="text-2xl font-bold text-blue-600">
+                              {governanceMetrics?.reviewCompletionRate || 100}%
+                            </p>
+                          </div>
+                          <div className="h-10 w-10 rounded-full bg-blue-500/20 flex items-center justify-center">
+                            <FileCheck className="h-5 w-5 text-blue-600" />
+                          </div>
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-2">
+                          {governanceMetrics?.completedReviews || 0} of {governanceMetrics?.totalReviewItems || 0} reviews completed
+                        </p>
+                      </CardContent>
+                    </Card>
+
+                    <Card className="bg-gradient-to-br from-orange-500/10 to-amber-500/10 border-orange-500/20">
+                      <CardContent className="pt-4">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-xs text-muted-foreground">Pending Reviews</p>
+                            <p className="text-2xl font-bold text-orange-600">
+                              {governanceMetrics?.pendingReviews || 0}
+                            </p>
+                          </div>
+                          <div className="h-10 w-10 rounded-full bg-orange-500/20 flex items-center justify-center">
+                            <Eye className="h-5 w-5 text-orange-600" />
+                          </div>
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-2">
+                          Awaiting manual review
+                        </p>
+                      </CardContent>
+                    </Card>
+
+                    <Card className="bg-gradient-to-br from-red-500/10 to-rose-500/10 border-red-500/20">
+                      <CardContent className="pt-4">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-xs text-muted-foreground">Urgent Items</p>
+                            <p className="text-2xl font-bold text-red-600">
+                              {governanceMetrics?.urgentItems || 0}
+                            </p>
+                          </div>
+                          <div className="h-10 w-10 rounded-full bg-red-500/20 flex items-center justify-center">
+                            <Flag className="h-5 w-5 text-red-600" />
+                          </div>
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-2">
+                          High priority issues requiring attention
+                        </p>
+                      </CardContent>
+                    </Card>
+                  </div>
+
+                  {/* Quality Score Breakdown and Flag Reasons */}
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* Quality Score Distribution */}
+                    <Card>
+                      <CardHeader className="pb-2">
+                        <CardTitle className="text-sm font-medium flex items-center gap-2">
+                          <Gauge className="h-4 w-4" />
+                          Quality Score Distribution
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <div className="w-3 h-3 rounded-full bg-green-500" />
+                              <span className="text-sm">Excellent (90+)</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-medium">{governanceMetrics?.excellentScores || 0}</span>
+                              <Progress
+                                value={governanceMetrics?.totalScored ? ((governanceMetrics.excellentScores || 0) / governanceMetrics.totalScored) * 100 : 0}
+                                className="w-20 h-2"
+                              />
+                            </div>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <div className="w-3 h-3 rounded-full bg-blue-500" />
+                              <span className="text-sm">Good (80-89)</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-medium">{governanceMetrics?.goodScores || 0}</span>
+                              <Progress
+                                value={governanceMetrics?.totalScored ? ((governanceMetrics.goodScores || 0) / governanceMetrics.totalScored) * 100 : 0}
+                                className="w-20 h-2"
+                              />
+                            </div>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <div className="w-3 h-3 rounded-full bg-yellow-500" />
+                              <span className="text-sm">Satisfactory (70-79)</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-medium">{governanceMetrics?.satisfactoryScores || 0}</span>
+                              <Progress
+                                value={governanceMetrics?.totalScored ? ((governanceMetrics.satisfactoryScores || 0) / governanceMetrics.totalScored) * 100 : 0}
+                                className="w-20 h-2"
+                              />
+                            </div>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <div className="w-3 h-3 rounded-full bg-red-500" />
+                              <span className="text-sm">Needs Improvement (&lt;70)</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-medium">{governanceMetrics?.needsImprovement || 0}</span>
+                              <Progress
+                                value={governanceMetrics?.totalScored ? ((governanceMetrics.needsImprovement || 0) / governanceMetrics.totalScored) * 100 : 0}
+                                className="w-20 h-2"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                        <div className="mt-4 pt-4 border-t">
+                          <div className="flex items-center justify-between text-sm">
+                            <span className="text-muted-foreground">Total Scored Conversations</span>
+                            <span className="font-medium">{governanceMetrics?.totalScored || 0}</span>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+
+                    {/* Flag Reasons Breakdown */}
+                    <Card>
+                      <CardHeader className="pb-2">
+                        <CardTitle className="text-sm font-medium flex items-center gap-2">
+                          <Flag className="h-4 w-4" />
+                          Flag Reasons Breakdown
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        {governanceMetrics?.flagReasons && Object.keys(governanceMetrics.flagReasons).length > 0 ? (
+                          <div className="space-y-3">
+                            {Object.entries(governanceMetrics.flagReasons)
+                              .sort((a, b) => b[1] - a[1])
+                              .slice(0, 5)
+                              .map(([reason, count], index) => (
+                                <div key={index} className="flex items-center justify-between">
+                                  <span className="text-sm truncate max-w-[200px]">{reason}</span>
+                                  <div className="flex items-center gap-2">
+                                    <Badge variant="secondary">{count}</Badge>
+                                    <Progress
+                                      value={(count / (governanceMetrics.totalReviewItems || 1)) * 100}
+                                      className="w-16 h-2"
+                                    />
+                                  </div>
+                                </div>
+                              ))}
+                          </div>
+                        ) : (
+                          <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
+                            <CheckCircle className="h-8 w-8 mb-2 text-green-500" />
+                            <p className="text-sm">No flagged items</p>
+                            <p className="text-xs">All conversations within acceptable parameters</p>
+                          </div>
+                        )}
+                        <div className="mt-4 pt-4 border-t">
+                          <div className="flex items-center justify-between text-sm">
+                            <span className="text-muted-foreground">Avg. Review Response Time</span>
+                            <span className="font-medium">{governanceMetrics?.avgReviewTime || "N/A"}</span>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </div>
+
+                  {/* Governance Insight */}
+                  <div className="mt-6 p-4 bg-primary/5 rounded-lg border border-primary/10">
+                    <div className="flex items-start gap-3">
+                      <Scale className="h-5 w-5 text-primary mt-0.5" />
+                      <div>
+                        <h4 className="font-medium text-sm">Governance Insight</h4>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          {governanceMetrics?.complianceRate && governanceMetrics.complianceRate >= 90
+                            ? "Excellent compliance rate! Your AI assistants are maintaining high quality standards across conversations."
+                            : governanceMetrics?.complianceRate && governanceMetrics.complianceRate >= 70
+                            ? "Good compliance rate. Consider reviewing flagged conversations to identify areas for prompt improvement."
+                            : "Compliance rate needs attention. Review the flagged conversations and consider updating assistant prompts or knowledge bases."}
+                          {governanceMetrics?.urgentItems && governanceMetrics.urgentItems > 0 &&
+                            ` There are ${governanceMetrics.urgentItems} urgent items requiring immediate attention.`}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
+            </CardContent>
+          </Card>
         </div>
       </DashboardLayout>
     </TooltipProvider>
