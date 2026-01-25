@@ -11,7 +11,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { HelpCircle, Phone, MessageSquare, Mic, Upload, FileText, X, Loader2 } from "lucide-react";
+import { HelpCircle, Phone, MessageSquare, Mic, Upload, FileText, X, Loader2, Plus, Building2 } from "lucide-react";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
@@ -70,6 +70,11 @@ export function AddAssistantModal({ open, onOpenChange, initialData, onSuccess }
   const [organizations, setOrganizations] = useState<{ id: string; name?: string | null }[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Inline org creation state
+  const [showNewOrgForm, setShowNewOrgForm] = useState(false);
+  const [isCreatingOrg, setIsCreatingOrg] = useState(false);
+  const [newOrgName, setNewOrgName] = useState("");
+
   const [formData, setFormData] = useState<FormData>({
     friendlyName: "",
     assistantType: "voice",
@@ -112,6 +117,52 @@ export function AddAssistantModal({ open, onOpenChange, initialData, onSuccess }
       setFormData((prev) => ({ ...prev, orgId: user.org_id }));
     }
   }, [user]);
+
+  // Handle inline organization creation
+  const handleCreateOrg = async () => {
+    if (!newOrgName.trim()) {
+      toast({ title: "Error", description: "Organization name is required", variant: "destructive" });
+      return;
+    }
+
+    setIsCreatingOrg(true);
+    try {
+      // Generate slug from name
+      const slug = newOrgName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+
+      const response = await fetch('/api/admin/organizations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: newOrgName.trim(),
+          slug,
+          flat_rate_fee: 500.00,
+          included_interactions: 5000,
+          overage_rate_per_1000: 50.00
+        })
+      });
+
+      const result = await response.json();
+
+      if (result.success && result.organization) {
+        // Add to organizations list
+        setOrganizations(prev => [...prev, { id: result.organization.id, name: result.organization.name }]);
+        // Select the new org
+        setFormData(prev => ({ ...prev, orgId: result.organization.id }));
+        // Reset form
+        setNewOrgName("");
+        setShowNewOrgForm(false);
+        toast({ title: "Organization Created", description: `${result.organization.name} has been created and selected.` });
+      } else {
+        throw new Error(result.error || "Failed to create organization");
+      }
+    } catch (error) {
+      console.error("Error creating organization:", error);
+      toast({ title: "Error", description: "Failed to create organization", variant: "destructive" });
+    } finally {
+      setIsCreatingOrg(false);
+    }
+  };
 
   // Populate form when editing
   useEffect(() => {
@@ -397,18 +448,68 @@ export function AddAssistantModal({ open, onOpenChange, initialData, onSuccess }
             {user?.role === "super_admin" && (
               <div className="space-y-2">
                 <Label htmlFor="orgId">Organization *</Label>
-                <Select value={formData.orgId ?? ""} onValueChange={(v) => handleChange("orgId", v || null)}>
-                  <SelectTrigger id="orgId">
-                    <SelectValue placeholder="Select organization" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {organizations.map((org) => (
-                      <SelectItem key={org.id} value={org.id}>
-                        {org.name ?? org.id}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                {!showNewOrgForm ? (
+                  <div className="flex gap-2">
+                    <Select value={formData.orgId ?? ""} onValueChange={(v) => handleChange("orgId", v || null)}>
+                      <SelectTrigger id="orgId" className="flex-1">
+                        <SelectValue placeholder="Select organization" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {organizations.map((org) => (
+                          <SelectItem key={org.id} value={org.id}>
+                            {org.name ?? org.id}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      onClick={() => setShowNewOrgForm(true)}
+                      title="Create new organization"
+                    >
+                      <Plus className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="space-y-2 p-3 bg-muted/50 rounded-lg border">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Building2 className="h-4 w-4 text-primary" />
+                      <span className="text-sm font-medium">Create New Organization</span>
+                    </div>
+                    <Input
+                      placeholder="Organization name"
+                      value={newOrgName}
+                      onChange={(e) => setNewOrgName(e.target.value)}
+                      disabled={isCreatingOrg}
+                    />
+                    <div className="flex gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={handleCreateOrg}
+                        disabled={isCreatingOrg || !newOrgName.trim()}
+                        className="flex-1"
+                      >
+                        {isCreatingOrg ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Plus className="h-4 w-4 mr-1" />}
+                        Create & Select
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setShowNewOrgForm(false);
+                          setNewOrgName("");
+                        }}
+                        disabled={isCreatingOrg}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>

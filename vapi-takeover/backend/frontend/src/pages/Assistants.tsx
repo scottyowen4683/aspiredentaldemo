@@ -2,11 +2,12 @@ import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Pause, Play, Settings, Trash2, Edit, Filter, Search, FileText, Bot, Phone, MessageSquare } from "lucide-react";
+import { Plus, Pause, Play, Settings, Trash2, Edit, Filter, Search, FileText, Bot, Phone, MessageSquare, Code } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import AddAssistantModal from "@/components/dashboard/AddAssistantModal";
 import AssistantRubricModal from "@/components/dashboard/AssistantRubricModal";
+import IntegrationModal from "@/components/dashboard/IntegrationModal";
 import { getOrganizationRubric, updateAssistantRubric } from "@/services/rubricService";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
@@ -44,6 +45,12 @@ export default function Assistants() {
   const [isRubricModalOpen, setIsRubricModalOpen] = useState(false);
   const [assistantForRubric, setAssistantForRubric] = useState<AssistantRow | null>(null);
   const [orgRubricForModal, setOrgRubricForModal] = useState<any>(null);
+  const [isIntegrationModalOpen, setIsIntegrationModalOpen] = useState(false);
+  const [assistantForIntegration, setAssistantForIntegration] = useState<{
+    id: string;
+    name: string;
+    type: "voice" | "chat" | "both";
+  } | null>(null);
   const { toast } = useToast();
 
   const { user } = useUser();
@@ -398,6 +405,22 @@ export default function Assistants() {
                       )}
                     </Button>
                     <Button
+                      variant="default"
+                      size="sm"
+                      className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700"
+                      onClick={() => {
+                        setAssistantForIntegration({
+                          id: assistant.id,
+                          name: assistant.name,
+                          type: (assistant.assistantType as "voice" | "chat") || "chat",
+                        });
+                        setIsIntegrationModalOpen(true);
+                      }}
+                      title="Get integration code"
+                    >
+                      <Code className="h-3 w-3" />
+                    </Button>
+                    <Button
                       variant="outline"
                       size="sm"
                       onClick={() => {
@@ -490,6 +513,18 @@ export default function Assistants() {
             }
           }
         }}
+      />
+
+      {/* Integration Modal */}
+      <IntegrationModal
+        open={isIntegrationModalOpen}
+        onOpenChange={(open) => {
+          if (!open) setAssistantForIntegration(null);
+          setIsIntegrationModalOpen(open);
+        }}
+        assistantId={assistantForIntegration?.id || ""}
+        assistantName={assistantForIntegration?.name || ""}
+        assistantType={assistantForIntegration?.type || "chat"}
       />
     </DashboardLayout>
   );
