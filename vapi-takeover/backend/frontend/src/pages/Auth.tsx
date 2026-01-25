@@ -290,50 +290,20 @@ export default function Auth() {
       //   return;
       // }
       const { email, password } = loginData;
-      // const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/secure-login`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-          },
-          body: JSON.stringify({ email, password }),
-        }
-      );
 
-      const result = await response.json();
+      // Use direct Supabase authentication
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
 
-
-      if (!response.ok) {
+      if (error) {
         toast({
           title: "Login failed",
-          description: result.error || "Account locked. Try again later.",
+          description: error.message || "Invalid credentials.",
           variant: "destructive",
         });
         return;
       }
 
-      // console.log('Supabase signInWithPassword result:', { data, error });
-
-      // ✅ Set session manually in Supabase Auth
-      if (result.session) {
-        const { data: sessionData, error: sessionError } = await supabase.auth.setSession({
-          access_token: result.session.access_token,
-          refresh_token: result.session.refresh_token,
-        });
-
-        if (sessionError) {
-          console.error("Error setting Supabase session:", sessionError);
-          toast({
-            title: "Login failed",
-            description: "Could not establish session.",
-            variant: "destructive",
-          });
-          return;
-        }
-
+      if (data.session) {
         // ✅ Check MFA enrollment/verification
         const { data: aalData, error: aalError } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
         if (aalError) throw aalError;
@@ -348,10 +318,6 @@ export default function Auth() {
           // User has already verified MFA
           navigate("/dashboard");
         }
-
-       
-
-        // navigate("/dashboard");
       }
 
 
