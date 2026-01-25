@@ -1,16 +1,16 @@
 /*
  * Client Cost Metrics Hook
- * 
+ *
  * This hook calculates cost metrics from the CLIENT'S PERSPECTIVE, not internal costs.
  * All calculations are based on:
  * 1. Monthly service fee they pay us
  * 2. Baseline human cost per call (set during onboarding)
  * 3. Their conversation volume
- * 
+ *
  * This does NOT include:
  * - LLM API costs
- * - TTS/STT costs  
- * - VAPI costs
+ * - TTS/STT costs
+ * - Platform costs
  * - Token usage
  * - Any internal operational costs
  */

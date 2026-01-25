@@ -518,8 +518,7 @@ export default function Conversations() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All Providers</SelectItem>
-                      <SelectItem value="vapi">Vapi</SelectItem>
-                      <SelectItem value="ghl">GHL</SelectItem>
+                      <SelectItem value="aspire">Aspire</SelectItem>
                     </SelectContent>
                   </Select>
                   <Select

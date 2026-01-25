@@ -9,7 +9,7 @@
  * - Savings: Compared to baseline human cost per call (set during onboarding)
  * - ROI: (Total Savings / Service Plan Investment) * 100
  * 
- * Internal costs (LLM, TTS/STT, VAPI tokens) are hidden from this view.
+ * Internal costs (LLM, TTS/STT, platform tokens) are hidden from this view.
  */
 
 import React, { useEffect } from "react";

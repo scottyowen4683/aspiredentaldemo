@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -11,7 +11,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { HelpCircle, Phone, MessageSquare, Mic } from "lucide-react";
+import { HelpCircle, Phone, MessageSquare, Mic, Upload, FileText, X, Loader2 } from "lucide-react";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
@@ -20,6 +20,7 @@ import { createAssistant, updateAssistant, AssistantRow } from "@/services/assis
 import { useUser } from "@/context/UserContext";
 import { fetchOrganizations } from "@/services/organizationService";
 import { cn } from "@/lib/utils";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 interface AddAssistantModalProps {
   open: boolean;
@@ -32,46 +33,58 @@ interface FormData {
   friendlyName: string;
   assistantType: "voice" | "chat";
   phoneNumber: string;
+  voiceSelectionMode: "preset" | "custom";
   elevenLabsVoiceId: string;
+  customVoiceId: string;
   prompt: string;
   model: string;
   temperature: number;
   maxTokens: number;
   firstMessage: string;
   kbEnabled: boolean;
+  kbFile: File | null;
+  kbText: string;
   orgId?: string | null;
   autoScore: boolean;
 }
 
 const DEFAULT_VOICES = [
-  { id: "21m00Tcm4TlvDq8ikWAM", name: "Rachel (Female)" },
-  { id: "AZnzlk1XvdvUeBnXmlld", name: "Domi (Female)" },
-  { id: "EXAVITQu4vr4xnSDxMaL", name: "Bella (Female)" },
-  { id: "ErXwobaYiN019PkySvjV", name: "Antoni (Male)" },
-  { id: "MF3mGyEYCl7XYWbV9V6O", name: "Elli (Female)" },
-  { id: "TxGEqnHWrfWFTfGW9XjX", name: "Josh (Male)" },
-  { id: "VR6AewLTigWG4xSOukaG", name: "Arnold (Male)" },
-  { id: "pNInz6obpgDQGcFmaJgB", name: "Adam (Male)" },
-  { id: "yoZ06aMxZJJ28mfd3POQ", name: "Sam (Male)" },
+  { id: "21m00Tcm4TlvDq8ikWAM", name: "Rachel - American Female (Calm)" },
+  { id: "AZnzlk1XvdvUeBnXmlld", name: "Domi - American Female (Strong)" },
+  { id: "EXAVITQu4vr4xnSDxMaL", name: "Bella - American Female (Soft)" },
+  { id: "ErXwobaYiN019PkySvjV", name: "Antoni - American Male (Well-rounded)" },
+  { id: "MF3mGyEYCl7XYWbV9V6O", name: "Elli - American Female (Emotional)" },
+  { id: "TxGEqnHWrfWFTfGW9XjX", name: "Josh - American Male (Deep)" },
+  { id: "VR6AewLTigWG4xSOukaG", name: "Arnold - American Male (Crisp)" },
+  { id: "pNInz6obpgDQGcFmaJgB", name: "Adam - American Male (Deep)" },
+  { id: "yoZ06aMxZJJ28mfd3POQ", name: "Sam - American Male (Raspy)" },
+  { id: "onwK4e9ZLuTAKqWW03F9", name: "Daniel - British Male (Deep)" },
+  { id: "XB0fDUnXU5powFXDhCwa", name: "Charlotte - Swedish Female (Seductive)" },
 ];
 
 export function AddAssistantModal({ open, onOpenChange, initialData, onSuccess }: AddAssistantModalProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isUploadingKb, setIsUploadingKb] = useState(false);
   const { toast } = useToast();
   const { user } = useUser();
   const [organizations, setOrganizations] = useState<{ id: string; name?: string | null }[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [formData, setFormData] = useState<FormData>({
     friendlyName: "",
     assistantType: "voice",
     phoneNumber: "",
+    voiceSelectionMode: "preset",
     elevenLabsVoiceId: "21m00Tcm4TlvDq8ikWAM",
+    customVoiceId: "",
     prompt: "",
     model: "gpt-4o-mini",
     temperature: 0.7,
     maxTokens: 1000,
     firstMessage: "Hello, how can I help you today?",
     kbEnabled: false,
+    kbFile: null,
+    kbText: "",
     orgId: null,
     autoScore: true,
   });
@@ -104,17 +117,24 @@ export function AddAssistantModal({ open, onOpenChange, initialData, onSuccess }
   useEffect(() => {
     if (open) {
       if (initialData) {
+        const isCustomVoice = initialData.elevenlabs_voice_id &&
+          !DEFAULT_VOICES.some(v => v.id === initialData.elevenlabs_voice_id);
+
         setFormData({
           friendlyName: initialData.friendly_name ?? "",
           assistantType: (initialData.assistant_type as "voice" | "chat") ?? "voice",
           phoneNumber: initialData.phone_number ?? "",
-          elevenLabsVoiceId: initialData.elevenlabs_voice_id ?? "21m00Tcm4TlvDq8ikWAM",
+          voiceSelectionMode: isCustomVoice ? "custom" : "preset",
+          elevenLabsVoiceId: isCustomVoice ? "21m00Tcm4TlvDq8ikWAM" : (initialData.elevenlabs_voice_id ?? "21m00Tcm4TlvDq8ikWAM"),
+          customVoiceId: isCustomVoice ? (initialData.elevenlabs_voice_id ?? "") : "",
           prompt: initialData.prompt ?? "",
           model: initialData.model ?? "gpt-4o-mini",
           temperature: initialData.temperature ?? 0.7,
           maxTokens: initialData.max_tokens ?? 1000,
           firstMessage: initialData.first_message ?? "Hello, how can I help you today?",
           kbEnabled: initialData.kb_enabled ?? false,
+          kbFile: null,
+          kbText: "",
           orgId: initialData.org_id ?? null,
           autoScore: initialData.auto_score ?? true,
         });
@@ -124,13 +144,17 @@ export function AddAssistantModal({ open, onOpenChange, initialData, onSuccess }
           friendlyName: "",
           assistantType: "voice",
           phoneNumber: "",
+          voiceSelectionMode: "preset",
           elevenLabsVoiceId: "21m00Tcm4TlvDq8ikWAM",
+          customVoiceId: "",
           prompt: "",
           model: "gpt-4o-mini",
           temperature: 0.7,
           maxTokens: 1000,
           firstMessage: "Hello, how can I help you today?",
           kbEnabled: false,
+          kbFile: null,
+          kbText: "",
           orgId: user?.role === "org_admin" ? user?.org_id ?? null : null,
           autoScore: true,
         });
@@ -140,6 +164,38 @@ export function AddAssistantModal({ open, onOpenChange, initialData, onSuccess }
 
   const handleChange = <K extends keyof FormData>(field: K, value: FormData[K]) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 10 * 1024 * 1024) { // 10MB limit
+        toast({ title: "Error", description: "File size must be less than 10MB", variant: "destructive" });
+        return;
+      }
+      const allowedTypes = ['.txt', '.pdf', '.docx'];
+      const ext = file.name.toLowerCase().slice(file.name.lastIndexOf('.'));
+      if (!allowedTypes.includes(ext)) {
+        toast({ title: "Error", description: "Only TXT, PDF, and DOCX files are supported", variant: "destructive" });
+        return;
+      }
+      handleChange("kbFile", file);
+      handleChange("kbEnabled", true);
+    }
+  };
+
+  const removeFile = () => {
+    handleChange("kbFile", null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
+  const getEffectiveVoiceId = () => {
+    if (formData.voiceSelectionMode === "custom" && formData.customVoiceId.trim()) {
+      return formData.customVoiceId.trim();
+    }
+    return formData.elevenLabsVoiceId;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -160,6 +216,12 @@ export function AddAssistantModal({ open, onOpenChange, initialData, onSuccess }
         return;
       }
 
+      if (formData.voiceSelectionMode === "custom" && formData.assistantType === "voice" && !formData.customVoiceId.trim()) {
+        toast({ title: "Error", description: "Please enter a custom ElevenLabs voice ID", variant: "destructive" });
+        setIsSubmitting(false);
+        return;
+      }
+
       const orgId = user?.role === "org_admin" ? user?.org_id ?? null : formData.orgId;
       if (!orgId) {
         toast({ title: "Error", description: "Please select an organization", variant: "destructive" });
@@ -173,7 +235,7 @@ export function AddAssistantModal({ open, onOpenChange, initialData, onSuccess }
         friendly_name: formData.friendlyName,
         bot_type: formData.assistantType,
         phone_number: formData.assistantType === "voice" ? formData.phoneNumber : null,
-        elevenlabs_voice_id: formData.assistantType === "voice" ? formData.elevenLabsVoiceId : null,
+        elevenlabs_voice_id: formData.assistantType === "voice" ? getEffectiveVoiceId() : null,
         prompt: formData.prompt || null,
         model: formData.model,
         temperature: formData.temperature,
@@ -191,6 +253,58 @@ export function AddAssistantModal({ open, onOpenChange, initialData, onSuccess }
       }
 
       if (result.success) {
+        const assistantId = result.data?.id || initialData?.id;
+
+        // If KB file is selected, upload it
+        if (formData.kbFile && assistantId) {
+          setIsUploadingKb(true);
+          try {
+            const formDataUpload = new FormData();
+            formDataUpload.append('file', formData.kbFile);
+            formDataUpload.append('org_id', orgId);
+            formDataUpload.append('assistant_id', assistantId);
+
+            const uploadResponse = await fetch('/api/admin/knowledge-base/upload', {
+              method: 'POST',
+              body: formDataUpload,
+            });
+
+            if (!uploadResponse.ok) {
+              console.error('KB upload failed:', await uploadResponse.text());
+              toast({ title: "Warning", description: "Assistant created but knowledge base upload failed", variant: "destructive" });
+            }
+          } catch (kbError) {
+            console.error('KB upload error:', kbError);
+          } finally {
+            setIsUploadingKb(false);
+          }
+        }
+
+        // If KB text is provided, upload it
+        if (formData.kbText.trim() && assistantId) {
+          setIsUploadingKb(true);
+          try {
+            const textResponse = await fetch('/api/admin/knowledge-base/text', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                org_id: orgId,
+                assistant_id: assistantId,
+                text: formData.kbText,
+                source: 'manual_input',
+              }),
+            });
+
+            if (!textResponse.ok) {
+              console.error('KB text upload failed:', await textResponse.text());
+            }
+          } catch (kbError) {
+            console.error('KB text upload error:', kbError);
+          } finally {
+            setIsUploadingKb(false);
+          }
+        }
+
         toast({
           title: initialData?.id ? "Assistant Updated" : "Assistant Created",
           description: `${formData.friendlyName} has been ${initialData?.id ? "updated" : "created"} successfully.`
@@ -213,7 +327,7 @@ export function AddAssistantModal({ open, onOpenChange, initialData, onSuccess }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             {formData.assistantType === "voice" ? (
@@ -305,33 +419,54 @@ export function AddAssistantModal({ open, onOpenChange, initialData, onSuccess }
               <h4 className="font-medium text-blue-700 dark:text-blue-300 flex items-center gap-2">
                 <Mic className="h-4 w-4" /> Voice Settings
               </h4>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="phoneNumber">Twilio Phone Number *</Label>
-                  <Input
-                    id="phoneNumber"
-                    placeholder="+1234567890"
-                    value={formData.phoneNumber}
-                    onChange={(e) => handleChange("phoneNumber", e.target.value)}
-                  />
-                  <p className="text-xs text-muted-foreground">Must be a verified Twilio number</p>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="voice">ElevenLabs Voice</Label>
-                  <Select value={formData.elevenLabsVoiceId} onValueChange={(v) => handleChange("elevenLabsVoiceId", v)}>
-                    <SelectTrigger id="voice">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {DEFAULT_VOICES.map((voice) => (
-                        <SelectItem key={voice.id} value={voice.id}>
-                          {voice.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="phoneNumber">Twilio Phone Number *</Label>
+                <Input
+                  id="phoneNumber"
+                  placeholder="+1234567890"
+                  value={formData.phoneNumber}
+                  onChange={(e) => handleChange("phoneNumber", e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">Enter a Twilio number from your account. It will be validated automatically.</p>
               </div>
+
+              <div className="space-y-3">
+                <Label>ElevenLabs Voice</Label>
+                <Tabs value={formData.voiceSelectionMode} onValueChange={(v) => handleChange("voiceSelectionMode", v as "preset" | "custom")}>
+                  <TabsList className="grid w-full grid-cols-2">
+                    <TabsTrigger value="preset">Preset Voices</TabsTrigger>
+                    <TabsTrigger value="custom">Custom Voice ID</TabsTrigger>
+                  </TabsList>
+                  <TabsContent value="preset" className="mt-3">
+                    <Select value={formData.elevenLabsVoiceId} onValueChange={(v) => handleChange("elevenLabsVoiceId", v)}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {DEFAULT_VOICES.map((voice) => (
+                          <SelectItem key={voice.id} value={voice.id}>
+                            {voice.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </TabsContent>
+                  <TabsContent value="custom" className="mt-3">
+                    <div className="space-y-2">
+                      <Input
+                        placeholder="Enter ElevenLabs Voice ID (e.g., 21m00Tcm4TlvDq8ikWAM)"
+                        value={formData.customVoiceId}
+                        onChange={(e) => handleChange("customVoiceId", e.target.value)}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Find voice IDs in your <a href="https://elevenlabs.io/voice-library" target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">ElevenLabs Voice Library</a>
+                      </p>
+                    </div>
+                  </TabsContent>
+                </Tabs>
+              </div>
+
               <div className="space-y-2">
                 <Label htmlFor="firstMessage">First Message (Greeting)</Label>
                 <Input
@@ -353,7 +488,7 @@ export function AddAssistantModal({ open, onOpenChange, initialData, onSuccess }
                   <button type="button" className="inline-flex"><HelpCircle className="h-4 w-4 text-muted-foreground" /></button>
                 </TooltipTrigger>
                 <TooltipContent className="max-w-80">
-                  <p>Instructions that define how the assistant behaves, its personality, and what information it should provide.</p>
+                  <p>Instructions that define how the assistant behaves. This is combined with the universal prompt.</p>
                 </TooltipContent>
               </Tooltip>
             </div>
@@ -364,6 +499,68 @@ export function AddAssistantModal({ open, onOpenChange, initialData, onSuccess }
               onChange={(e) => handleChange("prompt", e.target.value)}
               className="min-h-[120px]"
             />
+          </div>
+
+          {/* Knowledge Base */}
+          <div className="space-y-4 p-4 bg-purple-50/50 dark:bg-purple-950/20 rounded-xl border border-purple-200 dark:border-purple-900">
+            <div className="flex items-center justify-between">
+              <h4 className="font-medium text-purple-700 dark:text-purple-300 flex items-center gap-2">
+                <FileText className="h-4 w-4" /> Knowledge Base
+              </h4>
+              <Switch
+                checked={formData.kbEnabled}
+                onCheckedChange={(v) => handleChange("kbEnabled", !!v)}
+              />
+            </div>
+
+            {formData.kbEnabled && (
+              <div className="space-y-4">
+                {/* File Upload */}
+                <div className="space-y-2">
+                  <Label>Upload Document (TXT, PDF, DOCX)</Label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept=".txt,.pdf,.docx"
+                      onChange={handleFileSelect}
+                      className="hidden"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="flex-1"
+                    >
+                      <Upload className="h-4 w-4 mr-2" />
+                      Choose File
+                    </Button>
+                    {formData.kbFile && (
+                      <div className="flex items-center gap-2 px-3 py-2 bg-purple-100 dark:bg-purple-900/30 rounded-lg">
+                        <FileText className="h-4 w-4 text-purple-600" />
+                        <span className="text-sm text-purple-700 dark:text-purple-300 max-w-[150px] truncate">
+                          {formData.kbFile.name}
+                        </span>
+                        <button type="button" onClick={removeFile} className="text-purple-500 hover:text-purple-700">
+                          <X className="h-4 w-4" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Text Input */}
+                <div className="space-y-2">
+                  <Label>Or Paste Knowledge Text</Label>
+                  <Textarea
+                    placeholder="Paste FAQ content, product information, or any text the assistant should know..."
+                    value={formData.kbText}
+                    onChange={(e) => handleChange("kbText", e.target.value)}
+                    className="min-h-[100px]"
+                  />
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Model Settings */}
@@ -407,28 +604,32 @@ export function AddAssistantModal({ open, onOpenChange, initialData, onSuccess }
             </div>
           </div>
 
-          {/* Feature Toggles */}
-          <div className="grid grid-cols-2 gap-4">
-            <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
-              <Label htmlFor="kbEnabled" className="cursor-pointer">Knowledge Base</Label>
-              <Switch id="kbEnabled" checked={formData.kbEnabled} onCheckedChange={(v) => handleChange("kbEnabled", !!v)} />
-            </div>
-            <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
+          {/* Auto-scoring */}
+          <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
+            <div>
               <Label htmlFor="autoScore" className="cursor-pointer">Auto-scoring</Label>
-              <Switch id="autoScore" checked={formData.autoScore} onCheckedChange={(v) => handleChange("autoScore", !!v)} />
+              <p className="text-xs text-muted-foreground">Automatically score conversations using governance rubric</p>
             </div>
+            <Switch id="autoScore" checked={formData.autoScore} onCheckedChange={(v) => handleChange("autoScore", !!v)} />
           </div>
 
           <DialogFooter className="gap-2">
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={isSubmitting}>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={isSubmitting || isUploadingKb}>
               Cancel
             </Button>
             <Button
               type="submit"
-              disabled={isSubmitting}
+              disabled={isSubmitting || isUploadingKb}
               className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700"
             >
-              {isSubmitting ? "Saving..." : initialData?.id ? "Save Changes" : "Create Assistant"}
+              {isSubmitting || isUploadingKb ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  {isUploadingKb ? "Uploading KB..." : "Saving..."}
+                </>
+              ) : (
+                initialData?.id ? "Save Changes" : "Create Assistant"
+              )}
             </Button>
           </DialogFooter>
         </form>

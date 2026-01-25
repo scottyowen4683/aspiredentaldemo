@@ -187,7 +187,7 @@ export default function SuperAdminOrganizationDashboard() {
 
           <Card className="shadow-card">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">VAPI Costs</CardTitle>
+              <CardTitle className="text-sm font-medium">Platform Costs</CardTitle>
               <Server className="h-4 w-4 text-green-600" />
             </CardHeader>
             <CardContent>
@@ -343,7 +343,7 @@ export default function SuperAdminOrganizationDashboard() {
                   <Progress value={costBreakdownPercentages.ttsStC} className="h-2" />
                   
                   <div className="flex justify-between items-center">
-                    <span className="text-sm font-medium">VAPI Platform</span>
+                    <span className="text-sm font-medium">Voice Platform</span>
                     <div className="flex items-center space-x-2">
                       <span className="text-sm">${detailedCostBreakdown.vapi.toFixed(2)}</span>
                       <Badge variant="outline">{costBreakdownPercentages.vapi}%</Badge>

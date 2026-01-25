@@ -207,7 +207,7 @@ export const CostTracker: React.FC<CostTrackerProps> = ({
             
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <span className="text-sm text-muted-foreground">VAPI</span>
+                <span className="text-sm text-muted-foreground">Platform</span>
                 <span className="text-sm font-medium text-foreground">{breakdown.vapi}%</span>
               </div>
               <Progress value={breakdown.vapi} className="h-2" />

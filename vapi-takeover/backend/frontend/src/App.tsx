@@ -30,6 +30,9 @@ import Users from "./pages/Users";
 import AuditLogs from "./pages/AuditLogs";
 import EnrollMFA from "./components/MFA/EnrollMFA";
 import AuthMFA from "./components/MFA/AuthMFA";
+import Campaigns from "./pages/Campaigns";
+import KnowledgeBase from "./pages/KnowledgeBase";
+import Settings from "./pages/Settings";
 
 // Debug flag - set to true to use minimal app for testing
 const DEBUG_MINIMAL_APP = false;
@@ -230,6 +233,30 @@ const App = () => {
                 element={
                   <ProtectedRoute allowedRoles={["super_admin"]}>
                     <AuditLogs />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/campaigns"
+                element={
+                  <ProtectedRoute allowedRoles={["super_admin", "org_admin"]}>
+                    <Campaigns />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/knowledge-base"
+                element={
+                  <ProtectedRoute allowedRoles={["super_admin", "org_admin"]}>
+                    <KnowledgeBase />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/settings"
+                element={
+                  <ProtectedRoute allowedRoles={["super_admin"]}>
+                    <Settings />
                   </ProtectedRoute>
                 }
               />

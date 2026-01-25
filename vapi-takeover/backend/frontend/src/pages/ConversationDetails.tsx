@@ -855,7 +855,7 @@ export default function ConversationDetails() {
                     )}
                     {costBreakdown?.vapi !== undefined && costBreakdown.vapi > 0 && (
                       <div className="flex justify-between items-center text-sm">
-                        <span className="truncate">Vapi Platform</span>
+                        <span className="truncate">Voice Platform</span>
                         <span className="font-mono flex-shrink-0">{formatCurrency(costBreakdown?.vapi)}</span>
                       </div>
                     )}

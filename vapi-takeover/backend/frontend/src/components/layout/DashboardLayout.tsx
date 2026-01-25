@@ -14,6 +14,8 @@ import {
   Sun,
   Moon,
   FileText,
+  Phone,
+  BookOpen,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState, useEffect, useRef } from "react";
@@ -83,6 +85,8 @@ export function DashboardLayout({ children, userRole = "org_admin", userName = "
     { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard, roles: ["super_admin", "org_admin"] },
     { name: "Conversations", href: "/conversations", icon: MessageSquare, roles: ["super_admin", "org_admin"] },
     { name: "Assistants", href: "/assistants", icon: Bot, roles: ["super_admin", "org_admin"] },
+    { name: "Campaigns", href: "/campaigns", icon: Phone, roles: ["super_admin", "org_admin"] },
+    { name: "Knowledge Base", href: "/knowledge-base", icon: BookOpen, roles: ["super_admin", "org_admin"] },
     { name: "Review Queue", href: "/review-queue", icon: Flag, roles: ["super_admin", "org_admin"] },
     // Organizations should be visible to both super_admin (manage all orgs)
     // and org_admin (see their assigned org). The Organizations page will
@@ -94,9 +98,8 @@ export function DashboardLayout({ children, userRole = "org_admin", userName = "
     { name: "Users", href: "/users", icon: Users, roles: ["super_admin"] },
     // Audit Logs: only visible to super_admin
     { name: "Audit Logs", href: "/audit-logs", icon: FileText, roles: ["super_admin"] },
-
-
-  
+    // Settings: only visible to super_admin
+    { name: "Settings", href: "/settings", icon: Settings, roles: ["super_admin"] },
   ];
 
   // Determine which nav items to show.
@@ -107,7 +110,7 @@ export function DashboardLayout({ children, userRole = "org_admin", userName = "
 
   // Further reduce for org_admin on dashboard page
   if (userRole === "org_admin" && location.pathname === "/dashboard") {
-    const allowedNames = ["Dashboard", "Conversations", "Assistants", "Review Queue", "Organizations",];
+    const allowedNames = ["Dashboard", "Conversations", "Assistants", "Campaigns", "Knowledge Base", "Review Queue", "Organizations",];
     filteredNavigation = filteredNavigation.filter((item) => allowedNames.includes(item.name));
   }
 

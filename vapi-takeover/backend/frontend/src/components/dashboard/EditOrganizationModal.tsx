@@ -417,15 +417,15 @@ export function EditOrganizationModal({ open, onOpenChange, organization, onSave
 
           <TabsContent value="webhook">
             <div className="space-y-6 py-4">
-              {/* VAPI Section */}
+              {/* Voice Platform Section */}
               <div className="space-y-3">
-                <h3 className="text-sm font-medium text-foreground">VAPI Integration</h3>
+                <h3 className="text-sm font-medium text-foreground">Voice Platform Integration</h3>
                 <div className="space-y-3">
                   <div>
                     <Label className="text-xs text-muted-foreground">Webhook URL</Label>
                     <div className="flex items-center space-x-2 mt-1">
                       <Input readOnly value={webhookUrls.vapi} className="flex-1 font-mono text-xs break-all" />
-                      <Button variant="ghost" size="icon" className="flex-shrink-0" onClick={async () => { try { await navigator.clipboard.writeText(webhookUrls.vapi); toast({ title: 'Copied', description: 'VAPI webhook URL copied to clipboard.' }); } catch (e) { toast({ title: 'Error', description: 'Clipboard not available', variant: 'destructive' }); } }}>
+                      <Button variant="ghost" size="icon" className="flex-shrink-0" onClick={async () => { try { await navigator.clipboard.writeText(webhookUrls.vapi); toast({ title: 'Copied', description: 'Voice webhook URL copied to clipboard.' }); } catch (e) { toast({ title: 'Error', description: 'Clipboard not available', variant: 'destructive' }); } }}>
                         <Copy className="h-4 w-4" />
                       </Button>
                     </div>
@@ -466,7 +466,7 @@ export function EditOrganizationModal({ open, onOpenChange, organization, onSave
                           }
                           try { 
                             await navigator.clipboard.writeText(vapiSecret); 
-                            toast({ title: 'Copied', description: 'VAPI secret copied to clipboard.' }); 
+                            toast({ title: 'Copied', description: 'Voice secret copied to clipboard.' }); 
                           } catch (e) { 
                             toast({ title: 'Error', description: 'Clipboard not available', variant: 'destructive' }); 
                           } 
@@ -491,15 +491,15 @@ export function EditOrganizationModal({ open, onOpenChange, organization, onSave
               </div>
 
               <div className="border-t pt-4">
-                {/* GHL Section */}
+                {/* CRM Integration Section */}
               <div className="space-y-3">
-                <h3 className="text-sm font-medium text-foreground">GHL Integration</h3>
+                <h3 className="text-sm font-medium text-foreground">CRM Integration</h3>
                 <div className="space-y-3">
                   <div>
                     <Label className="text-xs text-muted-foreground">Webhook URL</Label>
                     <div className="flex items-center space-x-2 mt-1">
                       <Input readOnly value={webhookUrls.ghl} className="flex-1 font-mono text-xs break-all" />
-                      <Button variant="ghost" size="icon" className="flex-shrink-0" onClick={async () => { try { await navigator.clipboard.writeText(webhookUrls.ghl); toast({ title: 'Copied', description: 'GHL webhook URL copied to clipboard.' }); } catch (e) { toast({ title: 'Error', description: 'Clipboard not available', variant: 'destructive' }); } }}>
+                      <Button variant="ghost" size="icon" className="flex-shrink-0" onClick={async () => { try { await navigator.clipboard.writeText(webhookUrls.ghl); toast({ title: 'Copied', description: 'CRM webhook URL copied to clipboard.' }); } catch (e) { toast({ title: 'Error', description: 'Clipboard not available', variant: 'destructive' }); } }}>
                         <Copy className="h-4 w-4" />
                       </Button>
                     </div>
@@ -540,7 +540,7 @@ export function EditOrganizationModal({ open, onOpenChange, organization, onSave
                           }
                           try { 
                             await navigator.clipboard.writeText(ghlSecret); 
-                            toast({ title: 'Copied', description: 'GHL secret copied to clipboard.' }); 
+                            toast({ title: 'Copied', description: 'CRM secret copied to clipboard.' }); 
                           } catch (e) { 
                             toast({ title: 'Error', description: 'Clipboard not available', variant: 'destructive' }); 
                           } 
@@ -570,9 +570,9 @@ export function EditOrganizationModal({ open, onOpenChange, organization, onSave
           <TabsContent value="api">
             <div className="space-y-6 py-4">
               <div className="space-y-4">
-                <h3 className="text-sm font-medium text-foreground">GoHighLevel API Configuration</h3>
+                <h3 className="text-sm font-medium text-foreground">CRM API Configuration</h3>
                 <p className="text-xs text-muted-foreground">
-                  Configure GHL API settings for this organization to enable conversation syncing and processing.
+                  Configure CRM API settings for this organization to enable conversation syncing and processing.
                 </p>
                 
                 <div className="space-y-4">
@@ -581,7 +581,7 @@ export function EditOrganizationModal({ open, onOpenChange, organization, onSave
                     <div className="flex items-center space-x-2 flex-wrap sm:flex-nowrap">
                       <Input
                         id="ghlApiKey"
-                        placeholder="Enter GHL API key"
+                        placeholder="Enter CRM API key"
                         value={ghlApiKey}
                         onChange={(e) => setGhlApiKey(e.target.value)}
                         type={showGhlApiKey ? "text" : "password"}
@@ -604,7 +604,7 @@ export function EditOrganizationModal({ open, onOpenChange, organization, onSave
                     <Label htmlFor="ghlLocationId" className="text-sm">Location ID</Label>
                     <Input
                       id="ghlLocationId"
-                      placeholder="Enter GHL location ID"
+                      placeholder="Enter CRM location ID"
                       value={ghlLocationId}
                       onChange={(e) => setGhlLocationId(e.target.value)}
                       className="w-full"
@@ -616,7 +616,7 @@ export function EditOrganizationModal({ open, onOpenChange, organization, onSave
                     <Label htmlFor="ghlBaseUrl" className="text-sm">Base URL</Label>
                     <Input
                       id="ghlBaseUrl"
-                      placeholder="GHL API base URL"
+                      placeholder="CRM API base URL"
                       value={ghlBaseUrl}
                       onChange={(e) => setGhlBaseUrl(e.target.value)}
                       className="w-full"
