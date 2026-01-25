@@ -7,6 +7,7 @@ import { Input } from "../ui/input";
 import { Button } from "../ui/button";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
+import { useUser } from "@/context/UserContext";
 import QRCode from 'qrcode'
 
 interface EnrollMFAProps {
@@ -16,6 +17,7 @@ interface EnrollMFAProps {
 
 export default function EnrollMFA() {
   const { toast } = useToast();
+  const { refreshUser } = useUser();
   const navigate = useNavigate();
   const [factorId, setFactorId] = useState("");
   const [qrSecret, setQRSecret] = useState(""); // QR code SVG
@@ -136,12 +138,18 @@ useEffect(() => {
         description: "You have successfully enabled Multi-Factor Authentication.",
       });
 
+      // Refresh user data after MFA enrollment
+      await refreshUser();
 
       toast({
         title: "Welcome back!",
         description: "You have successfully logged in.",
       });
-      navigate("/dashboard");
+
+      // Small delay to ensure context is updated
+      setTimeout(() => {
+        navigate("/dashboard");
+      }, 100);
     } catch (err: any) {
       setError(err.message);
     }

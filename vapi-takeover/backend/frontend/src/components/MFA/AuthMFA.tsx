@@ -7,6 +7,7 @@ import { Input } from "../ui/input";
 import { Button } from "../ui/button";
 import { Link, useNavigate } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
+import { useUser } from "@/context/UserContext";
 
 interface AuthMFAProps {
   onSuccess: () => void;
@@ -14,6 +15,7 @@ interface AuthMFAProps {
 
 export default function AuthMFA() {
   const { toast } = useToast();
+  const { refreshUser } = useUser();
 
   const [verifyCode, setVerifyCode] = useState("");
   const [error, setError] = useState("");
@@ -39,12 +41,18 @@ export default function AuthMFA() {
       });
       if (verify.error) throw verify.error;
 
+      // Refresh user data after MFA verification
+      await refreshUser();
+
       toast({
         title: "Welcome back!",
         description: "You have successfully logged in.",
       });
 
-      navigate("/dashboard");
+      // Small delay to ensure context is updated
+      setTimeout(() => {
+        navigate("/dashboard");
+      }, 100);
     } catch (err: any) {
       setError(err.message);
     }
