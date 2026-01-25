@@ -1,0 +1,29 @@
+services:
+  # Backend API Server
+  - type: web
+    name: vapi-takeover-backend
+    env: node
+    region: oregon
+    plan: starter
+    branch: master
+    buildCommand: cd backend && npm install
+    startCommand: cd backend && npm start
+    healthCheckPath: /health
+
+    envVars:
+      - key: NODE_ENV
+        value: production
+
+      - key: PORT
+        value: 10000
+
+      - key: SESSION_TIMEOUT_MS
+        value: 900000
+
+      # Add these in Render dashboard (Settings > Environment):
+      # - OPENAI_API_KEY (your OpenAI key)
+      # - SUPABASE_URL (https://zykdlsvtofzojgojmkdg.supabase.co)
+      # - SUPABASE_SERVICE_KEY (your Supabase service role key)
+      # - TWILIO_ACCOUNT_SID (optional, for voice later)
+      # - TWILIO_AUTH_TOKEN (optional, for voice later)
+      # - ELEVENLABS_API_KEY (optional, for voice later)
