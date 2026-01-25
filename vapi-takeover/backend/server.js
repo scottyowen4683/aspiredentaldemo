@@ -3,8 +3,13 @@ import express from 'express';
 import cors from 'cors';
 import { createServer } from 'http';
 import { WebSocketServer } from 'ws';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
 import dotenv from 'dotenv';
 import logger from './services/logger.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 import supabaseService from './services/supabase-service.js';
 import VoiceHandler from './ai/voice-handler.js';
 
@@ -42,6 +47,11 @@ app.get('/health', (req, res) => {
     uptime: process.uptime(),
     environment: process.env.NODE_ENV
   });
+});
+
+// Serve test chat UI at root
+app.get('/', (req, res) => {
+  res.sendFile(join(__dirname, 'test-chat.html'));
 });
 
 // API Routes

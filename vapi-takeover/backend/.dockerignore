@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+
+# Development files
+.env
+.env.local
+.env.*.local
+
+# Git
+.git/
+.gitignore
+
+# Docs
+*.md
+
+# Keep test-chat.html - it's the UI
+
+# IDE
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Fly.io config (not needed in container)
+fly.toml
