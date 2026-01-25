@@ -66,6 +66,15 @@ app.use('/api/voice', voiceRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/campaigns', campaignsRouter);
 
+// SPA catch-all: serve index.html for all non-API routes (React Router handles client-side routing)
+app.get('*', (req, res, next) => {
+  // Skip API routes and static files
+  if (req.path.startsWith('/api/') || req.path.startsWith('/voice/')) {
+    return next();
+  }
+  res.sendFile(join(__dirname, 'public', 'index.html'));
+});
+
 // WebSocket handler for Twilio Media Streams
 wss.on('connection', async (ws, req) => {
   logger.info('WebSocket connection established');
