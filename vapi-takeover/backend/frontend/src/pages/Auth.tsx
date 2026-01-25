@@ -310,13 +310,13 @@ export default function Auth() {
 
         if (aalData.currentLevel === 'aal1' && aalData.nextLevel === 'aal2') {
           // User has enrolled MFA but not verified yet
-          navigate("/vmf"); // AuthMFA
+          window.location.href = "/vmf"; // AuthMFA
         } else if (aalData.currentLevel === 'aal1' && aalData.nextLevel === 'aal1') {
           // User has not enrolled MFA yet
-          navigate("/emf"); // EnrollMFA
+          window.location.href = "/emf"; // EnrollMFA
         } else {
           // User has already verified MFA
-          navigate("/dashboard");
+          window.location.href = "/dashboard";
         }
       }
 
