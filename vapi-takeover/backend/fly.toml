@@ -1,0 +1,62 @@
+# Fly.io Configuration - Aspire AI Platform
+# Deploy to Sydney, Australia for low latency
+
+app = "aspire-ai-platform"
+primary_region = "syd"  # Sydney, Australia
+
+# Build configuration
+[build]
+
+# Environment variables (non-secret)
+[env]
+  PORT = "8080"
+  NODE_ENV = "production"
+
+# HTTP service configuration
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = false  # Keep always running (important for voice calls)
+  auto_start_machines = true
+  min_machines_running = 1
+
+  # Concurrency limits
+  [http_service.concurrency]
+    type = "connections"
+    hard_limit = 1000
+    soft_limit = 500
+
+  # Health check
+  [[http_service.checks]]
+    interval = "15s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/health"
+
+# VM configuration - shared-cpu-1x is perfect for starter ($7/month)
+[[vm]]
+  size = "shared-cpu-1x"  # 256MB RAM, 1 shared CPU
+  memory = "256mb"
+
+# TCP service for WebSocket support (needed for Twilio Media Streams)
+[[services]]
+  protocol = "tcp"
+  internal_port = 8080
+
+  # HTTP port
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+    force_https = true
+
+  # HTTPS port
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]
+
+  # Concurrency
+  [services.concurrency]
+    type = "connections"
+    hard_limit = 1000
+    soft_limit = 500
