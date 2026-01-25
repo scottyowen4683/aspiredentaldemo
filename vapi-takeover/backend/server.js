@@ -57,6 +57,9 @@ app.get('/', (req, res) => {
   res.sendFile(join(__dirname, 'public', 'index.html'));
 });
 
+// Serve static files from public folder
+app.use(express.static(join(__dirname, 'public')));
+
 // API Routes
 app.use('/api/chat', chatRouter);
 app.use('/api/voice', voiceRouter);
