@@ -1,20 +1,19 @@
 // src/supabaseClient.js
 import { createClient } from '@supabase/supabase-js'
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+// Hardcoded Supabase config (public keys - safe to expose)
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://zykdlsvtofzojgojmkdg.supabase.co';
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp5a2Rsc3Z0b2Z6b2pnb2pta2RnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njg5OTkzMDksImV4cCI6MjA4NDU3NTMwOX0.J_xF_wrCo8S3E7NDKYJdHGNfgAAr7IJA9GGbQNdPaMQ';
 
-// Debug: log if env vars are missing
-if (!supabaseUrl || !supabaseAnonKey) {
-  console.error('Missing Supabase environment variables:', {
-    VITE_SUPABASE_URL: supabaseUrl ? 'set' : 'MISSING',
-    VITE_SUPABASE_ANON_KEY: supabaseAnonKey ? 'set' : 'MISSING'
-  });
-}
+// Debug: log configuration
+console.log('Supabase config:', {
+  url: supabaseUrl,
+  keyPrefix: supabaseAnonKey?.substring(0, 20) + '...'
+});
 
 export const supabase = createClient(
-  supabaseUrl || 'https://placeholder.supabase.co',
-  supabaseAnonKey || 'placeholder-key',
+  supabaseUrl,
+  supabaseAnonKey,
   {
     auth: {
       persistSession: true,
