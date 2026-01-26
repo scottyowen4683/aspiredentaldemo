@@ -1,5 +1,8 @@
 // ai/voice-handler.js - Complete voice pipeline (VAPI replacement)
 import OpenAI from 'openai';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import logger from '../services/logger.js';
 import supabaseService from '../services/supabase-service.js';
 import { streamElevenLabsAudio } from './elevenlabs.js';
@@ -180,29 +183,36 @@ class VoiceHandler {
   }
 
   async transcribeAudio(audioBuffer) {
+    // Write to temp file - most reliable method for OpenAI SDK
+    const tempFile = path.join(os.tmpdir(), `whisper-${this.callSid}-${Date.now()}.wav`);
+
     try {
       // Convert μ-law base64 audio from Twilio to WAV format for Whisper
       const wavBuffer = ulawToWav(audioBuffer);
 
-      logger.debug('Audio converted to WAV', {
+      logger.info('Audio converted to WAV', {
         inputSizeKB: (audioBuffer.length / 1024).toFixed(2),
-        outputSizeKB: (wavBuffer.length / 1024).toFixed(2)
+        outputSizeKB: (wavBuffer.length / 1024).toFixed(2),
+        tempFile
       });
 
-      // Create a File object using Node.js 20+ native File API
-      // OpenAI SDK v4+ accepts File objects directly
-      const file = new File([wavBuffer], 'audio.wav', { type: 'audio/wav' });
+      // Write WAV to temp file
+      fs.writeFileSync(tempFile, wavBuffer);
 
-      // Call Whisper API
+      // Call Whisper API using fs.createReadStream (most reliable)
       const transcription = await openai.audio.transcriptions.create({
-        file: file,
+        file: fs.createReadStream(tempFile),
         model: 'whisper-1',
         language: 'en',
         response_format: 'json'
       });
 
+      logger.info('Whisper transcription complete', {
+        text: transcription.text,
+        textLength: transcription.text?.length
+      });
+
       // Calculate cost (Whisper: $0.006 per minute)
-      // Twilio μ-law is 8kHz, 8-bit mono - calculate duration from original buffer
       const ulawBytes = Buffer.from(audioBuffer, 'base64').length;
       const durationSeconds = ulawBytes / 8000; // 8kHz sample rate
       const whisperCost = (durationSeconds / 60) * 0.006;
@@ -212,8 +222,20 @@ class VoiceHandler {
 
       return transcription.text;
     } catch (error) {
-      logger.error('Whisper transcription failed:', error);
+      logger.error('Whisper transcription failed:', {
+        error: error.message,
+        stack: error.stack
+      });
       throw error;
+    } finally {
+      // Clean up temp file
+      try {
+        if (fs.existsSync(tempFile)) {
+          fs.unlinkSync(tempFile);
+        }
+      } catch (cleanupError) {
+        logger.warn('Failed to clean up temp file:', tempFile);
+      }
     }
   }
 
