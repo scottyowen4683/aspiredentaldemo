@@ -150,21 +150,42 @@ class SupabaseService {
     logger.info('Creating conversation:', { orgId, assistantId, sessionId, channel, customerPhoneNumber });
 
     // Match exact schema: session_id is NOT NULL, channel is enum
+    // Start with required fields only
     const conversationData = {
       org_id: orgId,
       assistant_id: assistantId,
       session_id: sessionId, // Required - NOT NULL
       channel: channel || 'voice', // Enum: likely 'voice', 'chat', 'sms'
       started_at: new Date().toISOString(),
-      transcript: [],
-      customer_phone_number: customerPhoneNumber || null
+      transcript: []
     };
 
-    const { data, error } = await supabase
+    // Try to include customer_phone_number if provided
+    if (customerPhoneNumber) {
+      conversationData.customer_phone_number = customerPhoneNumber;
+    }
+
+    let { data, error } = await supabase
       .from('conversations')
       .insert(conversationData)
       .select()
       .single();
+
+    // If insert failed and we included customer_phone_number, retry without it
+    // (in case the column doesn't exist in the database)
+    if (error && customerPhoneNumber) {
+      logger.warn('Insert failed with customer_phone_number, retrying without it:', error.message);
+      delete conversationData.customer_phone_number;
+
+      const retryResult = await supabase
+        .from('conversations')
+        .insert(conversationData)
+        .select()
+        .single();
+
+      data = retryResult.data;
+      error = retryResult.error;
+    }
 
     if (error) {
       logger.error('Failed to create conversation:', {
