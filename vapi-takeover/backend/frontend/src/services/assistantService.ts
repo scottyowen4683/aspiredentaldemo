@@ -32,6 +32,41 @@ export interface CreateAssistantInput {
 
 export async function createAssistant(input: CreateAssistantInput, userId?: string) {
   try {
+    // Support both camelCase and snake_case inputs (for backwards compatibility)
+    const friendlyName = input.friendlyName ?? input.friendly_name ?? null;
+    const orgId = input.orgId ?? input.org_id ?? null;
+    const autoScore = input.autoScore ?? input.auto_score ?? true;
+    const botType = input.bot_type ?? 'voice';
+    const phoneNumber = input.phone_number ?? null;
+
+    // Validate Twilio phone number for voice assistants
+    if (botType === 'voice' && phoneNumber) {
+      try {
+        const validationResponse = await fetch('/api/admin/validate-twilio-number', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone_number: phoneNumber })
+        });
+
+        const validationResult = await validationResponse.json();
+
+        if (!validationResult.valid) {
+          return {
+            success: false,
+            error: {
+              message: validationResult.error || `Phone number ${phoneNumber} is not a valid Twilio number in your account. Please add it to your Twilio account first.`
+            }
+          };
+        }
+
+        // Log successful validation
+        console.log('Twilio number validated:', validationResult);
+      } catch (validationError) {
+        console.warn('Twilio validation failed, proceeding anyway:', validationError);
+        // Allow creation to proceed if validation service is unavailable
+      }
+    }
+
     let kb_path: string | null = null;
 
     if (input.kbType === "Link" && input.kbUrl) {
@@ -61,10 +96,6 @@ export async function createAssistant(input: CreateAssistantInput, userId?: stri
       kb_path = publicUrlData.publicUrl;
     }
 
-    // Support both camelCase and snake_case inputs (for backwards compatibility)
-    const friendlyName = input.friendlyName ?? input.friendly_name ?? null;
-    const orgId = input.orgId ?? input.org_id ?? null;
-    const autoScore = input.autoScore ?? input.auto_score ?? true;
     const providerRaw = input.provider ?? 'aspire';
 
     // Normalize provider to lowercase to match Postgres enum values (enums are case-sensitive)
@@ -81,8 +112,8 @@ export async function createAssistant(input: CreateAssistantInput, userId?: stri
       transcript_source: input.transcriptSource ?? null,
       auto_score: autoScore,
       // Support additional fields from AddAssistantModal
-      bot_type: input.bot_type ?? null,
-      phone_number: input.phone_number ?? null,
+      bot_type: botType,
+      phone_number: phoneNumber,
       elevenlabs_voice_id: input.elevenlabs_voice_id ?? null,
       model: input.model ?? null,
       temperature: input.temperature ?? null,
@@ -194,9 +225,42 @@ export async function updateAssistant(id: string, input: CreateAssistantInput, u
     // Get original assistant data for audit comparison
     const { data: originalAssistant } = await supabase
       .from("assistants")
-      .select("friendly_name, provider, org_id, kb_path, auto_score, rubric")
+      .select("friendly_name, provider, org_id, kb_path, auto_score, rubric, phone_number, bot_type")
       .eq("id", id)
       .single();
+
+    // Support both camelCase and snake_case inputs
+    const friendlyName = input.friendlyName ?? input.friendly_name ?? null;
+    const orgId = input.orgId ?? input.org_id ?? null;
+    const autoScore = input.autoScore ?? input.auto_score ?? true;
+    const botType = input.bot_type ?? originalAssistant?.bot_type ?? 'voice';
+    const phoneNumber = input.phone_number ?? null;
+
+    // Validate Twilio phone number if it changed for voice assistants
+    if (botType === 'voice' && phoneNumber && phoneNumber !== originalAssistant?.phone_number) {
+      try {
+        const validationResponse = await fetch('/api/admin/validate-twilio-number', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone_number: phoneNumber })
+        });
+
+        const validationResult = await validationResponse.json();
+
+        if (!validationResult.valid) {
+          return {
+            success: false,
+            error: {
+              message: validationResult.error || `Phone number ${phoneNumber} is not a valid Twilio number in your account.`
+            }
+          };
+        }
+
+        console.log('Twilio number validated for update:', validationResult);
+      } catch (validationError) {
+        console.warn('Twilio validation failed, proceeding anyway:', validationError);
+      }
+    }
 
     let kb_path: string | null = null;
 
@@ -215,10 +279,6 @@ export async function updateAssistant(id: string, input: CreateAssistantInput, u
       kb_path = publicUrlData.publicUrl;
     }
 
-    // Support both camelCase and snake_case inputs
-    const friendlyName = input.friendlyName ?? input.friendly_name ?? null;
-    const orgId = input.orgId ?? input.org_id ?? null;
-    const autoScore = input.autoScore ?? input.auto_score ?? true;
     const providerRaw = input.provider ?? 'aspire';
     const normalizedProvider = typeof providerRaw === "string" ? providerRaw.trim().toLowerCase() : providerRaw;
 
@@ -233,8 +293,8 @@ export async function updateAssistant(id: string, input: CreateAssistantInput, u
       transcript_source: input.transcriptSource ?? null,
       auto_score: autoScore,
       // Support additional fields from AddAssistantModal
-      bot_type: input.bot_type ?? null,
-      phone_number: input.phone_number ?? null,
+      bot_type: botType,
+      phone_number: phoneNumber,
       elevenlabs_voice_id: input.elevenlabs_voice_id ?? null,
       model: input.model ?? null,
       temperature: input.temperature ?? null,
