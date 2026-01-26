@@ -116,15 +116,22 @@ wss.on('connection', async (ws, req) => {
           // This records both sides of the conversation (dual-channel)
           try {
             const baseUrl = process.env.BASE_URL || `https://${process.env.FLY_APP_NAME}.fly.dev`;
-            await twilioClient.calls(callSid).recordings.create({
+            const recordingCallbackUrl = `${baseUrl}/api/voice/recording`;
+            logger.info('Starting recording with callback URL', { callSid, recordingCallbackUrl });
+
+            const recording = await twilioClient.calls(callSid).recordings.create({
               recordingChannels: 'dual',
-              recordingStatusCallback: `${baseUrl}/api/voice/recording`,
+              recordingStatusCallback: recordingCallbackUrl,
               recordingStatusCallbackMethod: 'POST'
             });
-            logger.info('Recording started for call', { callSid });
+            logger.info('Recording started successfully', { callSid, recordingSid: recording.sid });
           } catch (recordError) {
             // Don't fail the call if recording fails
-            logger.warn('Failed to start recording (continuing without):', recordError.message);
+            logger.error('Failed to start recording:', {
+              error: recordError.message,
+              code: recordError.code,
+              callSid
+            });
           }
 
           // Initialize voice handler

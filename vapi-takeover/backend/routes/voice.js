@@ -213,36 +213,50 @@ router.post('/recording', async (req, res) => {
         updated_at: new Date().toISOString()
       };
 
-      const { error } = await supabaseService.client
+      logger.info('Attempting to save recording URL', {
+        callSid: CallSid,
+        recordingUrl: RecordingUrl,
+        updateData
+      });
+
+      const { data, error } = await supabaseService.client
         .from('conversations')
         .update(updateData)
-        .eq('session_id', CallSid);
+        .eq('session_id', CallSid)
+        .select();
 
       if (error) {
         // If recording_url column doesn't exist, try without it
         logger.warn('Failed to save recording (trying without recording_url):', error.message);
-        const { error: retryError } = await supabaseService.client
+        const { data: retryData, error: retryError } = await supabaseService.client
           .from('conversations')
           .update({
             duration_seconds: parseInt(RecordingDuration) || 0,
             updated_at: new Date().toISOString()
           })
-          .eq('session_id', CallSid);
+          .eq('session_id', CallSid)
+          .select();
 
         if (retryError) {
           logger.error('Failed to save recording duration:', retryError);
         } else {
           logger.info('Recording duration saved (recording_url column may not exist)', {
             callSid: CallSid,
-            duration: RecordingDuration
+            duration: RecordingDuration,
+            rowsUpdated: retryData?.length || 0
           });
         }
       } else {
         logger.info('Recording saved to conversation', {
           callSid: CallSid,
           recordingUrl: RecordingUrl,
-          duration: RecordingDuration
+          duration: RecordingDuration,
+          rowsUpdated: data?.length || 0
         });
+
+        if (!data || data.length === 0) {
+          logger.warn('No conversation found with session_id', { callSid: CallSid });
+        }
       }
     }
 
