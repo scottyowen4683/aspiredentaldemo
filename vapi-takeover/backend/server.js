@@ -6,6 +6,7 @@ import { WebSocketServer } from 'ws';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import dotenv from 'dotenv';
+import twilio from 'twilio';
 import logger from './services/logger.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -25,6 +26,12 @@ dotenv.config();
 const app = express();
 const server = createServer(app);
 const wss = new WebSocketServer({ server, path: '/voice/stream' });
+
+// Initialize Twilio client for recording
+const twilioClient = twilio(
+  process.env.TWILIO_ACCOUNT_SID,
+  process.env.TWILIO_AUTH_TOKEN
+);
 
 // Middleware
 app.use(cors());
@@ -97,6 +104,7 @@ wss.on('connection', async (ws, req) => {
 
           // Get assistant ID from custom parameters (set by Twilio webhook)
           const assistantId = data.start.customParameters?.assistantId;
+          const callSid = data.start.callSid;
 
           if (!assistantId) {
             logger.error('No assistantId in call parameters');
@@ -104,8 +112,23 @@ wss.on('connection', async (ws, req) => {
             return;
           }
 
+          // Start recording for this call via Twilio REST API
+          // This records both sides of the conversation (dual-channel)
+          try {
+            const baseUrl = process.env.BASE_URL || `https://${process.env.FLY_APP_NAME}.fly.dev`;
+            await twilioClient.calls(callSid).recordings.create({
+              recordingChannels: 'dual',
+              recordingStatusCallback: `${baseUrl}/api/voice/recording`,
+              recordingStatusCallbackMethod: 'POST'
+            });
+            logger.info('Recording started for call', { callSid });
+          } catch (recordError) {
+            // Don't fail the call if recording fails
+            logger.warn('Failed to start recording (continuing without):', recordError.message);
+          }
+
           // Initialize voice handler
-          voiceHandler = new VoiceHandler(data.start.callSid, assistantId);
+          voiceHandler = new VoiceHandler(callSid, assistantId);
           const streamSid = data.streamSid; // Capture for use in callbacks
 
           try {
@@ -123,7 +146,14 @@ wss.on('connection', async (ws, req) => {
               'EXAVITQu4vr4xnSDxMaL'; // Default: "Sarah" voice
 
             try {
-              const greetingAudio = await streamElevenLabsAudio(greeting, voiceId);
+              // Get background sound setting from assistant
+              const backgroundSound = voiceHandler.assistant.background_sound || 'none';
+              const backgroundVolume = voiceHandler.assistant.background_volume || 0.15;
+
+              const greetingAudio = await streamElevenLabsAudio(greeting, voiceId, {
+                backgroundSound,
+                backgroundVolume
+              });
 
               logger.info('ElevenLabs greeting received', {
                 audioSizeKB: (greetingAudio.length / 1024).toFixed(2),

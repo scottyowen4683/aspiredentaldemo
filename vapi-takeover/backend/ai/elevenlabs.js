@@ -1,9 +1,131 @@
 // ai/elevenlabs.js - ElevenLabs Text-to-Speech integration with streaming
 import axios from 'axios';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import logger from '../services/logger.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
 const ELEVENLABS_API_URL = 'https://api.elevenlabs.io/v1';
+
+// Background audio cache
+let backgroundAudioCache = {};
+
+/**
+ * Generate synthetic background noise (μ-law 8kHz format)
+ * Creates 10 seconds of loopable ambient noise
+ * @param {string} type - Type: 'office' (soft murmur), 'cafe' (busier), 'white'
+ * @returns {Buffer}
+ */
+function generateBackgroundNoise(type) {
+  const sampleRate = 8000;
+  const duration = 10; // 10 seconds of loopable audio
+  const samples = sampleRate * duration;
+  const buffer = Buffer.alloc(samples);
+
+  // Parameters based on type
+  let noiseLevel = 0.03; // Very subtle
+  let lowPassFreq = 500;
+
+  switch (type) {
+    case 'office':
+      noiseLevel = 0.025; // Very subtle office hum
+      lowPassFreq = 400;
+      break;
+    case 'cafe':
+      noiseLevel = 0.04; // Slightly more noticeable
+      lowPassFreq = 600;
+      break;
+    case 'white':
+    default:
+      noiseLevel = 0.02;
+      lowPassFreq = 300;
+  }
+
+  // Generate pink-ish noise with low-pass filtering
+  let lastSample = 127; // μ-law silence
+  for (let i = 0; i < samples; i++) {
+    // Generate noise
+    const noise = (Math.random() - 0.5) * 2 * noiseLevel * 128;
+
+    // Simple low-pass filter (smoothing)
+    const alpha = lowPassFreq / (lowPassFreq + sampleRate);
+    const filtered = lastSample + alpha * (127 + noise - lastSample);
+    lastSample = filtered;
+
+    // Convert to μ-law range (0-255, 127 = silence)
+    buffer[i] = Math.max(0, Math.min(255, Math.round(filtered)));
+  }
+
+  logger.info(`Generated ${type} background noise`, { samples, duration: `${duration}s` });
+  return buffer;
+}
+
+/**
+ * Load background audio file (μ-law 8kHz format)
+ * Falls back to generated noise if file doesn't exist
+ * @param {string} type - Type of background: 'office', 'cafe', 'none'
+ * @returns {Buffer|null}
+ */
+function loadBackgroundAudio(type) {
+  if (type === 'none' || !type) return null;
+  if (backgroundAudioCache[type]) return backgroundAudioCache[type];
+
+  // Try to load from file first
+  try {
+    const audioDir = path.join(__dirname, '..', 'audio');
+    const audioPath = path.join(audioDir, `background-${type}.ulaw`);
+
+    if (fs.existsSync(audioPath)) {
+      backgroundAudioCache[type] = fs.readFileSync(audioPath);
+      logger.info(`Loaded background audio from file: ${type}`, { size: backgroundAudioCache[type].length });
+      return backgroundAudioCache[type];
+    }
+  } catch (error) {
+    logger.warn(`Failed to load background audio file ${type}:`, error.message);
+  }
+
+  // Generate synthetic noise as fallback
+  logger.info(`Generating synthetic background audio: ${type}`);
+  backgroundAudioCache[type] = generateBackgroundNoise(type);
+  return backgroundAudioCache[type];
+}
+
+/**
+ * Mix TTS audio with background noise (both μ-law 8kHz)
+ * @param {Buffer} ttsAudio - Main TTS audio
+ * @param {Buffer} backgroundAudio - Background audio loop
+ * @param {number} backgroundVolume - 0.0 to 1.0 (default 0.15 = 15%)
+ * @returns {Buffer}
+ */
+function mixAudioWithBackground(ttsAudio, backgroundAudio, backgroundVolume = 0.15) {
+  if (!backgroundAudio) return ttsAudio;
+
+  const mixed = Buffer.alloc(ttsAudio.length);
+
+  for (let i = 0; i < ttsAudio.length; i++) {
+    // Get background sample (loop if needed)
+    const bgIndex = i % backgroundAudio.length;
+
+    // μ-law decoding (approximate linear mixing)
+    // μ-law values are 0-255, with 127 being silence
+    const ttsSample = ttsAudio[i];
+    const bgSample = backgroundAudio[bgIndex];
+
+    // Simple weighted average for μ-law (not perfect but works well enough)
+    // Heavily weight the TTS audio, add subtle background
+    const mixedSample = Math.round(
+      ttsSample * (1 - backgroundVolume * 0.5) + bgSample * backgroundVolume * 0.5
+    );
+
+    mixed[i] = Math.max(0, Math.min(255, mixedSample));
+  }
+
+  return mixed;
+}
 
 /**
  * Stream audio from ElevenLabs TTS - returns chunks as they're generated
@@ -11,9 +133,15 @@ const ELEVENLABS_API_URL = 'https://api.elevenlabs.io/v1';
  * @param {string} text - Text to convert to speech
  * @param {string} voiceId - ElevenLabs voice ID
  * @param {function} onChunk - Callback for each audio chunk: (chunk: Buffer) => void
+ * @param {Object} options - Optional settings
+ * @param {string} options.backgroundSound - Background sound type: 'office', 'cafe', 'none'
+ * @param {number} options.backgroundVolume - Background volume 0.0-1.0 (default 0.15)
  * @returns {Promise<void>}
  */
-export async function streamElevenLabsTTS(text, voiceId, onChunk) {
+export async function streamElevenLabsTTS(text, voiceId, onChunk, options = {}) {
+  const { backgroundSound = 'none', backgroundVolume = 0.15 } = options;
+  const bgAudio = backgroundSound !== 'none' ? loadBackgroundAudio(backgroundSound) : null;
+  let bgOffset = 0; // Track position in background audio loop
   try {
     if (!ELEVENLABS_API_KEY) {
       throw new Error('ELEVENLABS_API_KEY not configured');
@@ -60,11 +188,27 @@ export async function streamElevenLabsTTS(text, voiceId, onChunk) {
           firstChunkTime = Date.now();
           logger.info('ElevenLabs first chunk received', {
             latencyMs: firstChunkTime - startTime,
-            chunkSize: chunk.length
+            chunkSize: chunk.length,
+            backgroundSound: backgroundSound || 'none'
           });
         }
         totalBytes += chunk.length;
-        onChunk(chunk);
+
+        // Mix with background audio if available
+        let outputChunk = chunk;
+        if (bgAudio) {
+          outputChunk = Buffer.alloc(chunk.length);
+          for (let i = 0; i < chunk.length; i++) {
+            const bgIndex = (bgOffset + i) % bgAudio.length;
+            const mixedSample = Math.round(
+              chunk[i] * (1 - backgroundVolume * 0.5) + bgAudio[bgIndex] * backgroundVolume * 0.5
+            );
+            outputChunk[i] = Math.max(0, Math.min(255, mixedSample));
+          }
+          bgOffset = (bgOffset + chunk.length) % bgAudio.length;
+        }
+
+        onChunk(outputChunk);
       });
 
       response.data.on('end', () => {
@@ -100,9 +244,13 @@ export async function streamElevenLabsTTS(text, voiceId, onChunk) {
  * Generate audio from ElevenLabs TTS (non-streaming, for greeting)
  * @param {string} text - Text to convert to speech
  * @param {string} voiceId - ElevenLabs voice ID
+ * @param {Object} options - Optional settings
+ * @param {string} options.backgroundSound - Background sound type: 'office', 'cafe', 'none'
+ * @param {number} options.backgroundVolume - Background volume 0.0-1.0 (default 0.15)
  * @returns {Promise<Buffer>} Audio buffer (μ-law, 8kHz for Twilio Media Streams)
  */
-export async function streamElevenLabsAudio(text, voiceId) {
+export async function streamElevenLabsAudio(text, voiceId, options = {}) {
+  const { backgroundSound = 'none', backgroundVolume = 0.15 } = options;
   try {
     if (!ELEVENLABS_API_KEY) {
       throw new Error('ELEVENLABS_API_KEY not configured');
@@ -140,13 +288,22 @@ export async function streamElevenLabsAudio(text, voiceId) {
       }
     );
 
-    const audioBuffer = Buffer.from(response.data);
+    let audioBuffer = Buffer.from(response.data);
+
+    // Mix with background audio if requested
+    if (backgroundSound && backgroundSound !== 'none') {
+      const bgAudio = loadBackgroundAudio(backgroundSound);
+      if (bgAudio) {
+        audioBuffer = mixAudioWithBackground(audioBuffer, bgAudio, backgroundVolume);
+        logger.info('Mixed TTS with background audio', { type: backgroundSound, volume: backgroundVolume });
+      }
+    }
 
     logger.info('ElevenLabs TTS generated', {
       audioSizeBytes: audioBuffer.length,
       audioSizeKB: (audioBuffer.length / 1024).toFixed(2),
       durationEstimate: `${(audioBuffer.length / 8000).toFixed(1)}s`,
-      firstBytesHex: audioBuffer.slice(0, 16).toString('hex')
+      backgroundSound: backgroundSound || 'none'
     });
 
     return audioBuffer;

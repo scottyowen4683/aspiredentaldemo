@@ -439,8 +439,15 @@ class VoiceHandler {
         throw new Error('No ElevenLabs voice configured');
       }
 
+      // Get background sound setting from assistant config (default: none)
+      const backgroundSound = this.assistant.background_sound || 'none';
+      const backgroundVolume = this.assistant.background_volume || 0.15;
+
       // Get audio from ElevenLabs (non-streaming for backward compatibility)
-      const audioStream = await streamElevenLabsAudio(text, voiceId);
+      const audioStream = await streamElevenLabsAudio(text, voiceId, {
+        backgroundSound,
+        backgroundVolume
+      });
 
       // Calculate cost (ElevenLabs: $0.00003 per character for Turbo v2.5)
       const elevenLabsCost = text.length * 0.00003;
@@ -569,8 +576,15 @@ class VoiceHandler {
         throw new Error('No ElevenLabs voice configured');
       }
 
+      // Get background sound setting from assistant config
+      const backgroundSound = this.assistant.background_sound || 'none';
+      const backgroundVolume = this.assistant.background_volume || 0.15;
+
       // Stream audio from ElevenLabs - chunks go directly to callback
-      await streamElevenLabsTTS(text, voiceId, onAudioChunk);
+      await streamElevenLabsTTS(text, voiceId, onAudioChunk, {
+        backgroundSound,
+        backgroundVolume
+      });
 
       // Calculate cost
       const elevenLabsCost = text.length * 0.00003;
