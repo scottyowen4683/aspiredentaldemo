@@ -11,8 +11,11 @@ const __dirname = path.dirname(__filename);
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
 const ELEVENLABS_API_URL = 'https://api.elevenlabs.io/v1';
 
-// Background audio cache
+// Background audio cache - cleared on deploy to regenerate with updated settings
 let backgroundAudioCache = {};
+
+// Clear cache on module load to ensure fresh generation with current settings
+backgroundAudioCache = {};
 
 /**
  * Generate synthetic background noise (μ-law 8kHz format)
@@ -26,29 +29,29 @@ function generateBackgroundNoise(type) {
   const samples = sampleRate * duration;
   const buffer = Buffer.alloc(samples);
 
-  // Parameters based on type
-  let noiseLevel = 0.03; // Very subtle
+  // Parameters based on type - INCREASED for audibility
+  let noiseLevel = 0.15; // Base noise level (was 0.03)
   let lowPassFreq = 500;
 
   switch (type) {
     case 'office':
-      noiseLevel = 0.025; // Very subtle office hum
-      lowPassFreq = 400;
+      noiseLevel = 0.12; // Noticeable office ambience (was 0.025)
+      lowPassFreq = 600;
       break;
     case 'cafe':
-      noiseLevel = 0.04; // Slightly more noticeable
-      lowPassFreq = 600;
+      noiseLevel = 0.18; // Busier cafe sound (was 0.04)
+      lowPassFreq = 800;
       break;
     case 'white':
     default:
-      noiseLevel = 0.02;
-      lowPassFreq = 300;
+      noiseLevel = 0.10;
+      lowPassFreq = 400;
   }
 
   // Generate pink-ish noise with low-pass filtering
   let lastSample = 127; // μ-law silence
   for (let i = 0; i < samples; i++) {
-    // Generate noise
+    // Generate noise - stronger amplitude
     const noise = (Math.random() - 0.5) * 2 * noiseLevel * 128;
 
     // Simple low-pass filter (smoothing)
@@ -60,7 +63,7 @@ function generateBackgroundNoise(type) {
     buffer[i] = Math.max(0, Math.min(255, Math.round(filtered)));
   }
 
-  logger.info(`Generated ${type} background noise`, { samples, duration: `${duration}s` });
+  logger.info(`Generated ${type} background noise`, { samples, duration: `${duration}s`, noiseLevel });
   return buffer;
 }
 
@@ -96,6 +99,7 @@ function loadBackgroundAudio(type) {
 
 /**
  * Mix TTS audio with background noise (both μ-law 8kHz)
+ * Uses additive mixing for more natural sound
  * @param {Buffer} ttsAudio - Main TTS audio
  * @param {Buffer} backgroundAudio - Background audio loop
  * @param {number} backgroundVolume - 0.0 to 1.0 (default 0.15 = 15%)
@@ -110,18 +114,20 @@ function mixAudioWithBackground(ttsAudio, backgroundAudio, backgroundVolume = 0.
     // Get background sample (loop if needed)
     const bgIndex = i % backgroundAudio.length;
 
-    // μ-law decoding (approximate linear mixing)
     // μ-law values are 0-255, with 127 being silence
-    const ttsSample = ttsAudio[i];
-    const bgSample = backgroundAudio[bgIndex];
+    // Convert to signed for mixing: -128 to +127
+    const ttsSignedValue = ttsAudio[i] - 127;
+    const bgSignedValue = backgroundAudio[bgIndex] - 127;
 
-    // Simple weighted average for μ-law (not perfect but works well enough)
-    // Heavily weight the TTS audio, add subtle background
-    const mixedSample = Math.round(
-      ttsSample * (1 - backgroundVolume * 0.5) + bgSample * backgroundVolume * 0.5
-    );
+    // Additive mixing: TTS at full volume + background at specified volume
+    // This preserves the TTS audio while adding background ambience
+    const mixedSigned = ttsSignedValue + (bgSignedValue * backgroundVolume);
 
-    mixed[i] = Math.max(0, Math.min(255, mixedSample));
+    // Soft clip to prevent harsh distortion
+    const clipped = Math.tanh(mixedSigned / 100) * 100;
+
+    // Convert back to unsigned μ-law range
+    mixed[i] = Math.max(0, Math.min(255, Math.round(clipped + 127)));
   }
 
   return mixed;
@@ -194,16 +200,19 @@ export async function streamElevenLabsTTS(text, voiceId, onChunk, options = {}) 
         }
         totalBytes += chunk.length;
 
-        // Mix with background audio if available
+        // Mix with background audio if available (additive mixing)
         let outputChunk = chunk;
         if (bgAudio) {
           outputChunk = Buffer.alloc(chunk.length);
           for (let i = 0; i < chunk.length; i++) {
             const bgIndex = (bgOffset + i) % bgAudio.length;
-            const mixedSample = Math.round(
-              chunk[i] * (1 - backgroundVolume * 0.5) + bgAudio[bgIndex] * backgroundVolume * 0.5
-            );
-            outputChunk[i] = Math.max(0, Math.min(255, mixedSample));
+            // Convert to signed for mixing
+            const ttsSignedValue = chunk[i] - 127;
+            const bgSignedValue = bgAudio[bgIndex] - 127;
+            // Additive mix with soft clipping
+            const mixedSigned = ttsSignedValue + (bgSignedValue * backgroundVolume);
+            const clipped = Math.tanh(mixedSigned / 100) * 100;
+            outputChunk[i] = Math.max(0, Math.min(255, Math.round(clipped + 127)));
           }
           bgOffset = (bgOffset + chunk.length) % bgAudio.length;
         }
