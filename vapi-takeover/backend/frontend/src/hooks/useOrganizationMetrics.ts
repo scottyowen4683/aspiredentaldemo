@@ -35,13 +35,16 @@ export const useOrganizationMetrics = (orgId: string | null) => {
         const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
         const endOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0);
 
-        // Fetch conversations data
+        // Fetch conversations data - only select columns that are guaranteed to exist
         const { data: allConversations, error: conversationsError } = await supabase
           .from('conversations')
-          .select('id, created_at, scored, confidence_score, total_cost, call_duration')
+          .select('id, created_at, overall_score, started_at')
           .eq('org_id', orgId);
 
-        if (conversationsError) throw conversationsError;
+        if (conversationsError) {
+          console.error('Conversations query error:', conversationsError);
+          throw new Error(`Failed to load conversations: ${conversationsError.message}`);
+        }
 
         // Fetch assistants data
         const { data: assistants, error: assistantsError } = await supabase
@@ -49,7 +52,10 @@ export const useOrganizationMetrics = (orgId: string | null) => {
           .select('id, auto_score, pause_auto_score')
           .eq('org_id', orgId);
 
-        if (assistantsError) throw assistantsError;
+        if (assistantsError) {
+          console.error('Assistants query error:', assistantsError);
+          throw new Error(`Failed to load assistants: ${assistantsError.message}`);
+        }
 
         // Fetch flagged conversations (from review_queue) - gracefully handle if table doesn't exist
         let flaggedData: any[] = [];
@@ -70,66 +76,41 @@ export const useOrganizationMetrics = (orgId: string | null) => {
 
         // Calculate metrics
         const totalConversations = allConversations?.length || 0;
-        
-        const conversationsThisMonth = allConversations?.filter(conv => 
-          new Date(conv.created_at) >= startOfThisMonth
+
+        const conversationsThisMonth = allConversations?.filter(conv =>
+          new Date(conv.created_at || conv.started_at) >= startOfThisMonth
         ).length || 0;
 
         const conversationsLastMonth = allConversations?.filter(conv => {
-          const date = new Date(conv.created_at);
+          const date = new Date(conv.created_at || conv.started_at);
           return date >= startOfLastMonth && date <= endOfLastMonth;
         }).length || 0;
 
-        const conversationsGrowth = conversationsLastMonth > 0 
-          ? ((conversationsThisMonth - conversationsLastMonth) / conversationsLastMonth) * 100 
+        const conversationsGrowth = conversationsLastMonth > 0
+          ? ((conversationsThisMonth - conversationsLastMonth) / conversationsLastMonth) * 100
           : conversationsThisMonth > 0 ? 100 : 0;
 
-        const activeAssistants = assistants?.filter(assistant => 
+        const activeAssistants = assistants?.filter(assistant =>
           assistant.auto_score && !assistant.pause_auto_score
         ).length || 0;
 
-        // Calculate average score from scored conversations
-        const scoredConversations = allConversations?.filter(conv => 
-          conv.scored && conv.confidence_score !== null
+        // Calculate average score from conversations with overall_score
+        const scoredConversations = allConversations?.filter(conv =>
+          conv.overall_score !== null && conv.overall_score !== undefined
         ) || [];
-        
+
         const avgScore = scoredConversations.length > 0
-          ? scoredConversations.reduce((sum, conv) => sum + (conv.confidence_score || 0), 0) / scoredConversations.length
+          ? scoredConversations.reduce((sum, conv) => sum + (conv.overall_score || 0), 0) / scoredConversations.length
           : 0;
 
         const flaggedConversations = flaggedData?.length || 0;
 
-        // Calculate cost metrics
-        const conversationsThisMonthWithCost = allConversations?.filter(conv => {
-          const date = new Date(conv.created_at);
-          return date >= startOfThisMonth && conv.total_cost;
-        }) || [];
+        // Cost tracking - set to 0 for self-hosted (no external API costs)
+        const totalCostThisMonth = 0;
+        const costGrowth = 0;
 
-        const conversationsLastMonthWithCost = allConversations?.filter(conv => {
-          const date = new Date(conv.created_at);
-          return date >= startOfLastMonth && date <= endOfLastMonth && conv.total_cost;
-        }) || [];
-
-        const totalCostThisMonth = conversationsThisMonthWithCost.reduce(
-          (sum, conv) => sum + (conv.total_cost || 0), 0
-        );
-
-        const totalCostLastMonth = conversationsLastMonthWithCost.reduce(
-          (sum, conv) => sum + (conv.total_cost || 0), 0
-        );
-
-        const costGrowth = totalCostLastMonth > 0 
-          ? ((totalCostThisMonth - totalCostLastMonth) / totalCostLastMonth) * 100 
-          : totalCostThisMonth > 0 ? 100 : 0;
-
-        // Calculate average response time (using call_duration as proxy)
-        const conversationsWithDuration = allConversations?.filter(conv => 
-          conv.call_duration && conv.call_duration > 0
-        ) || [];
-        
-        const avgResponseTime = conversationsWithDuration.length > 0
-          ? conversationsWithDuration.reduce((sum, conv) => sum + (conv.call_duration || 0), 0) / conversationsWithDuration.length
-          : 0;
+        // Average response time - not available without call_duration column
+        const avgResponseTime = 0;
 
         const calculatedMetrics: OrganizationMetrics = {
           totalConversations,
