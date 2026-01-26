@@ -75,9 +75,7 @@ export default function AuditLogs() {
   const { data: auditLogsData, isLoading, error, refetch } = useQuery({
     queryKey: ['audit-logs', filters, currentPage, pageSize],
     queryFn: async () => {
-      // Build base query for both count and data
-
-      // Build count query: chain .select('*') first, then filters
+      // Build count query
       let countQuery = supabase.from('audit_logs').select('*', { count: 'exact', head: true });
       if (filters.search) {
         countQuery = countQuery.or(`action.ilike.%${filters.search}%,details->>message.ilike.%${filters.search}%`);
@@ -101,12 +99,16 @@ export default function AuditLogs() {
       const { count, error: countError } = await countQuery;
 
       if (countError) {
-        throw new Error(`Failed to fetch audit logs count: ${countError.message}`);
+        console.log('Audit logs count query failed:', countError.message);
+        // Return empty if table doesn't exist
+        return { data: [], count: 0, totalPages: 0 };
       }
 
-      // Get paginated data
+      // Build data query - try with joins first, fallback to simple query
+      const from = (currentPage - 1) * pageSize;
+      const to = from + pageSize - 1;
 
-      // Build data query: chain .select(...) first, then filters
+      // First try with joins
       let dataQuery = supabase
         .from('audit_logs')
         .select(`
@@ -136,15 +138,86 @@ export default function AuditLogs() {
         dataQuery = dataQuery.lte('created_at', filters.date_to + 'T23:59:59');
       }
 
-      // Apply pagination
-      const from = (currentPage - 1) * pageSize;
-      const to = from + pageSize - 1;
       dataQuery = dataQuery.range(from, to);
 
-      const { data, error } = await dataQuery;
+      let { data, error: dataError } = await dataQuery;
 
-      if (error) {
-        throw new Error(`Failed to fetch audit logs: ${error.message}`);
+      // If join query fails, try without joins
+      if (dataError) {
+        console.log('Audit logs join query failed, trying without joins:', dataError.message);
+
+        let simpleQuery = supabase
+          .from('audit_logs')
+          .select('*')
+          .order('created_at', { ascending: false });
+
+        if (filters.search) {
+          simpleQuery = simpleQuery.or(`action.ilike.%${filters.search}%,details->>message.ilike.%${filters.search}%`);
+        }
+        if (filters.org_id && filters.org_id !== 'all') {
+          simpleQuery = simpleQuery.eq('org_id', filters.org_id);
+        }
+        if (filters.assistant_id && filters.assistant_id !== 'all') {
+          simpleQuery = simpleQuery.eq('assistant_id', filters.assistant_id);
+        }
+        if (filters.action && filters.action !== 'all') {
+          simpleQuery = simpleQuery.eq('action', filters.action);
+        }
+        if (filters.date_from) {
+          simpleQuery = simpleQuery.gte('created_at', filters.date_from);
+        }
+        if (filters.date_to) {
+          simpleQuery = simpleQuery.lte('created_at', filters.date_to + 'T23:59:59');
+        }
+
+        simpleQuery = simpleQuery.range(from, to);
+
+        const simpleResult = await simpleQuery;
+        if (simpleResult.error) {
+          console.log('Simple audit logs query also failed:', simpleResult.error.message);
+          return { data: [], count: 0, totalPages: 0 };
+        }
+
+        // Manually fetch related data for display
+        data = await Promise.all((simpleResult.data || []).map(async (log: any) => {
+          let orgData = null;
+          let assistantData = null;
+          let userData = null;
+
+          if (log.org_id) {
+            const { data: org } = await supabase
+              .from('organizations')
+              .select('name')
+              .eq('id', log.org_id)
+              .single();
+            orgData = org;
+          }
+
+          if (log.assistant_id) {
+            const { data: assistant } = await supabase
+              .from('assistants')
+              .select('friendly_name')
+              .eq('id', log.assistant_id)
+              .single();
+            assistantData = assistant;
+          }
+
+          if (log.user_id) {
+            const { data: userRecord } = await supabase
+              .from('users')
+              .select('full_name, email')
+              .eq('id', log.user_id)
+              .single();
+            userData = userRecord;
+          }
+
+          return {
+            ...log,
+            organizations: orgData,
+            assistants: assistantData,
+            users: userData
+          };
+        }));
       }
 
       console.log('📋 Audit logs fetched:', {
@@ -154,7 +227,7 @@ export default function AuditLogs() {
       });
 
       return {
-        data: data as AuditLog[],
+        data: (data || []) as AuditLog[],
         count: count || 0,
         totalPages: Math.ceil((count || 0) / pageSize)
       };

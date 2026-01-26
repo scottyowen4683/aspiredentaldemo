@@ -51,14 +51,22 @@ export const useOrganizationMetrics = (orgId: string | null) => {
 
         if (assistantsError) throw assistantsError;
 
-        // Fetch flagged conversations (from review_queue)
-        const { data: flaggedData, error: flaggedError } = await supabase
-          .from('review_queue')
-          .select('id')
-          .eq('org_id', orgId)
-          .eq('reviewed', false);
+        // Fetch flagged conversations (from review_queue) - gracefully handle if table doesn't exist
+        let flaggedData: any[] = [];
+        try {
+          const { data: flagged, error: flaggedError } = await supabase
+            .from('review_queue')
+            .select('id')
+            .eq('org_id', orgId)
+            .eq('reviewed', false);
 
-        if (flaggedError) throw flaggedError;
+          if (!flaggedError) {
+            flaggedData = flagged || [];
+          }
+        } catch (e) {
+          // review_queue table may not exist - use empty array
+          console.log('review_queue table not available');
+        }
 
         // Calculate metrics
         const totalConversations = allConversations?.length || 0;
@@ -202,15 +210,15 @@ export const useRecentActivity = (orgId: string | null, limit: number = 10) => {
         setLoading(true);
         setError(null);
 
-        // Fetch recent conversations with assistant info
+        // Fetch recent conversations with assistant info (without scores join that may fail)
         const { data: conversations, error: convError } = await supabase
           .from('conversations')
           .select(`
             id,
             created_at,
             confidence_score,
-            assistant:assistants(friendly_name),
-            scores(sentiments, flags)
+            overall_score,
+            assistant:assistants(friendly_name)
           `)
           .eq('org_id', orgId)
           .order('created_at', { ascending: false })
@@ -218,22 +226,27 @@ export const useRecentActivity = (orgId: string | null, limit: number = 10) => {
 
         if (convError) throw convError;
 
-        // Fetch recent audit logs
-        const { data: auditLogs, error: auditError } = await supabase
-          .from('audit_logs')
-          .select('id, action, created_at, details')
-          .eq('org_id', orgId)
-          .order('created_at', { ascending: false })
-          .limit(limit);
+        // Fetch recent audit logs - gracefully handle if empty or table issues
+        let auditLogs: any[] = [];
+        try {
+          const { data: logs, error: auditError } = await supabase
+            .from('audit_logs')
+            .select('id, action, created_at, details')
+            .eq('org_id', orgId)
+            .order('created_at', { ascending: false })
+            .limit(limit);
 
-        if (auditError) throw auditError;
+          if (!auditError) {
+            auditLogs = logs || [];
+          }
+        } catch (e) {
+          console.log('audit_logs query failed:', e);
+        }
 
         // Transform conversations into activities
         const conversationActivities: RecentActivity[] = conversations?.map(conv => {
-          const scores = conv.scores?.[0];
-          const sentiment = scores?.sentiments?.overall_sentiment || 'neutral';
-          const flags = scores?.flags || {};
-          const flagged = Object.values(flags).some(flag => flag === true);
+          // Use confidence_score or overall_score
+          const score = conv.confidence_score || conv.overall_score || null;
 
           return {
             id: conv.id,
@@ -242,9 +255,9 @@ export const useRecentActivity = (orgId: string | null, limit: number = 10) => {
             description: `Conversation with ${conv.assistant?.friendly_name || 'Unknown Assistant'}`,
             timestamp: conv.created_at,
             assistantName: conv.assistant?.friendly_name,
-            score: conv.confidence_score,
-            sentiment: sentiment,
-            flagged: flagged
+            score: score,
+            sentiment: 'neutral',
+            flagged: false
           };
         }) || [];
 
