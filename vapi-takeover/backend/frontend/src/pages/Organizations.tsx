@@ -227,10 +227,8 @@ export default function Organizations() {
                     <TableHeader>
                       <TableRow>
                         <TableHead>Organization</TableHead>
-                        <TableHead>Region</TableHead>
                         <TableHead>Assistants</TableHead>
-                        <TableHead>Default Rubric</TableHead>
-                        <TableHead>Cost This Month</TableHead>
+                        <TableHead>Users</TableHead>
                         <TableHead>Conversations</TableHead>
                         <TableHead>Status</TableHead>
                         <TableHead>Created</TableHead>
@@ -241,12 +239,10 @@ export default function Organizations() {
                       {[...Array(5)].map((_, i) => (
                         <TableRow key={i}>
                           <TableCell><Skeleton className="h-4 w-40" /></TableCell>
-                          <TableCell><Skeleton className="h-4 w-24" /></TableCell>
                           <TableCell><Skeleton className="h-4 w-12" /></TableCell>
-                          <TableCell><Skeleton className="h-4 w-28" /></TableCell>
+                          <TableCell><Skeleton className="h-4 w-12" /></TableCell>
                           <TableCell><Skeleton className="h-4 w-16" /></TableCell>
                           <TableCell><Skeleton className="h-4 w-16" /></TableCell>
-                          <TableCell><Skeleton className="h-4 w-12" /></TableCell>
                           <TableCell><Skeleton className="h-4 w-20" /></TableCell>
                           <TableCell><Skeleton className="h-4 w-12" /></TableCell>
                         </TableRow>
@@ -273,10 +269,8 @@ export default function Organizations() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Organization</TableHead>
-                    <TableHead>Region</TableHead>
                     <TableHead>Assistants</TableHead>
-                    <TableHead>Default Rubric</TableHead>
-                    <TableHead>Cost This Month</TableHead>
+                    <TableHead>Users</TableHead>
                     <TableHead>Conversations</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Created</TableHead>
@@ -288,10 +282,6 @@ export default function Organizations() {
                     <TableRow key={org.id} className="hover:bg-gradient-card">
                       <TableCell className="font-medium">{org.name}</TableCell>
                       <TableCell>
-                        <Badge variant="outline">{org.region}</Badge>
-                      </TableCell>
-                      
-                      <TableCell>
                         <div className="flex items-center">
                           <Bot className="h-4 w-4 mr-2 text-muted-foreground" />
                           {org.assistantCount || 0}
@@ -299,27 +289,17 @@ export default function Organizations() {
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center">
-                          {org.default_rubric ? (
-                            <Badge variant="default" className="bg-success">
-                              <FileText className="h-3 w-3 mr-1" />
-                              Configured
-                            </Badge>
-                          ) : (
-                            <Badge variant="outline">
-                              <FileText className="h-3 w-3 mr-1" />
-                              Not Set
-                            </Badge>
-                          )}
+                          <Users className="h-4 w-4 mr-2 text-muted-foreground" />
+                          {org.userCount || 0}
                         </div>
                       </TableCell>
-                      <TableCell>$0.00</TableCell>
                       <TableCell>{(org.conversationCount || 0).toLocaleString()}</TableCell>
                       <TableCell>
                         <Badge
-                          variant={org.status === "active" ? "default" : "secondary"}
-                          className={org.status === "active" ? "bg-success" : ""}
+                          variant={org.active !== false ? "default" : "secondary"}
+                          className={org.active !== false ? "bg-success" : ""}
                         >
-                          {org.status || 'active'}
+                          {org.active !== false ? 'active' : 'inactive'}
                         </Badge>
                       </TableCell>
                       <TableCell>
@@ -417,7 +397,7 @@ export default function Organizations() {
         onSave={(updated) => {
           // After successful update, refresh list and show toast
           refetchOrganizations();
-          toast({ title: "Updated", description: `Name: ${updated.name}, Region: ${updated.region}` });
+          toast({ title: "Updated", description: `Organization "${updated.name}" updated successfully` });
         }}
       />
 

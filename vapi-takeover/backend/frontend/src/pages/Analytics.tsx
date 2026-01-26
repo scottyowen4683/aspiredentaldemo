@@ -148,6 +148,7 @@ export default function Analytics() {
   });
 
   // Fetch governance metrics
+  // Note: review_queue and scores tables don't exist in current schema, returning defaults
   const { data: governanceMetrics, isLoading: governanceLoading } = useQuery({
     queryKey: ["governance-metrics", queryOrgId, selectedPeriod],
     queryFn: async () => {
@@ -156,42 +157,42 @@ export default function Analytics() {
       const startDate = new Date();
       startDate.setDate(startDate.getDate() - days);
 
-      // Fetch review queue stats
-      let reviewQuery = supabase
-        .from("review_queue")
-        .select("id, reviewed, urgency, flag_reason, created_at");
+      // Try to use overall_score from conversations table instead of separate scores table
+      let conversationsQuery = supabase
+        .from("conversations")
+        .select("overall_score, scored")
+        .eq("scored", true)
+        .not("overall_score", "is", null)
+        .gte("started_at", startDate.toISOString());
 
       if (queryOrgId) {
-        reviewQuery = reviewQuery.eq("org_id", queryOrgId);
+        conversationsQuery = conversationsQuery.eq("org_id", queryOrgId);
       }
-      reviewQuery = reviewQuery.gte("created_at", startDate.toISOString());
 
-      const { data: reviewData, error: reviewError } = await reviewQuery;
+      const { data: conversationsData, error: conversationsError } = await conversationsQuery;
 
-      // Fetch scores for rubric compliance
-      let scoresQuery = supabase
-        .from("scores")
-        .select("id, final_score, rubric_result, flags, created_at");
+      // If query fails, return defaults
+      if (conversationsError) {
+        console.log("Governance metrics: conversations query error, using defaults");
+        return {
+          totalReviewItems: 0,
+          pendingReviews: 0,
+          completedReviews: 0,
+          urgentItems: 0,
+          flagReasons: {},
+          complianceRate: 0,
+          excellentScores: 0,
+          goodScores: 0,
+          satisfactoryScores: 0,
+          needsImprovement: 0,
+          totalScored: 0,
+          avgReviewTime: "N/A",
+          reviewCompletionRate: 100,
+        };
+      }
 
-      scoresQuery = scoresQuery.gte("created_at", startDate.toISOString());
-
-      const { data: scoresData, error: scoresError } = await scoresQuery;
-
-      // Calculate governance metrics
-      const totalReviewItems = reviewData?.length || 0;
-      const pendingReviews = reviewData?.filter(r => !r.reviewed)?.length || 0;
-      const completedReviews = reviewData?.filter(r => r.reviewed)?.length || 0;
-      const urgentItems = reviewData?.filter(r => r.urgency === "high" || r.urgency === "critical")?.length || 0;
-
-      // Flag reasons breakdown
-      const flagReasons: Record<string, number> = {};
-      reviewData?.forEach(item => {
-        const reason = item.flag_reason || "Other";
-        flagReasons[reason] = (flagReasons[reason] || 0) + 1;
-      });
-
-      // Score quality metrics
-      const scores = scoresData?.map(s => s.final_score).filter(Boolean) || [];
+      // Score quality metrics from conversations.overall_score
+      const scores = conversationsData?.map(c => c.overall_score).filter((s): s is number => s !== null && s !== undefined) || [];
       const excellentScores = scores.filter(s => s >= 90).length;
       const goodScores = scores.filter(s => s >= 80 && s < 90).length;
       const satisfactoryScores = scores.filter(s => s >= 70 && s < 80).length;
@@ -202,25 +203,20 @@ export default function Analytics() {
         ? Math.round(((excellentScores + goodScores + satisfactoryScores) / scores.length) * 100)
         : 0;
 
-      // Calculate review response time (mock data - would need actual timestamps)
-      const avgReviewTime = completedReviews > 0 ? "2.4 hrs" : "N/A";
-
       return {
-        totalReviewItems,
-        pendingReviews,
-        completedReviews,
-        urgentItems,
-        flagReasons,
+        totalReviewItems: 0,
+        pendingReviews: 0,
+        completedReviews: 0,
+        urgentItems: 0,
+        flagReasons: {},
         complianceRate,
         excellentScores,
         goodScores,
         satisfactoryScores,
         needsImprovement,
         totalScored: scores.length,
-        avgReviewTime,
-        reviewCompletionRate: totalReviewItems > 0
-          ? Math.round((completedReviews / totalReviewItems) * 100)
-          : 100,
+        avgReviewTime: "N/A",
+        reviewCompletionRate: 100,
       };
     },
     refetchInterval: 60000,
