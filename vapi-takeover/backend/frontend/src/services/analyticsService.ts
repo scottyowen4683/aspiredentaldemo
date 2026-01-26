@@ -72,27 +72,39 @@ export interface DeferralReason {
 
 /**
  * Get key performance metrics for analytics dashboard
+ * Uses only existing schema tables: conversations, interaction_logs
  */
 export async function getAnalyticsMetrics(
-  orgId?: string, 
+  orgId?: string,
   period: string = "30d"
 ): Promise<AnalyticsMetrics> {
   try {
-
     console.log("Analytics Metrics Calculation:", { orgId, period });
 
     const days = period === "7d" ? 7 : period === "90d" ? 90 : 30;
     const dateFrom = new Date();
     dateFrom.setDate(dateFrom.getDate() - days);
 
-    // Build base query
+    // Build base query - using actual schema columns
     let conversationsQuery = supabase
       .from("conversations")
       .select(`
-        *,
-        scores(*)
+        id,
+        org_id,
+        assistant_id,
+        channel,
+        started_at,
+        ended_at,
+        duration_seconds,
+        success,
+        scored,
+        overall_score,
+        tokens_in,
+        tokens_out,
+        total_cost,
+        end_reason
       `)
-      .gte("created_at", dateFrom.toISOString());
+      .gte("started_at", dateFrom.toISOString());
 
     if (orgId && orgId !== "all") {
       conversationsQuery = conversationsQuery.eq("org_id", orgId);
@@ -107,218 +119,82 @@ export async function getAnalyticsMetrics(
 
     // Calculate metrics
     const totalCalls = conversations?.length || 0;
-    
-    // Separate voice and text calls
-    const voiceCalls = conversations?.filter(c => c.is_voice === true) || [];
-    const textCalls = conversations?.filter(c => c.is_voice === false) || [];
+
+    // Separate voice and text calls based on channel
+    const voiceCalls = conversations?.filter(c => c.channel === 'voice' || c.channel === 'phone') || [];
+    const textCalls = conversations?.filter(c => c.channel === 'chat' || c.channel === 'web') || [];
     const totalVoiceCalls = voiceCalls.length;
     const totalTextCalls = textCalls.length;
-    
-    // Calculate durations overall (call_duration is in seconds, convert to minutes)
-    const callDurations = conversations?.filter(c => c.call_duration).map(c => parseFloat(c.call_duration) / 60) || [];
 
-    console.log("Call Durations Sample (in minutes):", callDurations);
-    const avgCallDurationMinutes = callDurations.length > 0 
-      ? callDurations.reduce((sum, duration) => sum + duration, 0) / callDurations.length 
+    // Calculate durations (duration_seconds is in seconds, convert to minutes)
+    const callDurations = conversations?.filter(c => c.duration_seconds).map(c => c.duration_seconds / 60) || [];
+    const avgCallDurationMinutes = callDurations.length > 0
+      ? callDurations.reduce((sum, duration) => sum + duration, 0) / callDurations.length
       : 0;
-    
-    // Calculate voice call durations (in seconds, convert to minutes)
-    const voiceCallDurations = voiceCalls.filter(c => c.call_duration).map(c => parseFloat(c.call_duration) / 60);
+
+    // Voice call durations
+    const voiceCallDurations = voiceCalls.filter(c => c.duration_seconds).map(c => c.duration_seconds / 60);
     const avgVoiceCallDurationMinutes = voiceCallDurations.length > 0
       ? voiceCallDurations.reduce((sum, duration) => sum + duration, 0) / voiceCallDurations.length
       : 0;
-    
-    // Calculate text call durations (in seconds, convert to minutes)
-    const textCallDurations = textCalls.filter(c => c.call_duration).map(c => parseFloat(c.call_duration) / 60);
+
+    // Text call durations
+    const textCallDurations = textCalls.filter(c => c.duration_seconds).map(c => c.duration_seconds / 60);
     const avgTextCallDurationMinutes = textCallDurations.length > 0
       ? textCallDurations.reduce((sum, duration) => sum + duration, 0) / textCallDurations.length
       : 0;
 
-    const scoredConversations = conversations?.filter(c => c.scored && c.scores?.length > 0) || [];
-    const confidenceScores = conversations?.filter(c => c.confidence_score).map(c => c.confidence_score) || [];
-    const avgConfidence = confidenceScores.length > 0 
-      ? confidenceScores.reduce((sum, score) => sum + score, 0) / confidenceScores.length 
+    // Calculate scores from overall_score column in conversations table
+    const scoreValues = conversations?.filter(c => c.overall_score !== null && c.overall_score !== undefined)
+      .map(c => c.overall_score) || [];
+
+    const finalAvgScore = scoreValues.length > 0
+      ? scoreValues.reduce((sum, score) => sum + score, 0) / scoreValues.length
       : 0;
 
-    // Calculate scores from the scores table
-    const allScores = scoredConversations.flatMap(c => c.scores || []);
-    const scoreValues: number[] = [];
-    
-    allScores.forEach(scoreRecord => {
-      if (scoreRecord.is_used && scoreRecord.scores) {
-        let overallScore = null;
-        
-        if (typeof scoreRecord.scores === 'object') {
-          overallScore = scoreRecord.scores.overall_score || 
-                        scoreRecord.scores.overall || 
-                        scoreRecord.scores.total_score ||
-                        scoreRecord.scores.score ||
-                        scoreRecord.scores.average_score;
-        }
-        
-        if (overallScore && typeof overallScore === 'number' && overallScore >= 0 && overallScore <= 100) {
-          scoreValues.push(overallScore);
-        }
-      }
-    });
-    
-    let finalAvgScore = scoreValues.length > 0 
-      ? scoreValues.reduce((sum, score) => sum + score, 0) / scoreValues.length 
-      : 0;
+    // Calculate success rate as AI resolution rate
+    const successfulCalls = conversations?.filter(c => c.success === true).length || 0;
+    const aiResolutionRate = totalCalls > 0 ? (successfulCalls / totalCalls) * 100 : 0;
+    const escalationRate = 100 - aiResolutionRate;
 
-    // If no scores found via conversations, try direct scores table query
-    if (scoreValues.length === 0 && totalCalls > 0) {
-      let directScoresQuery = supabase
-        .from("scores")
-        .select(`
-          scores,
-          is_used,
-          conversations!inner(created_at, org_id)
-        `)
-        .eq("is_used", true)
-        .gte("conversations.created_at", dateFrom.toISOString());
-
-      if (orgId && orgId !== "all") {
-        directScoresQuery = directScoresQuery.eq("conversations.org_id", orgId);
-      }
-
-      const { data: directScores } = await directScoresQuery;
-
-      if (directScores && directScores.length > 0) {
-        const directScoreValues: number[] = [];
-        
-        directScores.forEach(scoreRecord => {
-          if (scoreRecord.scores) {
-            let overallScore = null;
-            
-            if (typeof scoreRecord.scores === 'object') {
-              overallScore = scoreRecord.scores.overall_score || 
-                            scoreRecord.scores.overall || 
-                            scoreRecord.scores.total_score ||
-                            scoreRecord.scores.score ||
-                            scoreRecord.scores.average_score;
-            }
-            
-            if (overallScore && typeof overallScore === 'number' && overallScore >= 0 && overallScore <= 100) {
-              directScoreValues.push(overallScore);
-            }
-          }
-        });
-        
-        if (directScoreValues.length > 0) {
-          finalAvgScore = directScoreValues.reduce((sum, score) => sum + score, 0) / directScoreValues.length;
-        }
-      }
-    }
-
-    // Count flagged conversations
-    const flaggedConversations = allScores.filter(s => 
-      s.is_used && (
-        s.flags?.requires_human_review || 
-        s.flags?.policy_violation || 
-        s.flags?.customer_complaint
-      )
-    ).length;
-
+    // Flagged rate - conversations that ended with escalation
+    const flaggedConversations = conversations?.filter(c =>
+      c.end_reason === 'escalated' || c.end_reason === 'transferred'
+    ).length || 0;
     const flaggedRate = totalCalls > 0 ? (flaggedConversations / totalCalls) * 100 : 0;
 
-    // Calculate escalation rate (conversations with low scores or flags)
-    const escalatedConversations = allScores.filter(s => 
-      s.is_used && (
-        (s.scores?.overall_score && s.scores.overall_score < 70) ||
-        s.flags?.requires_human_review
-      )
-    ).length;
-    
-    const escalationRate = totalCalls > 0 ? (escalatedConversations / totalCalls) * 100 : 0;
-    const aiResolutionRate = 100 - escalationRate;
+    // Token usage
+    const totalTokensIn = conversations?.reduce((sum, c) => sum + (c.tokens_in || 0), 0) || 0;
+    const totalTokensOut = conversations?.reduce((sum, c) => sum + (c.tokens_out || 0), 0) || 0;
+    const totalTokens = totalTokensIn + totalTokensOut;
 
-    // Get organization cost configuration and conversation costs
-    let totalConversationCost = 0;
+    // Total cost from conversations
+    const totalConversationCost = conversations?.reduce((sum, c) => sum + (c.total_cost || 0), 0) || 0;
+
+    // Get organization data
+    let organizationName = "All Organizations";
     let totalServicePlanCost = 0;
     let totalMoneySaved = 0;
-    let organizationName = "Unknown";
 
     if (orgId && orgId !== "all") {
-      // Get organization service plan configuration
-      const { data: orgData, error: orgError } = await supabase
+      const { data: orgData } = await supabase
         .from("organizations")
-        .select("name, monthly_service_fee, baseline_human_cost_per_call, service_plan_name")
+        .select("name, flat_rate_fee, price_per_interaction")
         .eq("id", orgId)
         .single();
 
-      if (!orgError && orgData) {
+      if (orgData) {
         organizationName = orgData.name || "Unknown";
-        const monthlyServiceFee = orgData.monthly_service_fee || 0;
-        const baselineHumanCost = orgData.baseline_human_cost_per_call || 7.50;
-
-        // Debug organization data
-        console.log("Organization Cost Configuration:", {
-          orgId,
-          organizationName,
-          monthlyServiceFee,
-          baselineHumanCost,
-          totalCalls,
-          orgData
-        });
-
-        // Calculate costs based on service plan
-        totalServicePlanCost = monthlyServiceFee;
-        totalMoneySaved = totalCalls * baselineHumanCost; // What it would cost with humans
-        totalConversationCost = monthlyServiceFee; // Use monthly fee as the cost basis for ROI calculation
-      } else {
-        console.log("Organization data error or missing:", { orgError, orgData, orgId });
-      }
-    } else {
-      // For super admin viewing all organizations, aggregate costs
-      const { data: allOrgs, error: allOrgsError } = await supabase
-        .from("organizations")
-        .select("id, monthly_service_fee, baseline_human_cost_per_call");
-
-      if (!allOrgsError && allOrgs) {
-        totalServicePlanCost = allOrgs.reduce((sum, org) => sum + (org.monthly_service_fee || 0), 0);
-        const avgBaselineHumanCost = allOrgs.reduce((sum, org) => sum + (org.baseline_human_cost_per_call || 7.50), 0) / allOrgs.length;
-        totalMoneySaved = totalCalls * avgBaselineHumanCost;
-        totalConversationCost = totalServicePlanCost; // Total service plan costs across all orgs
+        totalServicePlanCost = orgData.flat_rate_fee || 0;
+        // Estimate money saved (avg $5 per human handled call)
+        totalMoneySaved = totalCalls * 5;
       }
     }
 
-    // Get legacy cost data for super admin (internal cost tracking)
-    let internalTokenCost = 0;
-    if (orgId === "all" || !orgId) {
-      let costQuery = supabase
-        .from("cost_usage")
-        .select("tokens_used, minutes_processed")
-        .gte("period_start", dateFrom.toISOString());
-
-      const { data: costData, error: costError } = await costQuery;
-      
-      if (!costError && costData) {
-        const totalTokens = costData.reduce((sum, usage) => sum + (usage.tokens_used || 0), 0);
-        const totalMinutes = costData.reduce((sum, usage) => sum + parseFloat(usage.minutes_processed || "0"), 0);
-
-        // GPT-4o pricing: ~$0.00003 per token (rough estimate)
-        // Whisper pricing: $0.006 per minute
-        const tokenCost = totalTokens * 0.00003;
-        const whisperCost = totalMinutes * 0.006;
-        internalTokenCost = tokenCost + whisperCost;
-      }
-    }
-
-    // Calculate ROI based on role and context
-    const roi = totalConversationCost > 0 ? ((totalMoneySaved - totalConversationCost) / totalConversationCost) * 100 : 0;
-
-    // Debug logging for ROI calculation
-    console.log("ROI Calculation Debug:", {
-      totalMoneySaved,
-      totalConversationCost,
-      totalServicePlanCost,
-      internalTokenCost,
-      roi,
-      totalCalls,
-      orgId,
-      organizationName
-    });
+    // Calculate ROI
+    const roi = totalServicePlanCost > 0
+      ? ((totalMoneySaved - totalServicePlanCost) / totalServicePlanCost) * 100
+      : 0;
 
     return {
       totalCalls,
@@ -331,9 +207,9 @@ export async function getAnalyticsMetrics(
       escalationRate: Math.round(escalationRate * 10) / 10,
       flaggedRate: Math.round(flaggedRate * 10) / 10,
       avgScore: Math.round(finalAvgScore * 10) / 10,
-      confidence: Math.round(avgConfidence * 10) / 10,
-      totalTokens: 0, // Legacy field for compatibility
-      tokenCost: internalTokenCost || totalConversationCost, // Use internal cost for super admin, service plan cost for org admin
+      confidence: Math.round(aiResolutionRate * 10) / 10, // Use success rate as confidence proxy
+      totalTokens,
+      tokenCost: totalConversationCost,
       moneySaved: Math.round(totalMoneySaved),
       roi: Math.round(roi),
       servicePlanCost: totalServicePlanCost,
@@ -347,53 +223,22 @@ export async function getAnalyticsMetrics(
 }
 
 /**
- * Get top questions from resident_questions table
+ * Get top questions - placeholder since resident_questions table doesn't exist
  */
 export async function getTopQuestions(
-  orgId?: string, 
-  period: string = "30d", 
-  limit: number = 10
+  _orgId?: string,
+  _period: string = "30d",
+  _limit: number = 10
 ): Promise<TopQuestion[]> {
-  try {
-    const days = period === "7d" ? 7 : period === "90d" ? 90 : 30;
-    const dateFrom = new Date();
-    dateFrom.setDate(dateFrom.getDate() - days);
-
-    let query = supabase
-      .from("resident_questions")
-      .select("intent, frequency")
-      .gte("created_at", dateFrom.toISOString())
-      .order("frequency", { ascending: false })
-      .limit(limit);
-
-    if (orgId && orgId !== "all") {
-      query = query.eq("org_id", orgId);
-    }
-
-    const { data: questions, error } = await query;
-
-    if (error) {
-      console.error("Error fetching top questions:", error);
-      throw error;
-    }
-
-    return (questions || []).map((q, index) => ({
-      question: q.intent || `Question ${index + 1}`,
-      count: q.frequency || 0,
-      trend: "neutral" as const // Default trend when no historical data available
-    }));
-
-  } catch (error) {
-    console.error("Error in getTopQuestions:", error);
-    return [];
-  }
+  // Table doesn't exist in current schema - return empty
+  return [];
 }
 
 /**
- * Get sentiment analysis data from scores
+ * Get sentiment analysis data based on conversation success rate
  */
 export async function getSentimentData(
-  orgId?: string, 
+  orgId?: string,
   period: string = "30d"
 ): Promise<SentimentData[]> {
   try {
@@ -401,38 +246,23 @@ export async function getSentimentData(
     const dateFrom = new Date();
     dateFrom.setDate(dateFrom.getDate() - days);
 
-    let conversationsQuery = supabase
+    let query = supabase
       .from("conversations")
-      .select(`
-        scores(sentiments)
-      `)
-      .gte("created_at", dateFrom.toISOString());
+      .select("success, overall_score")
+      .gte("started_at", dateFrom.toISOString());
 
     if (orgId && orgId !== "all") {
-      conversationsQuery = conversationsQuery.eq("org_id", orgId);
+      query = query.eq("org_id", orgId);
     }
 
-    const { data: conversations, error } = await conversationsQuery;
+    const { data: conversations, error } = await query;
 
     if (error) {
       console.error("Error fetching sentiment data:", error);
       throw error;
     }
 
-    // Aggregate sentiment data
-    let positive = 0, neutral = 0, negative = 0, total = 0;
-
-    conversations?.forEach(conv => {
-      conv.scores?.forEach(score => {
-        if (score.sentiments?.overall_sentiment) {
-          total++;
-          const sentiment = score.sentiments.overall_sentiment.toLowerCase();
-          if (sentiment.includes('positive')) positive++;
-          else if (sentiment.includes('negative')) negative++;
-          else neutral++;
-        }
-      });
-    });
+    const total = conversations?.length || 0;
 
     if (total === 0) {
       return [
@@ -441,6 +271,17 @@ export async function getSentimentData(
         { name: "Negative", value: 0, color: "#EF4444" },
       ];
     }
+
+    // Use success and score to infer sentiment
+    const positive = conversations?.filter(c =>
+      c.success === true || (c.overall_score && c.overall_score >= 70)
+    ).length || 0;
+
+    const negative = conversations?.filter(c =>
+      c.success === false && (!c.overall_score || c.overall_score < 50)
+    ).length || 0;
+
+    const neutral = total - positive - negative;
 
     return [
       { name: "Positive", value: Math.round((positive / total) * 1000) / 10, color: "#10B981" },
@@ -459,10 +300,10 @@ export async function getSentimentData(
 }
 
 /**
- * Get feature usage data (voice vs chat)
+ * Get feature usage data (voice vs chat) based on channel column
  */
 export async function getFeatureUsage(
-  orgId?: string, 
+  orgId?: string,
   period: string = "30d"
 ): Promise<FeatureUsage[]> {
   try {
@@ -472,8 +313,8 @@ export async function getFeatureUsage(
 
     let query = supabase
       .from("conversations")
-      .select("is_voice")
-      .gte("created_at", dateFrom.toISOString());
+      .select("channel")
+      .gte("started_at", dateFrom.toISOString());
 
     if (orgId && orgId !== "all") {
       query = query.eq("org_id", orgId);
@@ -487,14 +328,14 @@ export async function getFeatureUsage(
     }
 
     const total = conversations?.length || 0;
-    
-    // Voice calls have is_voice = true, text conversations have is_voice = false
-    const voiceCalls = conversations?.filter(c => 
-      c.is_voice === true
+
+    // Voice calls based on channel
+    const voiceCalls = conversations?.filter(c =>
+      c.channel === 'voice' || c.channel === 'phone'
     ).length || 0;
-    
-    const textConversations = conversations?.filter(c => 
-      c.is_voice === false
+
+    const textConversations = conversations?.filter(c =>
+      c.channel === 'chat' || c.channel === 'web' || !c.channel
     ).length || 0;
 
     if (total === 0) {
@@ -505,17 +346,17 @@ export async function getFeatureUsage(
     }
 
     return [
-      { 
-        name: "Voice Calls", 
-        value: voiceCalls, 
-        percentage: Math.round((voiceCalls / total) * 1000) / 10, 
-        color: "#8B5CF6" 
+      {
+        name: "Voice Calls",
+        value: voiceCalls,
+        percentage: Math.round((voiceCalls / total) * 1000) / 10,
+        color: "#8B5CF6"
       },
-      { 
-        name: "Text Conversations", 
-        value: textConversations, 
-        percentage: Math.round((textConversations / total) * 1000) / 10, 
-        color: "#06B6D4" 
+      {
+        name: "Text Conversations",
+        value: textConversations,
+        percentage: Math.round((textConversations / total) * 1000) / 10,
+        color: "#06B6D4"
       },
     ];
 
@@ -529,10 +370,10 @@ export async function getFeatureUsage(
 }
 
 /**
- * Get score distribution data
+ * Get score distribution data using overall_score column
  */
 export async function getScoreDistribution(
-  orgId?: string, 
+  orgId?: string,
   period: string = "30d"
 ): Promise<ScoreDistribution[]> {
   try {
@@ -542,16 +383,10 @@ export async function getScoreDistribution(
 
     let baseQuery = supabase
       .from("conversations")
-      .select(`
-        id,
-        created_at,
-        org_id,
-        scored,
-        confidence_score
-      `)
+      .select("overall_score")
       .eq("scored", true)
-      .not("confidence_score", "is", null)
-      .gte("created_at", dateFrom.toISOString());
+      .not("overall_score", "is", null)
+      .gte("started_at", dateFrom.toISOString());
 
     if (orgId && orgId !== "all") {
       baseQuery = baseQuery.eq("org_id", orgId);
@@ -565,21 +400,18 @@ export async function getScoreDistribution(
     }
 
     if (!conversations || conversations.length === 0) {
-      console.log("No scored conversations found for score distribution");
       return getEmptyScoreDistribution();
     }
 
-    // Extract confidence scores directly from conversations
+    // Extract overall_score from conversations
     const scores: number[] = conversations
-      .filter(conv => conv.confidence_score && conv.confidence_score >= 0 && conv.confidence_score <= 100)
-      .map(conv => conv.confidence_score);
+      .filter(conv => conv.overall_score !== null && conv.overall_score >= 0 && conv.overall_score <= 100)
+      .map(conv => conv.overall_score);
 
     if (scores.length === 0) {
-      console.log("No valid confidence scores found for score distribution");
       return getEmptyScoreDistribution();
     }
 
-    console.log(`Found ${scores.length} valid scores for distribution:`, scores.slice(0, 5));
     return calculateScoreDistribution(scores);
 
   } catch (error) {
@@ -626,7 +458,7 @@ function calculateScoreDistribution(scores: number[]): ScoreDistribution[] {
  * Get call profile data (calls by hour)
  */
 export async function getCallProfile(
-  orgId?: string, 
+  orgId?: string,
   period: string = "30d"
 ): Promise<CallProfile[]> {
   try {
@@ -636,8 +468,8 @@ export async function getCallProfile(
 
     let query = supabase
       .from("conversations")
-      .select("created_at")
-      .gte("created_at", dateFrom.toISOString());
+      .select("started_at")
+      .gte("started_at", dateFrom.toISOString());
 
     if (orgId && orgId !== "all") {
       query = query.eq("org_id", orgId);
@@ -653,8 +485,10 @@ export async function getCallProfile(
     // Group by hour
     const hourCounts = new Array(24).fill(0);
     conversations?.forEach(conv => {
-      const hour = new Date(conv.created_at).getHours();
-      hourCounts[hour]++;
+      if (conv.started_at) {
+        const hour = new Date(conv.started_at).getHours();
+        hourCounts[hour]++;
+      }
     });
 
     // Format for business hours (9 AM - 5 PM)
@@ -687,10 +521,10 @@ export async function getCallProfile(
 }
 
 /**
- * Get trend data over time
+ * Get trend data over time using actual schema columns
  */
 export async function getTrendData(
-  orgId?: string, 
+  orgId?: string,
   period: string = "30d"
 ): Promise<TrendData[]> {
   try {
@@ -708,12 +542,9 @@ export async function getTrendData(
       // Get conversations for this week
       let conversationsQuery = supabase
         .from("conversations")
-        .select(`
-          confidence_score,
-          scores(scores, is_used)
-        `)
-        .gte("created_at", weekStart.toISOString())
-        .lte("created_at", weekEnd.toISOString());
+        .select("overall_score, success, tokens_in, tokens_out")
+        .gte("started_at", weekStart.toISOString())
+        .lte("started_at", weekEnd.toISOString());
 
       if (orgId && orgId !== "all") {
         conversationsQuery = conversationsQuery.eq("org_id", orgId);
@@ -722,49 +553,21 @@ export async function getTrendData(
       const { data: conversations } = await conversationsQuery;
 
       // Calculate averages for this week
-      const confidenceScores = conversations?.filter(c => c.confidence_score).map(c => c.confidence_score) || [];
-      const avgConfidence = confidenceScores.length > 0 
-        ? confidenceScores.reduce((sum, score) => sum + score, 0) / confidenceScores.length 
+      const scoreValues = conversations?.filter(c => c.overall_score !== null)
+        .map(c => c.overall_score) || [];
+
+      const avgScore = scoreValues.length > 0
+        ? scoreValues.reduce((sum, score) => sum + score, 0) / scoreValues.length
         : 0;
 
-      const scoreValues: number[] = [];
-      conversations?.flatMap(c => c.scores || [])
-        .filter(s => s.is_used && s.scores)
-        .forEach(s => {
-          if (s.scores) {
-            let overallScore = null;
-            
-            if (typeof s.scores === 'object') {
-              overallScore = s.scores.overall_score || 
-                            s.scores.overall || 
-                            s.scores.total_score ||
-                            s.scores.score ||
-                            s.scores.average_score;
-            }
-            
-            if (overallScore && typeof overallScore === 'number' && overallScore >= 0 && overallScore <= 100) {
-              scoreValues.push(overallScore);
-            }
-          }
-        });
-      
-      const avgScore = scoreValues.length > 0 
-        ? scoreValues.reduce((sum, score) => sum + score, 0) / scoreValues.length 
-        : 0;
+      // Use success rate as confidence proxy
+      const successCount = conversations?.filter(c => c.success === true).length || 0;
+      const totalCount = conversations?.length || 0;
+      const avgConfidence = totalCount > 0 ? (successCount / totalCount) * 100 : 0;
 
-      // Get token usage for this week
-      let tokenQuery = supabase
-        .from("cost_usage")
-        .select("tokens_used")
-        .gte("period_start", weekStart.toISOString())
-        .lte("period_end", weekEnd.toISOString());
-
-      if (orgId && orgId !== "all") {
-        tokenQuery = tokenQuery.eq("org_id", orgId);
-      }
-
-      const { data: tokenData } = await tokenQuery;
-      const totalTokens = tokenData?.reduce((sum, usage) => sum + (usage.tokens_used || 0), 0) || 0;
+      // Calculate total tokens from conversations
+      const totalTokens = conversations?.reduce((sum, c) =>
+        sum + (c.tokens_in || 0) + (c.tokens_out || 0), 0) || 0;
 
       trendData.push({
         date: weekStart.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
@@ -783,7 +586,7 @@ export async function getTrendData(
 }
 
 /**
- * Get top deferral/escalation reasons (why AI transfers to humans)
+ * Get top deferral/escalation reasons based on end_reason column
  */
 export async function getTopDeferralReasons(
   orgId?: string,
@@ -795,16 +598,11 @@ export async function getTopDeferralReasons(
     const dateFrom = new Date();
     dateFrom.setDate(dateFrom.getDate() - days);
 
-    // Query conversations with their scores to find escalation reasons
     let query = supabase
       .from("conversations")
-      .select(`
-        id,
-        escalation,
-        end_reason,
-        scores(flags, feedback, is_used)
-      `)
-      .gte("created_at", dateFrom.toISOString());
+      .select("end_reason")
+      .gte("started_at", dateFrom.toISOString())
+      .not("end_reason", "is", null);
 
     if (orgId && orgId !== "all") {
       query = query.eq("org_id", orgId);
@@ -817,55 +615,26 @@ export async function getTopDeferralReasons(
       throw error;
     }
 
-    // Map of deferral reasons with descriptions
+    // Map of end_reason descriptions
     const reasonDescriptions: Record<string, string> = {
-      "requires_escalation": "Complex issue requiring human expertise",
-      "policy_violation": "Potential policy or compliance violation detected",
-      "privacy_breach": "Sensitive information or privacy concern",
-      "resident_complaint": "Customer expressed dissatisfaction",
-      "incomplete_resolution": "AI could not fully resolve the request",
-      "compliance_risk": "Potential regulatory or compliance issue",
-      "technical_limitation": "Request beyond AI capabilities",
-      "customer_request": "Customer requested human agent",
-      "low_confidence": "AI had low confidence in response accuracy",
-      "sensitive_topic": "Topic requires human judgment",
-      "high_value_customer": "VIP or high-priority customer",
-      "billing_dispute": "Financial or billing related escalation",
-      "legal_inquiry": "Legal or contractual matter",
-      "emotional_distress": "Customer showing signs of distress",
-      "other": "Other reasons requiring human review"
+      "escalated": "Transferred to human agent",
+      "transferred": "Transferred to another department",
+      "timeout": "Conversation timed out",
+      "user_ended": "Customer ended conversation",
+      "completed": "Successfully resolved",
+      "error": "Technical error occurred",
+      "other": "Other reasons"
     };
 
-    // Count deferral reasons
+    // Count reasons
     const reasonCounts: Record<string, number> = {};
-    let totalEscalations = 0;
+    let total = 0;
 
     conversations?.forEach(conv => {
-      // Check if conversation was escalated
-      const wasEscalated = conv.escalation === true ||
-                          conv.end_reason === 'escalated' ||
-                          conv.end_reason === 'transferred';
-
-      // Check flags in scores
-      conv.scores?.forEach(score => {
-        if (score.is_used && score.flags) {
-          const flags = typeof score.flags === 'object' ? score.flags : {};
-
-          // Count each active flag as a reason
-          Object.entries(flags).forEach(([flag, isActive]) => {
-            if (isActive === true) {
-              const reason = flag;
-              reasonCounts[reason] = (reasonCounts[reason] || 0) + 1;
-              totalEscalations++;
-            }
-          });
-        }
-      });
-
-      // If escalated but no specific flag, count as 'other'
-      if (wasEscalated && conv.scores?.every(s => !s.flags || Object.values(s.flags).every(v => !v))) {
-        reasonCounts['other'] = (reasonCounts['other'] || 0) + 1;
-        totalEscalations++;
+      if (conv.end_reason) {
+        const reason = conv.end_reason;
+        reasonCounts[reason] = (reasonCounts[reason] || 0) + 1;
+        total++;
       }
     });
 
@@ -874,8 +643,8 @@ export async function getTopDeferralReasons(
       .map(([reason, count]) => ({
         reason: reason.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
         count,
-        percentage: totalEscalations > 0 ? Math.round((count / totalEscalations) * 1000) / 10 : 0,
-        description: reasonDescriptions[reason] || "Escalation reason"
+        percentage: total > 0 ? Math.round((count / total) * 1000) / 10 : 0,
+        description: reasonDescriptions[reason] || "End reason"
       }))
       .sort((a, b) => b.count - a.count)
       .slice(0, limit);

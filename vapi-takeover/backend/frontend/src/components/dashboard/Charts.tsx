@@ -280,22 +280,22 @@ interface CostBreakdownChartProps {
   data: {
     llm: number;
     ttsStC: number;
-    vapi: number; // Legacy name, represents platform costs
+    platform: number;
     other: number;
   };
   loading: boolean;
   className?: string;
 }
 
-export const CostBreakdownChart: React.FC<CostBreakdownChartProps> = ({ 
-  data, 
-  loading, 
-  className 
+export const CostBreakdownChart: React.FC<CostBreakdownChartProps> = ({
+  data,
+  loading,
+  className
 }) => {
   const chartData = [
     { name: 'LLM', value: data.llm, color: 'hsl(var(--primary))' },
     { name: 'TTS/STT', value: data.ttsStC, color: 'hsl(var(--success))' },
-    { name: 'Platform', value: data.vapi, color: 'hsl(var(--warning))' },
+    { name: 'Platform', value: data.platform, color: 'hsl(var(--warning))' },
     { name: 'Other', value: data.other, color: 'hsl(var(--muted))' }
   ].filter(item => item.value > 0);
 

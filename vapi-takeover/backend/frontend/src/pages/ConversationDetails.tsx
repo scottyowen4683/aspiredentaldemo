@@ -43,14 +43,14 @@ interface CostBreakdown {
   stt?: number;
   tts?: number;
   chat?: number;
-  vapi?: number;
+  platform?: number;
   total?: number;
   transport?: number;
   ttsCharacters?: number;
   llmPromptTokens?: number;
   knowledgeBaseCost?: number;
   llmCompletionTokens?: number;
-  // Text message cost fields (from VAPI session.costs array)
+  // Text message cost fields
   model?: number;
   session?: number;
   analysis?: number;
@@ -78,7 +78,7 @@ interface CostBreakdown {
     stt: number;
     tts: number;
     chat: number;
-    vapi: number;
+    platform: number;
     total: number;
     transport: number;
     ttsCharacters: number;
@@ -853,10 +853,10 @@ export default function ConversationDetails() {
                         <span className="font-mono flex-shrink-0">{formatCurrency(costBreakdown?.tts)}</span>
                       </div>
                     )}
-                    {costBreakdown?.vapi !== undefined && costBreakdown.vapi > 0 && (
+                    {costBreakdown?.platform !== undefined && costBreakdown.platform > 0 && (
                       <div className="flex justify-between items-center text-sm">
-                        <span className="truncate">Voice Platform</span>
-                        <span className="font-mono flex-shrink-0">{formatCurrency(costBreakdown?.vapi)}</span>
+                        <span className="truncate">Platform</span>
+                        <span className="font-mono flex-shrink-0">{formatCurrency(costBreakdown?.platform)}</span>
                       </div>
                     )}
                     {costBreakdown?.whisper_transcription && costBreakdown.whisper_transcription > 0 && (
