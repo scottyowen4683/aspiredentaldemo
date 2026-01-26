@@ -49,22 +49,32 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Serve static files from public folder
-app.use(express.static(join(__dirname, 'public')));
+// Debug: Check if public folder exists and list files
+import { existsSync, readdirSync } from 'fs';
+const publicPath = join(__dirname, 'public');
+logger.info(`Public folder path: ${publicPath}`);
+logger.info(`Public folder exists: ${existsSync(publicPath)}`);
+if (existsSync(publicPath)) {
+  logger.info(`Public folder contents: ${readdirSync(publicPath).join(', ')}`);
+}
 
-// Serve admin portal at root
-app.get('/', (req, res) => {
-  res.sendFile(join(__dirname, 'public', 'index.html'));
-});
-
 // Serve static files from public folder
-app.use(express.static(join(__dirname, 'public')));
+app.use(express.static(publicPath));
 
 // API Routes
 app.use('/api/chat', chatRouter);
 app.use('/api/voice', voiceRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/campaigns', campaignsRouter);
+
+// SPA catch-all: serve index.html for all non-API routes (React Router handles client-side routing)
+app.get('*', (req, res, next) => {
+  // Skip API routes and static files
+  if (req.path.startsWith('/api/') || req.path.startsWith('/voice/')) {
+    return next();
+  }
+  res.sendFile(join(__dirname, 'public', 'index.html'));
+});
 
 // WebSocket handler for Twilio Media Streams
 wss.on('connection', async (ws, req) => {

@@ -519,6 +519,175 @@ router.post('/validate-twilio-number', async (req, res) => {
 // STATS & MONITORING
 // =============================================================================
 
+// =============================================================================
+// EMBED CODE / INTEGRATION
+// =============================================================================
+
+// GET /api/admin/assistants/:id/embed-code - Get embed code for assistant
+router.get('/assistants/:id/embed-code', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const baseUrl = process.env.BASE_URL || `${req.protocol}://${req.get('host')}`;
+
+    // Get assistant
+    const { data: assistant, error } = await supabaseService.client
+      .from('assistants')
+      .select('*, organizations(name, slug)')
+      .eq('id', id)
+      .single();
+
+    if (error || !assistant) {
+      return res.status(404).json({
+        success: false,
+        error: 'Assistant not found'
+      });
+    }
+
+    // Get widget config (if any)
+    const widgetConfig = assistant.widget_config || {};
+    const primaryColor = widgetConfig.primaryColor || '#8B5CF6';
+    const greeting = widgetConfig.greeting || `Hello! I'm ${assistant.friendly_name}. How can I help you today?`;
+    const title = widgetConfig.title || assistant.friendly_name;
+
+    // Generate embed codes based on bot_type
+    let embedCodes = {};
+
+    if (assistant.bot_type === 'chat' || assistant.bot_type === 'both') {
+      // Chat widget embed code
+      embedCodes.chat = {
+        script: `<!-- Aspire AI Chat Widget -->
+<script
+  src="${baseUrl}/widget/aspire-chat.js"
+  data-assistant-id="${assistant.id}"
+  data-api-url="${baseUrl}"
+  data-primary-color="${primaryColor}"
+  data-greeting="${greeting}"
+  data-title="${title}"
+  data-position="bottom-right"
+  async>
+</script>`,
+        iframe: `<!-- Aspire AI Chat Widget (iframe) -->
+<iframe
+  src="${baseUrl}/widget/chat-frame.html?assistantId=${assistant.id}"
+  style="position: fixed; bottom: 20px; right: 20px; width: 400px; height: 600px; border: none; z-index: 9999;"
+  allow="microphone"
+></iframe>`,
+        npm: `// Install: npm install @aspire-ai/chat-widget
+import { AspireChat } from '@aspire-ai/chat-widget';
+
+const chat = new AspireChat({
+  assistantId: '${assistant.id}',
+  apiUrl: '${baseUrl}',
+  primaryColor: '${primaryColor}',
+  greeting: '${greeting}',
+  title: '${title}'
+});
+
+chat.init();`,
+        react: `// React Component
+import { useEffect } from 'react';
+
+export function AspireChatWidget() {
+  useEffect(() => {
+    const script = document.createElement('script');
+    script.src = '${baseUrl}/widget/aspire-chat.js';
+    script.async = true;
+    script.setAttribute('data-assistant-id', '${assistant.id}');
+    script.setAttribute('data-api-url', '${baseUrl}');
+    script.setAttribute('data-primary-color', '${primaryColor}');
+    script.setAttribute('data-greeting', '${greeting}');
+    script.setAttribute('data-title', '${title}');
+    document.body.appendChild(script);
+
+    return () => {
+      document.body.removeChild(script);
+    };
+  }, []);
+
+  return null;
+}`,
+        api: {
+          endpoint: `${baseUrl}/api/chat`,
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: {
+            assistantId: assistant.id,
+            sessionId: 'optional-unique-session-id',
+            message: 'User message here'
+          },
+          example: `curl -X POST ${baseUrl}/api/chat \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "assistantId": "${assistant.id}",
+    "message": "Hello, I need help"
+  }'`
+        }
+      };
+    }
+
+    if (assistant.bot_type === 'voice') {
+      // Voice assistant integration info
+      embedCodes.voice = {
+        phoneNumber: assistant.phone_number,
+        twilioWebhook: `${baseUrl}/api/voice/incoming`,
+        outboundApi: {
+          endpoint: `${baseUrl}/api/voice/outbound`,
+          method: 'POST',
+          body: {
+            assistantId: assistant.id,
+            toNumber: '+1234567890'
+          },
+          example: `curl -X POST ${baseUrl}/api/voice/outbound \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "assistantId": "${assistant.id}",
+    "toNumber": "+1234567890"
+  }'`
+        },
+        instructions: `To set up voice:
+1. Configure your Twilio number (${assistant.phone_number || 'Not configured'}) webhooks:
+   - Voice URL: ${baseUrl}/api/voice/incoming (POST)
+   - Status Callback: ${baseUrl}/api/voice/status (POST)
+
+2. For outbound calls, use the API endpoint above.
+
+3. Call recordings will be stored and accessible via the dashboard.`
+      };
+    }
+
+    res.json({
+      success: true,
+      assistant: {
+        id: assistant.id,
+        name: assistant.friendly_name,
+        type: assistant.bot_type,
+        organization: assistant.organizations?.name
+      },
+      embedCodes,
+      widgetConfig: {
+        primaryColor,
+        greeting,
+        title,
+        position: 'bottom-right',
+        showPoweredBy: true
+      }
+    });
+
+  } catch (error) {
+    logger.error('Embed code generation error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to generate embed code'
+    });
+  }
+});
+
+// =============================================================================
+// SYSTEM STATS
+// =============================================================================
+
 // GET /api/admin/stats - Get system-wide stats (for super admin)
 router.get('/stats', async (req, res) => {
   try {
