@@ -490,6 +490,22 @@ router.get('/knowledge-base', async (req, res) => {
 // TWILIO VALIDATION
 // =============================================================================
 
+// GET /api/admin/twilio-status - Check if Twilio is configured (for debugging)
+router.get('/twilio-status', async (req, res) => {
+  const hasAccountSid = !!process.env.TWILIO_ACCOUNT_SID;
+  const hasAuthToken = !!process.env.TWILIO_AUTH_TOKEN;
+
+  res.json({
+    configured: hasAccountSid && hasAuthToken,
+    hasAccountSid,
+    hasAuthToken,
+    accountSidPrefix: hasAccountSid ? process.env.TWILIO_ACCOUNT_SID.substring(0, 8) + '...' : null,
+    message: hasAccountSid && hasAuthToken
+      ? 'Twilio is configured'
+      : 'Twilio credentials missing - set TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN'
+  });
+});
+
 // POST /api/admin/validate-twilio-number - Validate Twilio phone number
 router.post('/validate-twilio-number', async (req, res) => {
   try {
