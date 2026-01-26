@@ -337,19 +337,26 @@ export async function searchOrganizations(
     const organizationsWithStats: Organization[] = organizations.map((org: any) => ({
       id: org.id,
       name: org.name,
-      region: org.region,
+      slug: org.slug,
+      contact_email: org.contact_email,
+      contact_phone: org.contact_phone,
+      billing_email: org.billing_email,
+      monthly_interaction_limit: org.monthly_interaction_limit,
+      price_per_interaction: org.price_per_interaction,
+      flat_rate_fee: org.flat_rate_fee,
+      included_interactions: org.included_interactions,
+      overage_rate_per_1000: org.overage_rate_per_1000,
+      current_period_start: org.current_period_start,
+      current_period_end: org.current_period_end,
+      current_period_interactions: org.current_period_interactions,
+      total_interactions: org.total_interactions,
+      settings: org.settings,
+      active: org.active,
       created_at: org.created_at,
       updated_at: org.updated_at,
-      vapi_webhook_secret: org.vapi_webhook_secret,
-      ghl_webhook_secret: org.ghl_webhook_secret,
-      // GHL API Settings
-      ghl_api_key: org.ghl_api_key,
-      ghl_location_id: org.ghl_location_id,
-      ghl_base_url: org.ghl_base_url,
       assistantCount: assistantCounts[org.id] || 0,
       userCount: userCounts[org.id] || 0,
       conversationCount: conversationCounts[org.id] || 0,
-      status: 'active' as const,
     }));
 
     return {
@@ -367,16 +374,21 @@ export async function searchOrganizations(
 }
 
 /**
- * Update an organization's fields (name, region, service plan, etc.)
+ * Update an organization's fields using actual schema columns
  */
-export async function updateOrganization(id: string, updates: Partial<{ 
-  name: string; 
-  region: string;
-  service_plan_name: string;
-  monthly_service_fee: number;
-  baseline_human_cost_per_call: number;
-  coverage_hours: "12hr" | "24hr";
-  time_zone: string;
+export async function updateOrganization(id: string, updates: Partial<{
+  name: string;
+  slug: string;
+  contact_email: string;
+  contact_phone: string;
+  billing_email: string;
+  monthly_interaction_limit: number;
+  price_per_interaction: number;
+  flat_rate_fee: number;
+  included_interactions: number;
+  overage_rate_per_1000: number;
+  settings: any;
+  active: boolean;
 }>): Promise<{
   success: boolean;
   data?: Organization;
@@ -403,22 +415,30 @@ export async function updateOrganization(id: string, updates: Partial<{
 }
 
 /**
- * Update organization API settings (GHL configuration)
+ * Update organization settings (stored in JSONB settings column)
  */
-export async function updateOrganizationApiSettings(id: string, apiSettings: {
-  ghl_api_key?: string;
-  ghl_location_id?: string;
-  ghl_base_url?: string;
-}): Promise<{
+export async function updateOrganizationApiSettings(id: string, apiSettings: Record<string, any>): Promise<{
   success: boolean;
   data?: Organization;
   error?: string;
 }> {
   try {
+    // Get current settings first
+    const { data: currentOrg } = await supabase
+      .from('organizations')
+      .select('settings')
+      .eq('id', id)
+      .single();
+
+    const mergedSettings = {
+      ...(currentOrg?.settings || {}),
+      ...apiSettings
+    };
+
     const { data, error } = await supabase
       .from('organizations')
       .update({
-        ...apiSettings,
+        settings: mergedSettings,
         updated_at: new Date().toISOString()
       })
       .eq('id', id)
@@ -448,10 +468,10 @@ export function generateWebhookSecret(provider: 'vapi' | 'ghl'): string {
 }
 
 /**
- * Update webhook secrets for an organization
+ * Update webhook secrets for an organization (stored in settings JSONB)
  */
 export async function updateWebhookSecrets(
-  id: string, 
+  id: string,
   secrets: { vapi_webhook_secret?: string; ghl_webhook_secret?: string }
 ): Promise<{
   success: boolean;
@@ -459,9 +479,24 @@ export async function updateWebhookSecrets(
   error?: string;
 }> {
   try {
+    // Get current settings first
+    const { data: currentOrg } = await supabase
+      .from('organizations')
+      .select('settings')
+      .eq('id', id)
+      .single();
+
+    const mergedSettings = {
+      ...(currentOrg?.settings || {}),
+      webhook_secrets: {
+        ...(currentOrg?.settings?.webhook_secrets || {}),
+        ...secrets
+      }
+    };
+
     const { data, error } = await supabase
       .from('organizations')
-      .update(secrets)
+      .update({ settings: mergedSettings })
       .eq('id', id)
       .select()
       .single();

@@ -167,14 +167,13 @@ export async function getPendingScoringConversations(orgId?: string) {
         id,
         org_id,
         assistant_id,
-        provider,
-        created_at,
-        call_duration,
+        channel,
+        started_at,
+        duration_seconds,
         assistants!inner(
           id,
           friendly_name,
-          auto_score,
-          pause_auto_score
+          auto_score
         ),
         organizations(
           name
@@ -182,8 +181,7 @@ export async function getPendingScoringConversations(orgId?: string) {
       `)
       .eq('scored', false)
       .eq('assistants.auto_score', true)
-      .eq('assistants.pause_auto_score', false)
-      .order('created_at', { ascending: true });
+      .order('started_at', { ascending: true });
 
     // Filter by org for non-super admins
     if (orgId) {
@@ -245,11 +243,9 @@ export async function getRecentScoringActivity(orgId?: string, limit = 50) {
  * Update assistant scoring settings
  */
 export async function updateAssistantScoringSettings(
-  assistantId: string, 
+  assistantId: string,
   settings: {
     auto_score?: boolean;
-    pause_auto_score?: boolean;
-    rubric?: string;
   }
 ) {
   try {
@@ -269,13 +265,12 @@ export async function updateAssistantScoringSettings(
 }
 
 /**
- * Update organization cost thresholds
+ * Update organization interaction limits
  */
 export async function updateCostThresholds(
   orgId: string,
   thresholds: {
-    monthly_token_threshold?: number;
-    monthly_minutes_threshold?: number;
+    monthly_interaction_limit?: number;
   }
 ) {
   try {
@@ -295,120 +290,33 @@ export async function updateCostThresholds(
 }
 
 /**
- * Get resident questions analytics for an assistant or organization
+ * Get resident questions analytics - placeholder (table doesn't exist in current schema)
  */
-export async function getResidentQuestions(assistantId?: string, orgId?: string, limit = 50) {
-  try {
-    let query = supabase
-      .from('resident_questions')
-      .select(`
-        id,
-        intent,
-        frequency,
-        created_at,
-        updated_at,
-        assistants(friendly_name),
-        organizations(name)
-      `)
-      .order('frequency', { ascending: false })
-      .limit(limit);
-
-    if (assistantId) {
-      query = query.eq('assistant_id', assistantId);
-    }
-
-    if (orgId) {
-      query = query.eq('org_id', orgId);
-    }
-
-    const { data, error } = await query;
-
-    if (error) throw error;
-
-    return { data: data || [], error: null };
-  } catch (error) {
-    console.error('Error getting resident questions:', error);
-    return { data: [], error };
-  }
+export async function getResidentQuestions(_assistantId?: string, _orgId?: string, _limit = 50) {
+  // Table doesn't exist in current schema
+  return { data: [], error: null };
 }
 
 /**
- * Get resident questions statistics
+ * Get resident questions statistics - placeholder (table doesn't exist in current schema)
  */
-export async function getResidentQuestionsStats(assistantId?: string, orgId?: string) {
-  try {
-    let query = supabase
-      .from('resident_questions')
-      .select('intent, frequency');
-
-    if (assistantId) {
-      query = query.eq('assistant_id', assistantId);
-    }
-
-    if (orgId) {
-      query = query.eq('org_id', orgId);
-    }
-
-    const { data, error } = await query;
-
-    if (error) throw error;
-
-    const stats = {
-      total_questions: data?.length || 0,
-      total_frequency: data?.reduce((sum, q) => sum + (q.frequency || 0), 0) || 0,
+export async function getResidentQuestionsStats(_assistantId?: string, _orgId?: string) {
+  // Table doesn't exist in current schema
+  return {
+    data: {
+      total_questions: 0,
+      total_frequency: 0,
       avg_frequency: 0,
       top_intents: [] as Array<{ intent: string; frequency: number }>
-    };
-
-    if (stats.total_questions > 0) {
-      stats.avg_frequency = Math.round(stats.total_frequency / stats.total_questions);
-      stats.top_intents = data
-        ?.sort((a, b) => (b.frequency || 0) - (a.frequency || 0))
-        .slice(0, 10)
-        .map(q => ({ intent: q.intent, frequency: q.frequency || 0 })) || [];
-    }
-
-    return { data: stats, error: null };
-  } catch (error) {
-    console.error('Error getting resident questions stats:', error);
-    return { data: null, error };
-  }
+    },
+    error: null
+  };
 }
 
 /**
- * Search resident questions by intent or keyword
+ * Search resident questions - placeholder (table doesn't exist in current schema)
  */
-export async function searchResidentQuestions(searchTerm: string, assistantId?: string, orgId?: string) {
-  try {
-    let query = supabase
-      .from('resident_questions')
-      .select(`
-        id,
-        intent,
-        frequency,
-        created_at,
-        updated_at,
-        assistants(friendly_name),
-        organizations(name)
-      `)
-      .ilike('intent', `%${searchTerm}%`)
-      .order('frequency', { ascending: false });
-
-    if (assistantId) {
-      query = query.eq('assistant_id', assistantId);
-    }
-
-    if (orgId) {
-      query = query.eq('org_id', orgId);
-    }
-
-    const { data, error } = await query;
-
-    if (error) throw error;
-
-    return { data: data || [], error: null };
-  } catch (error) {
-    console.error('Error searching resident questions:', error);
-    return { data: [], error };
-  }
+export async function searchResidentQuestions(_searchTerm: string, _assistantId?: string, _orgId?: string) {
+  // Table doesn't exist in current schema
+  return { data: [], error: null };
 }
