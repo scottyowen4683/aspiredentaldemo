@@ -1,6 +1,5 @@
 // ai/voice-handler.js - Complete voice pipeline (VAPI replacement)
 import OpenAI from 'openai';
-import { Readable } from 'stream';
 import logger from '../services/logger.js';
 import supabaseService from '../services/supabase-service.js';
 import { streamElevenLabsAudio } from './elevenlabs.js';
@@ -190,16 +189,9 @@ class VoiceHandler {
         outputSizeKB: (wavBuffer.length / 1024).toFixed(2)
       });
 
-      // Create a File-like object for OpenAI SDK (Node.js compatible)
-      // OpenAI SDK accepts objects with name, type, and arrayBuffer() method
-      const file = {
-        name: 'audio.wav',
-        type: 'audio/wav',
-        arrayBuffer: async () => wavBuffer.buffer.slice(wavBuffer.byteOffset, wavBuffer.byteOffset + wavBuffer.byteLength),
-        stream: () => Readable.from(wavBuffer),
-        size: wavBuffer.length,
-        lastModified: Date.now()
-      };
+      // Create a File object using Node.js 20+ native File API
+      // OpenAI SDK v4+ accepts File objects directly
+      const file = new File([wavBuffer], 'audio.wav', { type: 'audio/wav' });
 
       // Call Whisper API
       const transcription = await openai.audio.transcriptions.create({
