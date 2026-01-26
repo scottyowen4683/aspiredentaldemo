@@ -7,6 +7,16 @@ import supabaseService from '../services/supabase-service.js';
 const router = express.Router();
 const VoiceResponse = twilio.twiml.VoiceResponse;
 
+// Debug: echo what we receive
+router.post('/echo', (req, res) => {
+  logger.info('Echo endpoint hit:', {
+    body: req.body,
+    headers: req.headers,
+    contentType: req.get('content-type')
+  });
+  res.json({ received: req.body });
+});
+
 // POST /api/voice/incoming
 // Twilio webhook for incoming calls
 router.post('/incoming', async (req, res) => {
