@@ -9,16 +9,15 @@ import { TrendsChart, CostBreakdownChart } from "@/components/dashboard/Charts";
 import { useUser } from "@/context/UserContext";
 import { useOrganizationMetrics, useRecentActivity } from "@/hooks/useOrganizationMetrics";
 import { useAssistantPerformance, useCostAnalytics } from "@/hooks/useAssistantPerformance";
-import { supabase } from "@/supabaseClient";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { 
-  RefreshCw, 
-  AlertTriangle, 
+import {
+  RefreshCw,
+  AlertTriangle,
   TrendingUp,
   BarChart3,
   Users,
@@ -26,7 +25,8 @@ import {
   Cpu,
   Server,
   Zap,
-  Clock
+  Clock,
+  MessageSquare
 } from "lucide-react";
 
 export default function SuperAdminOrganizationDashboard() {
@@ -78,8 +78,8 @@ export default function SuperAdminOrganizationDashboard() {
   const chartData = costData?.map(day => ({
     date: day.date,
     conversations: day.conversationCount,
-    avgScore: assistants.length > 0 
-      ? assistants.reduce((sum, a) => sum + a.avgScore, 0) / assistants.length 
+    avgScore: assistants.length > 0
+      ? assistants.reduce((sum, a) => sum + a.avgScore, 0) / assistants.length
       : 0,
     totalCost: day.totalCost
   })) || [];
@@ -151,13 +151,13 @@ export default function SuperAdminOrganizationDashboard() {
         )}
 
         {/* Main Metrics Overview */}
-        <MetricsOverview 
-          metrics={metrics} 
-          loading={metricsLoading} 
-          error={metricsError} 
+        <MetricsOverview
+          metrics={metrics}
+          loading={metricsLoading}
+          error={metricsError}
         />
 
-        {/* Internal Cost Analysis */}
+        {/* Internal Cost Analysis - Super Admin Only */}
         <div className="grid gap-6 md:grid-cols-4">
           <Card className="shadow-card">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">

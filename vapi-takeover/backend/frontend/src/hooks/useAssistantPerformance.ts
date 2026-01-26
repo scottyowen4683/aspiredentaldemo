@@ -39,113 +39,69 @@ export const useAssistantPerformance = (orgId: string | null, days: number = 30)
         const startDate = new Date();
         startDate.setDate(startDate.getDate() - days);
 
-        // Fetch assistants with related conversation and score data
+        // Fetch assistants with related conversation data (without scores join that may fail)
         const { data: assistantsData, error: assistantsError } = await supabase
           .from('assistants')
           .select(`
             id,
             friendly_name,
             auto_score,
-            pause_auto_score,
-            conversations!inner(
-              id,
-              created_at,
-              confidence_score,
-              total_cost,
-              scores(
-                sentiments,
-                flags
-              )
-            )
+            pause_auto_score
           `)
           .eq('org_id', orgId);
 
         if (assistantsError) throw assistantsError;
 
-        // Fetch flagged conversations by assistant
-        const { data: flaggedData, error: flaggedError } = await supabase
-          .from('review_queue')
-          .select(`
-            id,
-            score_id,
-            org_id
-          `)
-          .eq('org_id', orgId)
-          .eq('reviewed', false);
+        // Fetch conversations separately (avoiding inner join issues)
+        const { data: conversationsData } = await supabase
+          .from('conversations')
+          .select('id, created_at, confidence_score, overall_score, assistant_id')
+          .eq('org_id', orgId);
 
-        // Fetch score data separately to get conversation and assistant relationships
-        let flaggedByAssistant: Record<string, number> = {};
-        if (flaggedData && flaggedData.length > 0) {
-          const scoreIds = flaggedData.map(item => item.score_id).filter(Boolean);
-          if (scoreIds.length > 0) {
-            const { data: scoresData } = await supabase
-              .from('scores')
-              .select(`
-                id,
-                conversation_id,
-                conversations!inner(
-                  assistant_id
-                )
-              `)
-              .in('id', scoreIds);
-
-            if (scoresData) {
-              scoresData.forEach(score => {
-                const assistantId = score.conversations?.assistant_id;
-                if (assistantId) {
-                  flaggedByAssistant[assistantId] = (flaggedByAssistant[assistantId] || 0) + 1;
-                }
-              });
+        // Group conversations by assistant
+        const conversationsByAssistant: Record<string, any[]> = {};
+        conversationsData?.forEach(conv => {
+          if (conv.assistant_id) {
+            if (!conversationsByAssistant[conv.assistant_id]) {
+              conversationsByAssistant[conv.assistant_id] = [];
             }
+            conversationsByAssistant[conv.assistant_id].push(conv);
           }
-        }
+        });
 
-        if (flaggedError) throw flaggedError;
+        // Flagged conversations feature not available without review_queue table
+        let flaggedByAssistant: Record<string, number> = {};
 
         // Process data for each assistant
         const processedAssistants: AssistantPerformanceData[] = assistantsData?.map(assistant => {
-          const conversations = assistant.conversations || [];
-          
+          const conversations = conversationsByAssistant[assistant.id] || [];
+
           // Filter conversations within date range
-          const recentConversations = conversations.filter(conv => 
+          const recentConversations = conversations.filter(conv =>
             new Date(conv.created_at) >= startDate
           );
 
           // Calculate metrics
           const totalConversations = recentConversations.length;
-          
-          const scoredConversations = recentConversations.filter(conv => 
-            conv.confidence_score !== null && conv.confidence_score !== undefined
+
+          // Use confidence_score or overall_score
+          const scoredConversations = recentConversations.filter(conv =>
+            (conv.confidence_score !== null && conv.confidence_score !== undefined) ||
+            (conv.overall_score !== null && conv.overall_score !== undefined)
           );
-          
+
           const avgScore = scoredConversations.length > 0
-            ? scoredConversations.reduce((sum, conv) => sum + (conv.confidence_score || 0), 0) / scoredConversations.length
+            ? scoredConversations.reduce((sum, conv) => sum + (conv.confidence_score || conv.overall_score || 0), 0) / scoredConversations.length
             : 0;
 
-          // Calculate sentiment distribution and get most common
-          const sentiments = recentConversations
-            .map(conv => conv.scores?.[0]?.sentiments?.overall_sentiment)
-            .filter(Boolean);
-          
-          const sentimentCounts = sentiments.reduce((acc, sentiment) => {
-            acc[sentiment] = (acc[sentiment] || 0) + 1;
-            return acc;
-          }, {} as Record<string, number>);
-
-          const avgSentiment = Object.keys(sentimentCounts).length > 0 
-            ? Object.entries(sentimentCounts).reduce((max, [sentiment, count]) => 
-                (count as number) > (max.count as number) ? { sentiment, count } : max, 
-                { sentiment: 'neutral', count: 0 }
-              ).sentiment
-            : 'neutral';
+          // Sentiment not available without scores table
+          const avgSentiment = 'neutral';
 
           // Count flagged conversations for this assistant
           const flaggedConversations = flaggedByAssistant[assistant.id] || 0;
 
-          // Calculate total cost
-          const totalCost = recentConversations.reduce(
-            (sum, conv) => sum + (conv.total_cost || 0), 0
-          );
+          // Cost tracking removed for self-hosted platform
+          const totalCost = 0;
 
           // Generate trends data (daily aggregations)
           const trendsData = generateDailyTrends(recentConversations, startDate, endDate);
@@ -327,8 +283,9 @@ function generateDailyTrends(
     const date = new Date(conv.created_at).toISOString().split('T')[0];
     if (dailyData[date]) {
       dailyData[date].conversations += 1;
-      if (conv.confidence_score !== null && conv.confidence_score !== undefined) {
-        dailyData[date].totalScore += conv.confidence_score;
+      const score = conv.confidence_score || conv.overall_score;
+      if (score !== null && score !== undefined) {
+        dailyData[date].totalScore += score;
         dailyData[date].scoreCount += 1;
       }
     }
