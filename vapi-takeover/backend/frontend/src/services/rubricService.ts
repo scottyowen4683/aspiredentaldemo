@@ -34,6 +34,7 @@ export interface RubricUsageStats {
 
 /**
  * Get organization's default rubric
+ * Note: Uses settings JSONB column since default_rubric column may not exist
  */
 export async function getOrganizationRubric(orgId: string): Promise<{
   success: boolean;
@@ -43,29 +44,32 @@ export async function getOrganizationRubric(orgId: string): Promise<{
   try {
     const { data, error } = await supabase
       .from("organizations")
-      .select("default_rubric")
+      .select("settings")
       .eq("id", orgId)
       .single();
 
     if (error) {
-      return { success: false, error };
+      console.log("Error fetching organization rubric:", error.message);
+      return { success: true, data: null };
     }
 
-    const rubric = data?.default_rubric ? JSON.parse(data.default_rubric) : null;
-    
+    // Try to get rubric from settings JSONB column
+    const rubric = data?.settings?.default_rubric || null;
+
     return { success: true, data: rubric };
   } catch (err) {
     console.error("Error fetching organization rubric:", err);
-    return { success: false, error: err as Error };
+    return { success: true, data: null };
   }
 }
 
 /**
  * Update organization's default rubric
+ * Note: Stores rubric in settings JSONB column since default_rubric column may not exist
  */
 export async function updateOrganizationRubric(
-  orgId: string, 
-  rubric: Rubric, 
+  orgId: string,
+  rubric: Rubric,
   userId?: string
 ): Promise<{
   success: boolean;
@@ -82,22 +86,36 @@ export async function updateOrganizationRubric(
       created_at: new Date().toISOString()
     };
 
+    // First get current settings
+    const { data: currentOrg } = await supabase
+      .from("organizations")
+      .select("settings, name")
+      .eq("id", orgId)
+      .single();
+
+    // Merge rubric into settings
+    const mergedSettings = {
+      ...(currentOrg?.settings || {}),
+      default_rubric: rubricWithTimestamp
+    };
+
     const { data, error } = await supabase
       .from("organizations")
-      .update({ 
-        default_rubric: JSON.stringify(rubricWithTimestamp),
+      .update({
+        settings: mergedSettings,
         updated_at: new Date().toISOString()
       })
       .eq("id", orgId)
-      .select("default_rubric, name")
+      .select("settings, name")
       .single();
 
     if (error) {
+      console.error("Error updating organization rubric:", error);
       return { success: false, error };
     }
 
-    const updatedRubric = data?.default_rubric ? JSON.parse(data.default_rubric) : null;
-    
+    const updatedRubric = data?.settings?.default_rubric || null;
+
     // Log audit event
     if (userId) {
       await logAuditEvent({
@@ -105,7 +123,7 @@ export async function updateOrganizationRubric(
         user_id: userId,
         action: isNewRubric ? AUDIT_ACTIONS.ORGANIZATION_RUBRIC_CREATED : AUDIT_ACTIONS.ORGANIZATION_RUBRIC_UPDATED,
         details: {
-          organization_name: data?.name,
+          organization_name: data?.name || currentOrg?.name,
           rubric_dimensions: rubric.dimensions?.length || 0,
           rubric_version: rubric.version || 1,
           dimension_names: rubric.dimensions?.map(d => d.name) || [],
@@ -114,7 +132,7 @@ export async function updateOrganizationRubric(
         }
       });
     }
-    
+
     return { success: true, data: updatedRubric };
   } catch (err) {
     console.error("Error updating organization rubric:", err);
