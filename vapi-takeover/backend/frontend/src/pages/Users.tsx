@@ -41,9 +41,9 @@ export default function Users() {
   const [inviteRole, setInviteRole] = useState<"org_admin">("org_admin");
   const [inviteOrgId, setInviteOrgId] = useState<string>("");
   const { toast } = useToast();
-
-
-
+  const [searchParams] = useSearchParams();
+  const orgFilter = searchParams.get("orgId");
+  const { user } = useUser();
 
   // Fetch users
   const {
@@ -91,10 +91,6 @@ export default function Users() {
     totalAdmins: 0,
     totalSuperAdmins: 0,
   };
-
-  const [searchParams] = useSearchParams();
-  const orgFilter = searchParams.get("orgId");
-  const { user } = useUser();
 
   let filteredUsers = users;
 

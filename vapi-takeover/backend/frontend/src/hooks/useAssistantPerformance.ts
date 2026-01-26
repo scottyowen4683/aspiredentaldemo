@@ -186,31 +186,47 @@ export const useCostAnalytics = (orgId: string | null, days: number = 30) => {
         const startDate = new Date();
         startDate.setDate(startDate.getDate() - days);
 
-        // Fetch conversations with cost breakdown
+        // Fetch conversations - only select columns that exist
         const { data: conversations, error: conversationsError } = await supabase
           .from('conversations')
-          .select('id, created_at, total_cost, cost_breakdown')
+          .select('id, created_at, started_at')
           .eq('org_id', orgId)
           .gte('created_at', startDate.toISOString())
           .lte('created_at', endDate.toISOString())
           .order('created_at', { ascending: true });
 
-        if (conversationsError) throw conversationsError;
+        // If created_at doesn't work, try started_at
+        let convData = conversations;
+        if (conversationsError) {
+          console.log('Cost analytics: trying with started_at instead of created_at');
+          const { data: convStarted, error: startedError } = await supabase
+            .from('conversations')
+            .select('id, started_at')
+            .eq('org_id', orgId)
+            .gte('started_at', startDate.toISOString())
+            .lte('started_at', endDate.toISOString())
+            .order('started_at', { ascending: true });
 
-        // Group conversations by date and calculate daily costs
+          if (startedError) {
+            console.log('Cost analytics query failed:', startedError.message);
+            // Return empty data rather than failing
+            setCostData([]);
+            setTotalCost(0);
+            setLoading(false);
+            return;
+          }
+          convData = convStarted;
+        }
+
+        // Group conversations by date (cost tracking disabled for self-hosted)
         const dailyCosts: Record<string, CostBreakdown> = {};
-        let totalCostSum = 0;
 
-        conversations?.forEach(conv => {
-          const date = new Date(conv.created_at).toISOString().split('T')[0];
-          const cost = conv.total_cost || 0;
-          const breakdown = conv.cost_breakdown || {};
+        convData?.forEach(conv => {
+          const dateStr = new Date(conv.created_at || conv.started_at).toISOString().split('T')[0];
 
-          totalCostSum += cost;
-
-          if (!dailyCosts[date]) {
-            dailyCosts[date] = {
-              date,
+          if (!dailyCosts[dateStr]) {
+            dailyCosts[dateStr] = {
+              date: dateStr,
               totalCost: 0,
               llmCost: 0,
               ttsStCost: 0,
@@ -219,19 +235,7 @@ export const useCostAnalytics = (orgId: string | null, days: number = 30) => {
             };
           }
 
-          dailyCosts[date].totalCost += cost;
-          dailyCosts[date].conversationCount += 1;
-
-          // Extract cost breakdown if available
-          if (breakdown.llm) {
-            dailyCosts[date].llmCost += breakdown.llm;
-          }
-          if (breakdown.tts || breakdown.stt) {
-            dailyCosts[date].ttsStCost += (breakdown.tts || 0) + (breakdown.stt || 0);
-          }
-          if (breakdown.platform) {
-            dailyCosts[date].platformCost += breakdown.platform;
-          }
+          dailyCosts[dateStr].conversationCount += 1;
         });
 
         // Convert to array and fill missing dates
@@ -249,10 +253,12 @@ export const useCostAnalytics = (orgId: string | null, days: number = 30) => {
         }
 
         setCostData(costArray);
-        setTotalCost(Math.round(totalCostSum * 100) / 100);
+        setTotalCost(0); // No cost tracking for self-hosted
       } catch (err) {
         console.error('Error fetching cost analytics:', err);
-        setError(err instanceof Error ? err.message : 'Unknown error occurred');
+        // Don't set error - just use empty data
+        setCostData([]);
+        setTotalCost(0);
       } finally {
         setLoading(false);
       }
