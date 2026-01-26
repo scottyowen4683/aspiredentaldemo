@@ -129,6 +129,7 @@ export async function createAssistant(input: CreateAssistantInput, userId?: stri
       rubric: input.defaultRubric ?? null,
       transcript_source: input.transcriptSource ?? null,
       auto_score: autoScore,
+      active: true, // Ensure assistant is active for voice routing
       // Support additional fields from AddAssistantModal
       bot_type: botType,
       phone_number: phoneNumber,

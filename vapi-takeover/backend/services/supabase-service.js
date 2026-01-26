@@ -67,18 +67,61 @@ class SupabaseService {
   }
 
   async getAssistantByPhoneNumber(phoneNumber) {
-    const { data, error } = await supabase
+    // Normalize phone number - try with and without + prefix
+    const normalizedNumber = phoneNumber.startsWith('+') ? phoneNumber : `+${phoneNumber}`;
+    const withoutPlus = phoneNumber.replace(/^\+/, '');
+
+    logger.info('Looking up assistant by phone number:', {
+      original: phoneNumber,
+      normalized: normalizedNumber,
+      withoutPlus
+    });
+
+    // Try exact match first
+    let { data, error } = await supabase
       .from('assistants')
       .select('*')
-      .eq('phone_number', phoneNumber)
-      .eq('active', true)
+      .eq('phone_number', normalizedNumber)
       .single();
 
-    if (error) {
+    // If not found, try without the + prefix
+    if (!data && !error?.code?.includes('PGRST116')) {
+      const result = await supabase
+        .from('assistants')
+        .select('*')
+        .eq('phone_number', withoutPlus)
+        .single();
+      data = result.data;
+      error = result.error;
+    }
+
+    // If still not found, try original format
+    if (!data && phoneNumber !== normalizedNumber && phoneNumber !== withoutPlus) {
+      const result = await supabase
+        .from('assistants')
+        .select('*')
+        .eq('phone_number', phoneNumber)
+        .single();
+      data = result.data;
+      error = result.error;
+    }
+
+    if (error && !error.code?.includes('PGRST116')) {
       logger.error('Error fetching assistant by phone:', error);
+    }
+
+    if (!data) {
+      logger.warn('No assistant found for phone number:', { phoneNumber, normalizedNumber, withoutPlus });
       return null;
     }
 
+    // Check if assistant is active
+    if (data.active === false) {
+      logger.warn('Assistant found but is inactive:', { id: data.id, name: data.friendly_name });
+      return null;
+    }
+
+    logger.info('Assistant found:', { id: data.id, name: data.friendly_name, phone: data.phone_number });
     return data;
   }
 
