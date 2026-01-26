@@ -1,5 +1,6 @@
 // ai/voice-handler.js - Complete voice pipeline (VAPI replacement)
-import OpenAI, { toFile } from 'openai';
+import OpenAI from 'openai';
+import { Readable } from 'stream';
 import logger from '../services/logger.js';
 import supabaseService from '../services/supabase-service.js';
 import { streamElevenLabsAudio } from './elevenlabs.js';
@@ -189,8 +190,16 @@ class VoiceHandler {
         outputSizeKB: (wavBuffer.length / 1024).toFixed(2)
       });
 
-      // Create file object compatible with OpenAI Node.js SDK
-      const file = await toFile(wavBuffer, 'audio.wav', { type: 'audio/wav' });
+      // Create a File-like object for OpenAI SDK (Node.js compatible)
+      // OpenAI SDK accepts objects with name, type, and arrayBuffer() method
+      const file = {
+        name: 'audio.wav',
+        type: 'audio/wav',
+        arrayBuffer: async () => wavBuffer.buffer.slice(wavBuffer.byteOffset, wavBuffer.byteOffset + wavBuffer.byteLength),
+        stream: () => Readable.from(wavBuffer),
+        size: wavBuffer.length,
+        lastModified: Date.now()
+      };
 
       // Call Whisper API
       const transcription = await openai.audio.transcriptions.create({
@@ -399,9 +408,9 @@ class VoiceHandler {
 
       // Update conversation with score
       await supabaseService.client
-        .from('chat_conversations')
+        .from('conversations')
         .update({
-          score: scoringResult.overallScore,
+          confidence_score: scoringResult.weighted_total_score || scoringResult.overallScore,
           scored_at: new Date().toISOString()
         })
         .eq('id', this.conversation.id);

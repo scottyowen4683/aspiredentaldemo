@@ -86,25 +86,18 @@ router.post('/incoming', async (req, res) => {
       assistantName: assistant.friendly_name
     });
 
-    // Create TwiML response
+    // Create TwiML response - optimized for low latency voice AI
     const response = new VoiceResponse();
 
-    // Always play a greeting so we know the webhook connected
-    const greeting = assistant.first_message || `Hello! You've reached ${assistant.friendly_name || 'the Aspire AI assistant'}. How can I help you today?`;
+    // Brief greeting, then immediately connect to AI stream
+    // For production, consider removing greeting entirely for instant AI response
+    const greeting = assistant.first_message || `Hi, how can I help you?`;
     response.say({
       voice: 'Polly.Joanna'
     }, greeting);
 
-    // Start call recording in background (non-blocking, unlike <Record> verb)
-    // This uses the <Start><Record> verb which runs in parallel with the stream
-    const start = response.start();
-    start.record({
-      recordingStatusCallback: `https://${req.headers.host}/api/voice/recording`,
-      recordingStatusCallbackEvent: 'completed'
-    });
-
-    // Connect to WebSocket Media Stream for real-time voice AI
-    // This is the core of the voice assistant - bidirectional audio streaming
+    // Connect to WebSocket Media Stream for real-time bidirectional voice AI
+    // This streams audio to/from our server for Whisper → GPT → ElevenLabs pipeline
     const connect = response.connect();
     const stream = connect.stream({
       url: `wss://${req.headers.host}/voice/stream`
