@@ -128,7 +128,24 @@ function buildScoringPrompt(rubric, conversationType) {
   prompt += `- **resident_complaint:** Expression of dissatisfaction or complaint\n`;
   prompt += `- **incomplete_resolution:** Unresolved resident needs\n`;
   prompt += `- **training_opportunity:** Clear areas for AI improvement\n`;
-  prompt += `- **compliance_risk:** Potential legal or regulatory concerns\n\n`;
+  prompt += `- **compliance_risk:** Potential legal or regulatory concerns\n`;
+  prompt += `- **abrupt_ending:** Call ended suddenly without proper closure/goodbye\n`;
+  prompt += `- **no_engagement:** User did not respond meaningfully or hung up immediately\n`;
+  prompt += `- **technical_issue:** Evidence of audio/technical problems in conversation\n\n`;
+
+  prompt += `## CALL QUALITY EVALUATION (CRITICAL FOR VOICE)\n\n`;
+  prompt += `Evaluate call quality indicators:\n`;
+  prompt += `- **call_duration_assessment:** Was the call unreasonably short (< 30 seconds of meaningful exchange)?\n`;
+  prompt += `- **conversation_completeness:** Did the conversation reach a natural conclusion?\n`;
+  prompt += `- **user_engagement_level:** Did the user participate meaningfully beyond initial contact?\n`;
+  prompt += `- **proper_closure:** Was there a proper goodbye/closing statement from both parties?\n`;
+  prompt += `- **abrupt_hangup_detected:** Did the user or AI end call mid-sentence or without closure?\n\n`;
+
+  prompt += `**SCORING PENALTY RULES:**\n`;
+  prompt += `- If user hung up immediately with no meaningful exchange: Score 0-20\n`;
+  prompt += `- If call ended abruptly mid-conversation: Reduce score by 30-50 points\n`;
+  prompt += `- If no proper closing/goodbye: Reduce score by 10-20 points\n`;
+  prompt += `- If only AI spoke with no user response: Score 0-30\n\n`;
 
   prompt += `## SENTIMENT ANALYSIS\n\n`;
   prompt += `Analyze:\n`;
@@ -261,7 +278,18 @@ Analyze this conversation and provide a detailed evaluation in the following JSO
     "resident_complaint": false,
     "incomplete_resolution": false,
     "training_opportunity": false,
-    "compliance_risk": false
+    "compliance_risk": false,
+    "abrupt_ending": false,
+    "no_engagement": false,
+    "technical_issue": false
+  },
+  "call_quality": {
+    "call_duration_assessment": "adequate",
+    "conversation_completeness": "complete",
+    "user_engagement_level": "engaged",
+    "proper_closure": true,
+    "abrupt_hangup_detected": false,
+    "meaningful_exchange": true
   },
   "resident_intents": [
     {

@@ -28,6 +28,8 @@ export interface CreateAssistantInput {
   first_message?: string | null;
   kb_enabled?: boolean | null;
   auto_score?: boolean | null;
+  background_sound?: string | null;
+  background_volume?: number | null;
 }
 
 export async function createAssistant(input: CreateAssistantInput, userId?: string) {
@@ -137,7 +139,10 @@ export async function createAssistant(input: CreateAssistantInput, userId?: stri
       model: input.model ?? null,
       temperature: input.temperature ?? null,
       max_tokens: input.max_tokens ?? null,
+      first_message: input.first_message ?? null,
       kb_enabled: input.kb_enabled ?? false,
+      background_sound: input.background_sound ?? null,
+      background_volume: input.background_volume ?? null,
     };
 
     const { data, error } = await supabase.from("assistants").insert([insertObj]).select().single();
@@ -177,6 +182,7 @@ export interface AssistantRow {
   org_id?: string | null;
   friendly_name?: string | null;
   bot_type?: string | null;
+  assistant_type?: string | null;
   active?: boolean | null;
   phone_number?: string | null;
   elevenlabs_voice_id?: string | null;
@@ -185,12 +191,15 @@ export interface AssistantRow {
   model?: string | null;
   temperature?: number | null;
   max_tokens?: number | null;
+  first_message?: string | null;
   kb_enabled?: boolean | null;
   kb_match_count?: number | null;
   total_interactions?: number | null;
   avg_interaction_time?: number | null;
   performance_rank?: number | null;
   auto_score?: boolean | null;
+  background_sound?: string | null;
+  background_volume?: number | null;
   created_at?: string | null;
   updated_at?: string | null;
   // Computed fields
@@ -201,7 +210,7 @@ export async function fetchAssistants(): Promise<AssistantRow[]> {
   const { data, error } = await supabase
     .from("assistants")
     .select(
-      `id, org_id, friendly_name, bot_type, active, phone_number, elevenlabs_voice_id, widget_config, prompt, model, temperature, max_tokens, kb_enabled, kb_match_count, total_interactions, avg_interaction_time, performance_rank, auto_score, created_at, updated_at`
+      `id, org_id, friendly_name, bot_type, active, phone_number, elevenlabs_voice_id, widget_config, prompt, model, temperature, max_tokens, first_message, kb_enabled, kb_match_count, total_interactions, avg_interaction_time, performance_rank, auto_score, background_sound, background_volume, created_at, updated_at`
     )
     .order("created_at", { ascending: false });
 
@@ -334,7 +343,10 @@ export async function updateAssistant(id: string, input: CreateAssistantInput, u
       model: input.model ?? null,
       temperature: input.temperature ?? null,
       max_tokens: input.max_tokens ?? null,
+      first_message: input.first_message ?? null,
       kb_enabled: input.kb_enabled ?? false,
+      background_sound: input.background_sound ?? null,
+      background_volume: input.background_volume ?? null,
     };
 
     const { data, error } = await supabase.from("assistants").update(updateObj).eq("id", id).select().single();

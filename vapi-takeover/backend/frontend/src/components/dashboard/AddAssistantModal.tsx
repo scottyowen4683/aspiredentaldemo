@@ -46,6 +46,8 @@ interface FormData {
   kbText: string;
   orgId?: string | null;
   autoScore: boolean;
+  backgroundSound: "none" | "office" | "cafe";
+  backgroundVolume: number;
 }
 
 const DEFAULT_VOICES = [
@@ -92,6 +94,8 @@ export function AddAssistantModal({ open, onOpenChange, initialData, onSuccess }
     kbText: "",
     orgId: null,
     autoScore: true,
+    backgroundSound: "none",
+    backgroundVolume: 0.15,
   });
 
   // Fetch organizations for super_admin
@@ -188,6 +192,8 @@ export function AddAssistantModal({ open, onOpenChange, initialData, onSuccess }
           kbText: "",
           orgId: initialData.org_id ?? null,
           autoScore: initialData.auto_score ?? true,
+          backgroundSound: (initialData.background_sound as "none" | "office" | "cafe") ?? "none",
+          backgroundVolume: initialData.background_volume ?? 0.15,
         });
       } else {
         // Reset to defaults for new assistant
@@ -208,6 +214,8 @@ export function AddAssistantModal({ open, onOpenChange, initialData, onSuccess }
           kbText: "",
           orgId: user?.role === "org_admin" ? user?.org_id ?? null : null,
           autoScore: true,
+          backgroundSound: "none",
+          backgroundVolume: 0.15,
         });
       }
     }
@@ -294,6 +302,8 @@ export function AddAssistantModal({ open, onOpenChange, initialData, onSuccess }
         first_message: formData.firstMessage || null,
         kb_enabled: formData.kbEnabled,
         auto_score: formData.autoScore,
+        background_sound: formData.assistantType === "voice" ? formData.backgroundSound : null,
+        background_volume: formData.assistantType === "voice" ? formData.backgroundVolume : null,
       };
 
       let result;
@@ -576,6 +586,37 @@ export function AddAssistantModal({ open, onOpenChange, initialData, onSuccess }
                   value={formData.firstMessage}
                   onChange={(e) => handleChange("firstMessage", e.target.value)}
                 />
+              </div>
+
+              {/* Background Sound */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="backgroundSound">Background Sound</Label>
+                  <Select value={formData.backgroundSound} onValueChange={(v) => handleChange("backgroundSound", v as "none" | "office" | "cafe")}>
+                    <SelectTrigger id="backgroundSound">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">None</SelectItem>
+                      <SelectItem value="office">Office Ambience</SelectItem>
+                      <SelectItem value="cafe">Cafe Background</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">Adds subtle ambient noise to make calls feel more natural</p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="backgroundVolume">Background Volume ({Math.round(formData.backgroundVolume * 100)}%)</Label>
+                  <Input
+                    id="backgroundVolume"
+                    type="range"
+                    min="0"
+                    max="0.5"
+                    step="0.05"
+                    value={formData.backgroundVolume}
+                    onChange={(e) => handleChange("backgroundVolume", parseFloat(e.target.value))}
+                    className="cursor-pointer"
+                  />
+                </div>
               </div>
             </div>
           )}

@@ -472,14 +472,25 @@ export default function ConversationDetails() {
               </p>
             </div>
           </div>
-          <div className="flex flex-col space-y-2 sm:flex-row sm:space-y-0 sm:space-x-3">
+          <div className="flex flex-col space-y-2 sm:flex-row sm:space-y-0 sm:space-x-3 items-start">
             {conversation.recording_url && (
-              <Button variant="outline" asChild className="w-full sm:w-auto">
-                <a href={conversation.recording_url} target="_blank" rel="noopener noreferrer">
-                  <Play className="mr-2 h-4 w-4" />
-                  Play Recording
-                </a>
-              </Button>
+              <div className="flex flex-col space-y-2 w-full sm:w-auto">
+                <audio
+                  controls
+                  className="w-full sm:w-80"
+                  src={conversation.recording_url.endsWith('.mp3') || conversation.recording_url.endsWith('.wav')
+                    ? conversation.recording_url
+                    : `${conversation.recording_url}.mp3`}
+                >
+                  Your browser does not support audio playback.
+                </audio>
+                <Button variant="outline" asChild size="sm" className="w-full sm:w-auto">
+                  <a href={`${conversation.recording_url}.mp3`} download>
+                    <Play className="mr-2 h-4 w-4" />
+                    Download Recording
+                  </a>
+                </Button>
+              </div>
             )}
             {conversation.log_url && (
               <Button variant="outline" asChild className="w-full sm:w-auto">
