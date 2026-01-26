@@ -161,38 +161,33 @@ wss.on('connection', async (ws, req) => {
               // Continue anyway - conversation can still work
             }
 
-            // Set speech end callback for ongoing conversation
+            // Set speech end callback for ongoing conversation - STREAMING for low latency!
             voiceHandler.audioBuffer.onSpeechEnd(async () => {
               try {
-                const result = await voiceHandler.onSpeechEnd();
+                logger.info('Speech end detected, starting streaming response');
 
-                if (result && result.audioStream) {
-                  logger.info('AI response ready', {
+                // Use streaming method - sends audio chunks to Twilio IMMEDIATELY
+                const result = await voiceHandler.onSpeechEndStreaming((audioChunk) => {
+                  // This callback fires for each chunk from ElevenLabs
+                  // Send directly to Twilio for lowest latency
+                  if (ws.readyState === 1) {
+                    const chunkBase64 = audioChunk.toString('base64');
+                    ws.send(JSON.stringify({
+                      event: 'media',
+                      streamSid: streamSid,
+                      media: {
+                        payload: chunkBase64
+                      }
+                    }));
+                  }
+                });
+
+                if (result) {
+                  logger.info('Streaming response complete', {
                     transcription: result.transcription,
                     responsePreview: result.responseText?.substring(0, 50) + '...',
-                    latencyMs: result.latency?.total,
-                    audioSizeKB: (result.audioStream.length / 1024).toFixed(2)
+                    latencyMs: result.latency
                   });
-
-                  // Send audio in chunks up to 8KB
-                  const MAX_CHUNK_SIZE = 8000;
-
-                  for (let offset = 0; offset < result.audioStream.length; offset += MAX_CHUNK_SIZE) {
-                    const chunk = result.audioStream.slice(offset, Math.min(offset + MAX_CHUNK_SIZE, result.audioStream.length));
-                    const chunkBase64 = chunk.toString('base64');
-
-                    if (ws.readyState === 1) {
-                      ws.send(JSON.stringify({
-                        event: 'media',
-                        streamSid: streamSid,
-                        media: {
-                          payload: chunkBase64
-                        }
-                      }));
-                    }
-                  }
-
-                  logger.info('AI response audio fully sent');
                 }
               } catch (error) {
                 logger.error('Error processing speech:', error);

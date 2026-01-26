@@ -137,17 +137,40 @@ class SupabaseService {
   // ===========================================================================
 
   async createConversation({ orgId, assistantId, sessionId, channel }) {
-    const { data, error } = await supabase
+    // Store sessionId in metadata if session_id column doesn't exist
+    const insertData = {
+      org_id: orgId,
+      assistant_id: assistantId,
+      channel: channel || 'voice',
+      is_voice: channel === 'voice',
+      started_at: new Date().toISOString(),
+      transcript: [] // Initialize empty transcript array
+    };
+
+    // Try with session_id first (migration schema)
+    let { data, error } = await supabase
       .from('conversations')
-      .insert({
-        org_id: orgId,
-        assistant_id: assistantId,
-        session_id: sessionId,
-        channel,
-        started_at: new Date().toISOString()
-      })
+      .insert({ ...insertData, session_id: sessionId })
       .select()
       .single();
+
+    // If session_id column doesn't exist, try without it
+    if (error && error.message?.includes('session_id')) {
+      logger.info('session_id column not found, creating without it');
+      const result = await supabase
+        .from('conversations')
+        .insert(insertData)
+        .select()
+        .single();
+      data = result.data;
+      error = result.error;
+
+      // Store sessionId mapping for lookup
+      if (data) {
+        this._sessionMap = this._sessionMap || new Map();
+        this._sessionMap.set(sessionId, data.id);
+      }
+    }
 
     if (error) {
       logger.error('Error creating conversation:', error);
@@ -159,25 +182,41 @@ class SupabaseService {
   }
 
   async getConversation(sessionId) {
-    const { data, error } = await supabase
+    // Try with session_id column first (migration schema)
+    let { data, error } = await supabase
       .from('conversations')
       .select('*')
       .eq('session_id', sessionId)
       .single();
+
+    // If session_id column doesn't exist, use the ID mapping
+    if (error && error.message?.includes('session_id')) {
+      const conversationId = this._sessionMap?.get(sessionId);
+      if (conversationId) {
+        const result = await supabase
+          .from('conversations')
+          .select('*')
+          .eq('id', conversationId)
+          .single();
+        data = result.data;
+        error = result.error;
+      }
+    }
 
     if (error) {
       if (error.code === 'PGRST116') { // Not found
         return null;
       }
       logger.error('Error fetching conversation:', error);
-      throw error;
+      return null;
     }
 
     return data;
   }
 
   async updateConversation(sessionId, updates) {
-    const { data, error} = await supabase
+    // Try with session_id column first
+    let { data, error } = await supabase
       .from('conversations')
       .update({
         ...updates,
@@ -186,6 +225,24 @@ class SupabaseService {
       .eq('session_id', sessionId)
       .select()
       .single();
+
+    // If session_id column doesn't exist, use ID mapping
+    if (error && error.message?.includes('session_id')) {
+      const conversationId = this._sessionMap?.get(sessionId);
+      if (conversationId) {
+        const result = await supabase
+          .from('conversations')
+          .update({
+            ...updates,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', conversationId)
+          .select()
+          .single();
+        data = result.data;
+        error = result.error;
+      }
+    }
 
     if (error) {
       logger.error('Error updating conversation:', error);
@@ -196,71 +253,139 @@ class SupabaseService {
   }
 
   async endConversation(sessionId, { endReason, duration, costs }) {
+    // Build updates that work with both schema versions
     const updates = {
       ended_at: new Date().toISOString(),
       end_reason: endReason,
       duration_seconds: duration,
-      ...costs
+      call_duration: duration,
+      // Use total_cost (exists in both schemas)
+      total_cost: costs?.total_cost || 0,
+      // Store detailed breakdown in cost_breakdown JSONB (production schema)
+      cost_breakdown: {
+        whisper_cost: costs?.whisper_cost || 0,
+        gpt_cost: costs?.gpt_cost || 0,
+        elevenlabs_cost: costs?.elevenlabs_cost || 0,
+        twilio_cost: costs?.twilio_cost || 0,
+        total: costs?.total_cost || 0
+      }
     };
 
-    return await this.updateConversation(sessionId, updates);
+    // Also try to set individual cost columns if they exist (migration schema)
+    if (costs?.whisper_cost) updates.whisper_cost = costs.whisper_cost;
+    if (costs?.gpt_cost) updates.gpt_cost = costs.gpt_cost;
+    if (costs?.elevenlabs_cost) updates.elevenlabs_cost = costs.elevenlabs_cost;
+    if (costs?.twilio_cost) updates.twilio_cost = costs.twilio_cost;
+
+    try {
+      return await this.updateConversation(sessionId, updates);
+    } catch (error) {
+      // If update fails due to missing columns, try with just compatible fields
+      logger.warn('Full update failed, trying minimal update:', error.message);
+      const minimalUpdates = {
+        ended_at: new Date().toISOString(),
+        end_reason: endReason,
+        duration_seconds: duration,
+        total_cost: costs?.total_cost || 0,
+        cost_breakdown: updates.cost_breakdown
+      };
+      return await this.updateConversation(sessionId, minimalUpdates);
+    }
   }
 
   // ===========================================================================
   // CONVERSATION MESSAGES
+  // Uses transcript JSONB field in conversations table (not separate table)
   // ===========================================================================
 
   async addMessage({ conversationId, role, content, functionName, functionArgs, latencyMs }) {
-    const { data, error } = await supabase
-      .from('conversation_messages')
-      .insert({
-        conversation_id: conversationId,
+    try {
+      // Get current transcript
+      const { data: conversation, error: fetchError } = await supabase
+        .from('conversations')
+        .select('transcript')
+        .eq('id', conversationId)
+        .single();
+
+      if (fetchError) {
+        logger.error('Error fetching conversation for message:', fetchError);
+        throw fetchError;
+      }
+
+      // Build message object
+      const message = {
         role,
         content,
-        function_name: functionName,
-        function_args: functionArgs,
-        latency_ms: latencyMs,
-        timestamp: new Date().toISOString()
-      })
-      .select()
-      .single();
+        timestamp: new Date().toISOString(),
+        ...(functionName && { function_name: functionName }),
+        ...(functionArgs && { function_args: functionArgs }),
+        ...(latencyMs && { latency_ms: latencyMs })
+      };
 
-    if (error) {
+      // Append to existing transcript or create new array
+      const currentTranscript = conversation?.transcript || [];
+      const newTranscript = [...currentTranscript, message];
+
+      // Update conversation with new transcript
+      const { data, error } = await supabase
+        .from('conversations')
+        .update({
+          transcript: newTranscript,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', conversationId)
+        .select()
+        .single();
+
+      if (error) {
+        logger.error('Error adding message to transcript:', error);
+        throw error;
+      }
+
+      logger.debug('Message added to conversation', {
+        conversationId,
+        role,
+        messageCount: newTranscript.length
+      });
+
+      return message;
+    } catch (error) {
       logger.error('Error adding message:', error);
       throw error;
     }
-
-    return data;
   }
 
   async getMessages(conversationId) {
     const { data, error } = await supabase
-      .from('conversation_messages')
-      .select('*')
-      .eq('conversation_id', conversationId)
-      .order('timestamp', { ascending: true });
+      .from('conversations')
+      .select('transcript')
+      .eq('id', conversationId)
+      .single();
 
     if (error) {
       logger.error('Error fetching messages:', error);
-      throw error;
+      return [];
     }
 
-    return data || [];
+    return data?.transcript || [];
   }
 
   async getConversationHistory(sessionId, limit = 20) {
-    // Get conversation ID first
+    // Get conversation with transcript
     const conversation = await this.getConversation(sessionId);
     if (!conversation) return [];
 
-    // Get messages
-    const messages = await this.getMessages(conversation.id);
+    // Get messages from transcript field
+    const messages = conversation.transcript || [];
 
-    // Return in OpenAI format
-    return messages.map(msg => ({
-      role: msg.role,
-      content: msg.content
-    }));
+    // Return in OpenAI format (filter system messages for context)
+    return messages
+      .filter(msg => msg.role !== 'system')
+      .slice(-limit)
+      .map(msg => ({
+        role: msg.role,
+        content: msg.content
+      }));
   }
 
   // ===========================================================================

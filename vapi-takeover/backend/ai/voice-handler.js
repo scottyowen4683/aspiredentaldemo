@@ -5,7 +5,7 @@ import os from 'os';
 import path from 'path';
 import logger from '../services/logger.js';
 import supabaseService from '../services/supabase-service.js';
-import { streamElevenLabsAudio } from './elevenlabs.js';
+import { streamElevenLabsAudio, streamElevenLabsTTS } from './elevenlabs.js';
 import { BufferManager, ulawToWav } from '../audio/buffer-manager.js';
 import { scoreConversation } from './rubric-scorer.js';
 
@@ -382,7 +382,7 @@ class VoiceHandler {
         throw new Error('No ElevenLabs voice configured');
       }
 
-      // Stream audio from ElevenLabs
+      // Get audio from ElevenLabs (non-streaming for backward compatibility)
       const audioStream = await streamElevenLabsAudio(text, voiceId);
 
       // Calculate cost (ElevenLabs: $0.00003 per character for Turbo v2.5)
@@ -393,6 +393,161 @@ class VoiceHandler {
       return audioStream;
     } catch (error) {
       logger.error('ElevenLabs TTS failed:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Generate speech with streaming - sends audio chunks immediately as they arrive
+   * This is MUCH faster than waiting for full audio
+   * @param {string} text - Text to speak
+   * @param {function} onAudioChunk - Callback for each chunk: (chunk: Buffer) => void
+   */
+  async generateSpeechStreaming(text, onAudioChunk) {
+    try {
+      const voiceId = this.assistant.elevenlabs_voice_id || process.env.ELEVENLABS_VOICE_DEFAULT;
+
+      if (!voiceId) {
+        throw new Error('No ElevenLabs voice configured');
+      }
+
+      // Stream audio from ElevenLabs - chunks go directly to callback
+      await streamElevenLabsTTS(text, voiceId, onAudioChunk);
+
+      // Calculate cost
+      const elevenLabsCost = text.length * 0.00003;
+      this.costs.elevenlabs += elevenLabsCost;
+      this.costs.total += elevenLabsCost;
+
+    } catch (error) {
+      logger.error('ElevenLabs streaming TTS failed:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Process speech end with STREAMING response - much faster!
+   * Sends audio to Twilio as soon as ElevenLabs generates each chunk
+   * @param {function} onAudioChunk - Callback for each audio chunk: (chunk: Buffer) => void
+   * @returns {Promise<{transcription, responseText, latency}>}
+   */
+  async onSpeechEndStreaming(onAudioChunk) {
+    if (this.isProcessing) {
+      logger.debug('Already processing, ignoring speech end');
+      return null;
+    }
+
+    this.isProcessing = true;
+    const turnStartTime = Date.now();
+
+    try {
+      // Get accumulated audio
+      const audioBuffer = this.audioBuffer.flush();
+      if (audioBuffer.length === 0) {
+        this.isProcessing = false;
+        return null;
+      }
+
+      logger.info('Processing speech (streaming)', {
+        callSid: this.callSid,
+        audioSizeKB: (audioBuffer.length / 1024).toFixed(2)
+      });
+
+      // Step 1: Transcribe with Whisper
+      const transcriptionStart = Date.now();
+      const transcription = await this.transcribeAudio(audioBuffer);
+      const transcriptionLatency = Date.now() - transcriptionStart;
+
+      if (!transcription || transcription.trim().length === 0) {
+        logger.warn('Empty transcription, skipping turn');
+        this.isProcessing = false;
+        return null;
+      }
+
+      logger.info('Transcription complete', {
+        text: transcription,
+        latencyMs: transcriptionLatency
+      });
+
+      // Save user message
+      await supabaseService.addMessage({
+        conversationId: this.conversation.id,
+        role: 'user',
+        content: transcription,
+        latencyMs: transcriptionLatency
+      });
+
+      // Step 2: Generate GPT response
+      const gptStart = Date.now();
+      const gptResponse = await this.generateResponse(transcription);
+      const gptLatency = Date.now() - gptStart;
+
+      logger.info('GPT response generated', {
+        text: gptResponse.text.substring(0, 100) + '...',
+        tokensIn: gptResponse.tokensIn,
+        tokensOut: gptResponse.tokensOut,
+        latencyMs: gptLatency
+      });
+
+      // Save assistant message
+      await supabaseService.addMessage({
+        conversationId: this.conversation.id,
+        role: 'assistant',
+        content: gptResponse.text,
+        latencyMs: gptLatency
+      });
+
+      // Update costs
+      this.costs.gpt += gptResponse.cost;
+      this.costs.total += gptResponse.cost;
+
+      // Step 3: STREAM TTS audio with ElevenLabs - sends chunks immediately!
+      const ttsStart = Date.now();
+      let firstChunkSent = false;
+      let totalAudioBytes = 0;
+
+      await this.generateSpeechStreaming(gptResponse.text, (chunk) => {
+        if (!firstChunkSent) {
+          firstChunkSent = true;
+          const firstChunkLatency = Date.now() - ttsStart;
+          logger.info('First audio chunk sent to Twilio', {
+            firstChunkLatencyMs: firstChunkLatency,
+            totalLatencySoFarMs: Date.now() - turnStartTime
+          });
+        }
+        totalAudioBytes += chunk.length;
+        onAudioChunk(chunk);
+      });
+
+      const ttsLatency = Date.now() - ttsStart;
+      const totalLatency = Date.now() - turnStartTime;
+      this.turnCount++;
+
+      logger.info('Streaming turn complete', {
+        turnNumber: this.turnCount,
+        transcriptionMs: transcriptionLatency,
+        gptMs: gptLatency,
+        ttsMs: ttsLatency,
+        totalMs: totalLatency,
+        audioBytes: totalAudioBytes
+      });
+
+      this.isProcessing = false;
+
+      return {
+        transcription,
+        responseText: gptResponse.text,
+        latency: {
+          transcription: transcriptionLatency,
+          gpt: gptLatency,
+          tts: ttsLatency,
+          total: totalLatency
+        }
+      };
+
+    } catch (error) {
+      logger.error('Error processing speech (streaming):', error);
+      this.isProcessing = false;
       throw error;
     }
   }
