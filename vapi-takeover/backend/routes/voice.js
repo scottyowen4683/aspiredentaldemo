@@ -103,11 +103,8 @@ router.post('/incoming', async (req, res) => {
       value: From
     });
 
-    // Set status callback for call completion
-    response.on('callCompleted', {
-      url: `https://${req.headers.host}/api/voice/status`,
-      method: 'POST'
-    });
+    // Note: Status callbacks are configured in Twilio console or when making outbound calls
+    // The /api/voice/status endpoint receives status updates via Twilio's configured webhook
 
     res.type('text/xml');
     res.send(response.toString());
