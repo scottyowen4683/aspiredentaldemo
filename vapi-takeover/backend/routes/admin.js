@@ -531,6 +531,50 @@ router.post('/validate-twilio-number', async (req, res) => {
   }
 });
 
+// POST /api/admin/configure-twilio-webhook - Configure Twilio webhook for a phone number
+router.post('/configure-twilio-webhook', async (req, res) => {
+  try {
+    const { phone_number } = req.body;
+
+    if (!phone_number) {
+      return res.status(400).json({
+        success: false,
+        error: 'phone_number is required'
+      });
+    }
+
+    const { configureTwilioWebhooks } = await import('../services/twilio-validator.js');
+
+    // Get the base URL for webhooks
+    const baseUrl = process.env.BASE_URL || `https://${req.get('host')}`;
+
+    const result = await configureTwilioWebhooks(phone_number, {
+      voiceUrl: `${baseUrl}/api/voice/incoming`,
+      statusCallbackUrl: `${baseUrl}/api/voice/status`
+    });
+
+    if (!result.success) {
+      return res.status(400).json(result);
+    }
+
+    logger.info('Twilio webhooks configured:', result);
+
+    res.json({
+      success: true,
+      message: `Webhooks configured for ${phone_number}`,
+      voiceUrl: result.voiceUrl,
+      statusCallback: result.statusCallback
+    });
+
+  } catch (error) {
+    logger.error('Configure webhook error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to configure webhooks'
+    });
+  }
+});
+
 // =============================================================================
 // STATS & MONITORING
 // =============================================================================

@@ -146,20 +146,24 @@ router.post('/recording', async (req, res) => {
     });
 
     if (RecordingStatus === 'completed' && RecordingUrl) {
-      // Save recording URL to conversation
-      await supabaseService.client
-        .from('chat_conversations')
+      // Save recording URL to conversation (using conversations table, not chat_conversations)
+      const { error } = await supabaseService.client
+        .from('conversations')
         .update({
           recording_url: RecordingUrl,
-          recording_sid: RecordingSid,
-          recording_duration: parseInt(RecordingDuration)
+          call_duration: parseInt(RecordingDuration) || 0
         })
         .eq('session_id', CallSid);
 
-      logger.info('Recording URL saved to conversation', {
-        callSid: CallSid,
-        recordingUrl: RecordingUrl
-      });
+      if (error) {
+        logger.error('Failed to save recording URL:', error);
+      } else {
+        logger.info('Recording URL saved to conversation', {
+          callSid: CallSid,
+          recordingUrl: RecordingUrl,
+          duration: RecordingDuration
+        });
+      }
     }
 
     res.sendStatus(200);
