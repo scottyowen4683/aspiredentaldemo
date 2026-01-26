@@ -82,6 +82,7 @@ wss.on('connection', async (ws, req) => {
   logger.info('WebSocket connection established');
 
   let voiceHandler = null;
+  let mediaChunkCount = 0;
 
   ws.on('message', async (message) => {
     try {
@@ -207,6 +208,13 @@ wss.on('connection', async (ws, req) => {
 
         case 'media':
           // Incoming audio from user
+          mediaChunkCount++;
+          if (mediaChunkCount === 1 || mediaChunkCount % 100 === 0) {
+            logger.info('Receiving audio', {
+              chunkNumber: mediaChunkCount,
+              payloadLength: data.media?.payload?.length || 0
+            });
+          }
           if (voiceHandler && data.media?.payload) {
             await voiceHandler.processAudioChunk(data.media.payload);
           }

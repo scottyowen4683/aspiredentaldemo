@@ -10,43 +10,46 @@ export class BufferManager {
     this.chunks = [];
     this.onSpeechEndCallback = null;
 
-    // VAD configuration
-    this.silenceThreshold = 10; // μ-law energy threshold (adjust as needed)
+    // VAD configuration - tuned for μ-law telephone audio
+    this.silenceThreshold = 5; // Lower threshold - μ-law silence is very low energy
     this.speechStarted = false;
     this.silentChunksCount = 0;
-    this.silentChunksRequired = 25; // ~500ms of silence at 20ms chunks (8000 Hz / 160 samples)
-    this.minSpeechChunks = 10; // Minimum chunks to consider valid speech
+    this.silentChunksRequired = 40; // ~800ms of silence (Twilio sends ~20ms chunks)
+    this.minSpeechChunks = 5; // Minimum chunks to consider valid speech (~100ms)
     this.speechChunksCount = 0;
+    this.totalChunksReceived = 0;
 
     // Debounce for processing
     this.processingTimeout = null;
-    this.processDelay = 100; // Small delay to batch final silence detection
+    this.processDelay = 50; // Small delay to batch final silence detection
   }
 
   /**
-   * Calculate energy (RMS-like) of μ-law audio chunk
+   * Calculate energy of μ-law audio chunk
+   * For μ-law: 0xFF and 0x7F are silence (bias points)
+   * Deviation from these values indicates audio energy
    * @param {string} audioBase64 - Base64 encoded μ-law audio
-   * @returns {number} Energy level
+   * @returns {number} Energy level (0-127 scale)
    */
   calculateEnergy(audioBase64) {
     const buffer = Buffer.from(audioBase64, 'base64');
-    let energy = 0;
+    if (buffer.length === 0) return 0;
+
+    let totalDeviation = 0;
 
     for (let i = 0; i < buffer.length; i++) {
-      // μ-law decode to get approximate amplitude
-      // In μ-law, 0x7F and 0xFF are near-silence
       const sample = buffer[i];
-      // Convert μ-law sample to approximate linear value
-      const sign = sample & 0x80;
-      const magnitude = ~sample & 0x7F;
-      const exponent = (magnitude >> 4) & 0x07;
-      const mantissa = magnitude & 0x0F;
-      let linear = (mantissa << (exponent + 3)) + (1 << (exponent + 3)) - 132;
-      if (linear < 0) linear = 0;
-      energy += linear;
+      // μ-law silence is around 0x7F (127) or 0xFF (255)
+      // Calculate deviation from silence points
+      const devFrom7F = Math.abs(sample - 0x7F);
+      const devFromFF = Math.abs(sample - 0xFF);
+      // Use the smaller deviation (closer to a silence point = lower energy)
+      const deviation = Math.min(devFrom7F, devFromFF);
+      totalDeviation += deviation;
     }
 
-    return buffer.length > 0 ? energy / buffer.length : 0;
+    // Return average deviation (0-127 scale)
+    return totalDeviation / buffer.length;
   }
 
   /**
@@ -54,10 +57,24 @@ export class BufferManager {
    * @param {string} audioBase64 - Base64 encoded audio from Twilio (μ-law, 8kHz)
    */
   add(audioBase64) {
+    this.totalChunksReceived++;
     const energy = this.calculateEnergy(audioBase64);
     const isSpeech = energy > this.silenceThreshold;
 
-    // Always add chunks during speech
+    // Log every 50 chunks to monitor
+    if (this.totalChunksReceived % 50 === 0) {
+      logger.info('VAD status', {
+        totalChunks: this.totalChunksReceived,
+        currentEnergy: energy.toFixed(2),
+        threshold: this.silenceThreshold,
+        speechStarted: this.speechStarted,
+        speechChunks: this.speechChunksCount,
+        silentChunks: this.silentChunksCount,
+        bufferedChunks: this.chunks.length
+      });
+    }
+
+    // Always add chunks once speech has started
     if (this.speechStarted || isSpeech) {
       this.chunks.push(audioBase64);
     }
@@ -67,7 +84,7 @@ export class BufferManager {
       if (!this.speechStarted) {
         this.speechStarted = true;
         this.speechChunksCount = 0;
-        logger.debug('Speech started', { energy });
+        logger.info('🎤 Speech STARTED', { energy: energy.toFixed(2), threshold: this.silenceThreshold });
       }
       this.speechChunksCount++;
       this.silentChunksCount = 0;
@@ -83,8 +100,11 @@ export class BufferManager {
 
       if (this.silentChunksCount >= this.silentChunksRequired) {
         // Enough silence detected - trigger speech end
-        // Use small delay to ensure we don't cut off mid-word
         if (!this.processingTimeout) {
+          logger.info('🔇 Silence detected, scheduling speech end', {
+            silentChunks: this.silentChunksCount,
+            speechChunks: this.speechChunksCount
+          });
           this.processingTimeout = setTimeout(() => {
             this.detectSpeechEnd();
           }, this.processDelay);
@@ -101,7 +121,7 @@ export class BufferManager {
 
     // Only process if we had meaningful speech
     if (this.speechChunksCount < this.minSpeechChunks) {
-      logger.debug('Ignoring short audio', {
+      logger.info('Ignoring short audio', {
         speechChunks: this.speechChunksCount,
         minRequired: this.minSpeechChunks
       });
@@ -109,10 +129,11 @@ export class BufferManager {
       return;
     }
 
-    logger.info('Speech end detected', {
+    logger.info('🎙️ Speech END - triggering processing', {
       totalChunks: this.chunks.length,
       speechChunks: this.speechChunksCount,
-      silentChunks: this.silentChunksCount
+      silentChunks: this.silentChunksCount,
+      estimatedDurationMs: this.chunks.length * 20 // ~20ms per chunk
     });
 
     // Trigger callback if set
@@ -149,6 +170,10 @@ export class BufferManager {
    */
   flush() {
     const audio = this.chunks.join('');
+    logger.info('Flushing audio buffer', {
+      chunks: this.chunks.length,
+      totalBase64Length: audio.length
+    });
     this.reset();
     return audio;
   }
@@ -184,23 +209,26 @@ export function ulawToWav(ulawBase64) {
   // Decode base64
   const ulawBuffer = Buffer.from(ulawBase64, 'base64');
 
-  // μ-law to PCM conversion table
-  const mulaw2pcm = (mulaw) => {
-    const MULAW_BIAS = 0x84;
-    const MULAW_MAX = 0x1FFF;
+  logger.info('Converting μ-law to WAV', {
+    inputBytes: ulawBuffer.length,
+    estimatedDurationSec: (ulawBuffer.length / 8000).toFixed(2)
+  });
 
-    mulaw = ~mulaw;
-    const sign = mulaw & 0x80;
+  // μ-law to PCM conversion (ITU-T G.711)
+  const mulaw2pcm = (mulaw) => {
+    // Invert all bits
+    mulaw = ~mulaw & 0xFF;
+
+    // Extract sign, exponent, and mantissa
+    const sign = (mulaw & 0x80) ? -1 : 1;
     const exponent = (mulaw >> 4) & 0x07;
     const mantissa = mulaw & 0x0F;
 
-    let sample = mantissa << (exponent + 3);
-    sample += MULAW_BIAS;
+    // Compute linear value
+    let linear = ((mantissa << 3) + 0x84) << exponent;
+    linear -= 0x84;
 
-    if (exponent === 0) sample += 0x84;
-    if (sample > MULAW_MAX) sample = MULAW_MAX;
-
-    return sign ? -sample : sample;
+    return sign * linear;
   };
 
   // Convert μ-law to 16-bit PCM
