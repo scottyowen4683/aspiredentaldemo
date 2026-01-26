@@ -506,6 +506,18 @@ router.get('/twilio-status', async (req, res) => {
   });
 });
 
+// GET /api/admin/twilio-numbers - List all Twilio phone numbers and their webhook config
+router.get('/twilio-numbers', async (req, res) => {
+  try {
+    const { listTwilioNumbers } = await import('../services/twilio-validator.js');
+    const result = await listTwilioNumbers();
+    res.json(result);
+  } catch (error) {
+    logger.error('List Twilio numbers error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // GET /api/admin/ai-status - Check if AI services are configured (OpenAI, ElevenLabs)
 router.get('/ai-status', async (req, res) => {
   const hasOpenAI = !!process.env.OPENAI_API_KEY;
