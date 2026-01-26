@@ -130,14 +130,14 @@ export function useSuperAdminMetrics() {
           .select('*', { count: 'exact', head: true })
           .eq('reviewed', false);
 
-        // Get cost usage for current month
-        const { data: costData } = await supabase
-          .from('cost_usage')
-          .select('tokens_used, minutes_processed')
-          .gte('period_start', startOfMonth.toISOString());
+        // Cost usage - derive from conversations (no separate cost_usage table)
+        const { data: conversationCosts } = await supabase
+          .from('conversations')
+          .select('tokens_in, tokens_out, duration_seconds')
+          .gte('created_at', startOfMonth.toISOString());
 
-        const totalTokensUsed = costData?.reduce((sum, usage) => sum + (usage.tokens_used || 0), 0) || 0;
-        const totalMinutesProcessed = costData?.reduce((sum, usage) => sum + (usage.minutes_processed || 0), 0) || 0;
+        const totalTokensUsed = conversationCosts?.reduce((sum, c) => sum + (c.tokens_in || 0) + (c.tokens_out || 0), 0) || 0;
+        const totalMinutesProcessed = conversationCosts?.reduce((sum, c) => sum + ((c.duration_seconds || 0) / 60), 0) || 0;
 
         // Get total cost from conversations this month
         const { data: conversationsThisMonth } = await supabase
@@ -196,7 +196,7 @@ export function useOrganizationSummaries() {
           .select(`
             id,
             name,
-            status,
+            active,
             created_at
           `)
           .order('created_at', { ascending: false });
@@ -254,7 +254,7 @@ export function useOrganizationSummaries() {
             assistantCount: assistantCount || 0,
             userCount: userCount || 0,
             flaggedCount: flaggedCount || 0,
-            status: org.status || 'active',
+            status: org.active === false ? 'inactive' : 'active',
             created_at: org.created_at
           });
         }
