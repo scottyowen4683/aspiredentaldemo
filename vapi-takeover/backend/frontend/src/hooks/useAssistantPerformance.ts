@@ -55,7 +55,7 @@ export const useAssistantPerformance = (orgId: string | null, days: number = 30)
         // Fetch conversations separately (avoiding inner join issues)
         const { data: conversationsData } = await supabase
           .from('conversations')
-          .select('id, created_at, confidence_score, overall_score, assistant_id')
+          .select('id, created_at, overall_score, assistant_id')
           .eq('org_id', orgId);
 
         // Group conversations by assistant
@@ -84,14 +84,13 @@ export const useAssistantPerformance = (orgId: string | null, days: number = 30)
           // Calculate metrics
           const totalConversations = recentConversations.length;
 
-          // Use confidence_score or overall_score
+          // Use overall_score
           const scoredConversations = recentConversations.filter(conv =>
-            (conv.confidence_score !== null && conv.confidence_score !== undefined) ||
-            (conv.overall_score !== null && conv.overall_score !== undefined)
+            conv.overall_score !== null && conv.overall_score !== undefined
           );
 
           const avgScore = scoredConversations.length > 0
-            ? scoredConversations.reduce((sum, conv) => sum + (conv.confidence_score || conv.overall_score || 0), 0) / scoredConversations.length
+            ? scoredConversations.reduce((sum, conv) => sum + (conv.overall_score || 0), 0) / scoredConversations.length
             : 0;
 
           // Sentiment not available without scores table
@@ -289,7 +288,7 @@ function generateDailyTrends(
     const date = new Date(conv.created_at).toISOString().split('T')[0];
     if (dailyData[date]) {
       dailyData[date].conversations += 1;
-      const score = conv.confidence_score || conv.overall_score;
+      const score = conv.overall_score;
       if (score !== null && score !== undefined) {
         dailyData[date].totalScore += score;
         dailyData[date].scoreCount += 1;

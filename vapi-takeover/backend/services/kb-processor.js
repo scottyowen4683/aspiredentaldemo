@@ -2,6 +2,7 @@
 // Handles file upload → text extraction → chunking → embedding → Supabase storage
 
 import OpenAI from 'openai';
+import crypto from 'crypto';
 import pdf from 'pdf-parse';
 import mammoth from 'mammoth';
 import supabaseService from './supabase-service.js';
@@ -132,6 +133,9 @@ export async function processKnowledgeBase(options) {
       const cost = (tokens / 1_000_000) * 0.02;
       totalEmbeddingCost += cost;
 
+      // Generate content hash for deduplication
+      const contentHash = crypto.createHash('sha256').update(chunk).digest('hex');
+
       // Save to Supabase - matches actual schema
       const { data, error } = await supabaseService.client
         .from('knowledge_chunks')
@@ -141,6 +145,7 @@ export async function processKnowledgeBase(options) {
           tenant_id: org_id?.toString() || '', // Required text field
           source: fileName,
           content: chunk,
+          content_hash: contentHash,
           chunk_index: i,
           embedding,
           embedding_model: 'text-embedding-3-small',

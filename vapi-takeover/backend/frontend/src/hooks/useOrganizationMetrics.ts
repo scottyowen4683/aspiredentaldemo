@@ -197,7 +197,6 @@ export const useRecentActivity = (orgId: string | null, limit: number = 10) => {
           .select(`
             id,
             created_at,
-            confidence_score,
             overall_score,
             assistant:assistants(friendly_name)
           `)
@@ -226,8 +225,8 @@ export const useRecentActivity = (orgId: string | null, limit: number = 10) => {
 
         // Transform conversations into activities
         const conversationActivities: RecentActivity[] = conversations?.map(conv => {
-          // Use confidence_score or overall_score
-          const score = conv.confidence_score || conv.overall_score || null;
+          // Use overall_score
+          const score = conv.overall_score || null;
 
           return {
             id: conv.id,
