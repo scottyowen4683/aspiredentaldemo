@@ -1,54 +1,138 @@
-// audio/buffer-manager.js - Audio buffering and Voice Activity Detection
+// audio/buffer-manager.js - Audio buffering and Voice Activity Detection (VAD)
 import logger from '../services/logger.js';
 
 /**
- * Manages audio buffering from Twilio Media Streams
- * Accumulates base64 audio chunks and detects silence
+ * Manages audio buffering from Twilio Media Streams with proper VAD
+ * Uses energy-based voice activity detection since Twilio sends continuous audio
  */
 export class BufferManager {
   constructor() {
     this.chunks = [];
-    this.lastAudioTime = null;
-    this.silenceThreshold = 1500; // 1.5 seconds of silence = speech end
-    this.silenceTimer = null;
     this.onSpeechEndCallback = null;
+
+    // VAD configuration
+    this.silenceThreshold = 10; // μ-law energy threshold (adjust as needed)
+    this.speechStarted = false;
+    this.silentChunksCount = 0;
+    this.silentChunksRequired = 25; // ~500ms of silence at 20ms chunks (8000 Hz / 160 samples)
+    this.minSpeechChunks = 10; // Minimum chunks to consider valid speech
+    this.speechChunksCount = 0;
+
+    // Debounce for processing
+    this.processingTimeout = null;
+    this.processDelay = 100; // Small delay to batch final silence detection
   }
 
   /**
-   * Add audio chunk to buffer
+   * Calculate energy (RMS-like) of μ-law audio chunk
+   * @param {string} audioBase64 - Base64 encoded μ-law audio
+   * @returns {number} Energy level
+   */
+  calculateEnergy(audioBase64) {
+    const buffer = Buffer.from(audioBase64, 'base64');
+    let energy = 0;
+
+    for (let i = 0; i < buffer.length; i++) {
+      // μ-law decode to get approximate amplitude
+      // In μ-law, 0x7F and 0xFF are near-silence
+      const sample = buffer[i];
+      // Convert μ-law sample to approximate linear value
+      const sign = sample & 0x80;
+      const magnitude = ~sample & 0x7F;
+      const exponent = (magnitude >> 4) & 0x07;
+      const mantissa = magnitude & 0x0F;
+      let linear = (mantissa << (exponent + 3)) + (1 << (exponent + 3)) - 132;
+      if (linear < 0) linear = 0;
+      energy += linear;
+    }
+
+    return buffer.length > 0 ? energy / buffer.length : 0;
+  }
+
+  /**
+   * Add audio chunk to buffer with VAD
    * @param {string} audioBase64 - Base64 encoded audio from Twilio (μ-law, 8kHz)
    */
   add(audioBase64) {
-    this.chunks.push(audioBase64);
-    this.lastAudioTime = Date.now();
+    const energy = this.calculateEnergy(audioBase64);
+    const isSpeech = energy > this.silenceThreshold;
 
-    // Reset silence timer
-    if (this.silenceTimer) {
-      clearTimeout(this.silenceTimer);
+    // Always add chunks during speech
+    if (this.speechStarted || isSpeech) {
+      this.chunks.push(audioBase64);
     }
 
-    // Start new silence timer
-    this.silenceTimer = setTimeout(() => {
-      this.detectSpeechEnd();
-    }, this.silenceThreshold);
+    if (isSpeech) {
+      // Speech detected
+      if (!this.speechStarted) {
+        this.speechStarted = true;
+        this.speechChunksCount = 0;
+        logger.debug('Speech started', { energy });
+      }
+      this.speechChunksCount++;
+      this.silentChunksCount = 0;
+
+      // Clear any pending processing
+      if (this.processingTimeout) {
+        clearTimeout(this.processingTimeout);
+        this.processingTimeout = null;
+      }
+    } else if (this.speechStarted) {
+      // Silence during speech - count consecutive silent chunks
+      this.silentChunksCount++;
+
+      if (this.silentChunksCount >= this.silentChunksRequired) {
+        // Enough silence detected - trigger speech end
+        // Use small delay to ensure we don't cut off mid-word
+        if (!this.processingTimeout) {
+          this.processingTimeout = setTimeout(() => {
+            this.detectSpeechEnd();
+          }, this.processDelay);
+        }
+      }
+    }
   }
 
   /**
-   * Called when silence is detected (user stopped speaking)
+   * Called when silence is detected after speech
    */
   detectSpeechEnd() {
-    if (this.chunks.length === 0) {
+    this.processingTimeout = null;
+
+    // Only process if we had meaningful speech
+    if (this.speechChunksCount < this.minSpeechChunks) {
+      logger.debug('Ignoring short audio', {
+        speechChunks: this.speechChunksCount,
+        minRequired: this.minSpeechChunks
+      });
+      this.reset();
       return;
     }
 
-    logger.debug('Speech end detected', {
-      chunks: this.chunks.length,
-      silenceDuration: this.silenceThreshold
+    logger.info('Speech end detected', {
+      totalChunks: this.chunks.length,
+      speechChunks: this.speechChunksCount,
+      silentChunks: this.silentChunksCount
     });
 
     // Trigger callback if set
     if (this.onSpeechEndCallback) {
       this.onSpeechEndCallback();
+    }
+  }
+
+  /**
+   * Reset state for next utterance
+   */
+  reset() {
+    this.speechStarted = false;
+    this.silentChunksCount = 0;
+    this.speechChunksCount = 0;
+    this.chunks = [];
+
+    if (this.processingTimeout) {
+      clearTimeout(this.processingTimeout);
+      this.processingTimeout = null;
     }
   }
 
@@ -65,13 +149,7 @@ export class BufferManager {
    */
   flush() {
     const audio = this.chunks.join('');
-    this.chunks = [];
-
-    if (this.silenceTimer) {
-      clearTimeout(this.silenceTimer);
-      this.silenceTimer = null;
-    }
-
+    this.reset();
     return audio;
   }
 
@@ -79,12 +157,7 @@ export class BufferManager {
    * Clear all audio without processing
    */
   clear() {
-    this.chunks = [];
-
-    if (this.silenceTimer) {
-      clearTimeout(this.silenceTimer);
-      this.silenceTimer = null;
-    }
+    this.reset();
   }
 
   /**
