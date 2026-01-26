@@ -255,11 +255,18 @@ class SupabaseService {
       const currentTranscript = Array.isArray(conversation?.transcript) ? conversation.transcript : [];
       const newTranscript = [...currentTranscript, message];
 
-      // Update conversation with new transcript
+      // Build plain text version for transcript_text column (for portal display)
+      const transcriptText = newTranscript
+        .filter(msg => msg.role !== 'system')
+        .map(msg => `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content}`)
+        .join('\n');
+
+      // Update conversation with new transcript (both JSONB and plain text)
       const { error } = await supabase
         .from('conversations')
         .update({
           transcript: newTranscript,
+          transcript_text: transcriptText,
           updated_at: new Date().toISOString()
         })
         .eq('id', conversationId);

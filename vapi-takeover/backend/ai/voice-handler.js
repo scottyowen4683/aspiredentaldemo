@@ -784,7 +784,8 @@ class VoiceHandler {
       }
 
       // Auto-score conversation if enabled (optimized for government compliance)
-      if (this.assistant.auto_score !== false && this.conversation) {
+      // Only score if we have a valid conversation ID (not the dummy object)
+      if (this.assistant.auto_score !== false && this.conversation?.id) {
         await this.scoreConversation();
       }
 
@@ -844,34 +845,37 @@ class VoiceHandler {
       this.costs.scoring = scoringResult.metadata.cost.total;
       this.costs.total += scoringResult.metadata.cost.total;
 
-      // Save score to database
-      await supabaseService.client
-        .from('conversation_scores')
-        .insert({
-          conversation_id: this.conversation.id,
-          overall_score: scoringResult.overallScore,
-          dimension_scores: scoringResult.dimensions,
-          flags: scoringResult.flags,
-          feedback: scoringResult.feedback,
-          cost: scoringResult.metadata.cost.total,
-          model_used: 'gpt-4o-mini',
-          scoring_type: 'voice'
-        });
+      // Update conversation with score (using correct schema field names)
+      // Schema has: overall_score (integer), scored (boolean), score_details (jsonb)
+      const overallScore = Math.round(scoringResult.weighted_total_score || scoringResult.confidence_score || 0);
 
-      // Update conversation with score
       await supabaseService.client
         .from('conversations')
         .update({
-          confidence_score: scoringResult.weighted_total_score || scoringResult.overallScore,
-          scored_at: new Date().toISOString()
+          overall_score: overallScore,
+          scored: true,
+          score_details: {
+            scores: scoringResult.scores,
+            grade: scoringResult.grade,
+            sentiments: scoringResult.sentiments,
+            flags: scoringResult.flags,
+            resident_intents: scoringResult.resident_intents,
+            success_evaluation: scoringResult.success_evaluation,
+            summary: scoringResult.summary,
+            strengths: scoringResult.strengths,
+            improvements: scoringResult.improvements,
+            model_used: 'gpt-4o-mini',
+            scoring_type: 'voice',
+            cost: scoringResult.metadata?.cost?.total || 0
+          }
         })
         .eq('id', this.conversation.id);
 
       logger.info('Voice conversation scored:', {
         conversationId: this.conversation.id,
-        score: scoringResult.overallScore,
-        flags: scoringResult.flags.length,
-        scoringCost: scoringResult.metadata.cost.total
+        score: overallScore,
+        grade: scoringResult.grade,
+        scoringCost: scoringResult.metadata?.cost?.total || 0
       });
 
     } catch (error) {
