@@ -13,14 +13,27 @@ router.post('/incoming', async (req, res) => {
   try {
     const { From, To, CallSid } = req.body;
 
-    logger.info('Incoming voice call', {
+    logger.info('Incoming voice call - raw request:', {
       from: From,
       to: To,
-      callSid: CallSid
+      callSid: CallSid,
+      bodyKeys: Object.keys(req.body || {}),
+      contentType: req.get('content-type')
     });
 
+    if (!To) {
+      logger.error('No To field in request body!', { body: req.body });
+      const response = new VoiceResponse();
+      response.say({ voice: 'Polly.Joanna' }, 'Error: No destination number provided.');
+      response.hangup();
+      res.type('text/xml');
+      return res.send(response.toString());
+    }
+
     // Look up assistant by phone number
+    logger.info('Looking up assistant for phone:', To);
     const assistant = await supabaseService.getAssistantByPhoneNumber(To);
+    logger.info('Lookup result:', { found: !!assistant, phone: To });
 
     if (!assistant) {
       logger.warn('No assistant found for phone number:', To);
