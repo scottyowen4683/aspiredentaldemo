@@ -249,25 +249,61 @@ class VoiceHandler {
   }
 
   async transcribeAudio(audioBuffer) {
-    // audioBuffer is now a raw Buffer (already decoded from base64 chunks)
-    // Write to temp file - most reliable method for OpenAI SDK
+    const durationSeconds = audioBuffer.length / 8000; // 8kHz sample rate
+
+    // Try Deepgram first if configured (much faster: ~100-300ms vs 500-1500ms)
+    if (process.env.DEEPGRAM_API_KEY) {
+      try {
+        const startTime = Date.now();
+        const wavBuffer = ulawToWav(audioBuffer);
+
+        const response = await fetch('https://api.deepgram.com/v1/listen?model=nova-2&language=en', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Token ${process.env.DEEPGRAM_API_KEY}`,
+            'Content-Type': 'audio/wav'
+          },
+          body: wavBuffer
+        });
+
+        if (response.ok) {
+          const result = await response.json();
+          const text = result.results?.channels?.[0]?.alternatives?.[0]?.transcript || '';
+          const latency = Date.now() - startTime;
+
+          logger.info('Deepgram transcription complete', {
+            text,
+            latencyMs: latency,
+            durationSec: durationSeconds.toFixed(2)
+          });
+
+          // Deepgram cost: ~$0.0043/min for Nova-2
+          const cost = (durationSeconds / 60) * 0.0043;
+          this.costs.whisper += cost; // Using whisper key for all STT costs
+          this.costs.total += cost;
+
+          return text;
+        } else {
+          logger.warn('Deepgram failed, falling back to Whisper:', response.status);
+        }
+      } catch (dgError) {
+        logger.warn('Deepgram error, falling back to Whisper:', dgError.message);
+      }
+    }
+
+    // Fall back to Whisper
     const tempFile = path.join(os.tmpdir(), `whisper-${this.callSid}-${Date.now()}.wav`);
 
     try {
-      // Convert μ-law audio buffer to WAV format for Whisper
       const wavBuffer = ulawToWav(audioBuffer);
 
-      logger.info('Audio converted to WAV', {
+      logger.info('Using Whisper for transcription', {
         inputSizeKB: (audioBuffer.length / 1024).toFixed(2),
-        outputSizeKB: (wavBuffer.length / 1024).toFixed(2),
-        durationSec: (audioBuffer.length / 8000).toFixed(2),
-        tempFile
+        durationSec: durationSeconds.toFixed(2)
       });
 
-      // Write WAV to temp file
       fs.writeFileSync(tempFile, wavBuffer);
 
-      // Call Whisper API using fs.createReadStream (most reliable)
       const transcription = await openai.audio.transcriptions.create({
         file: fs.createReadStream(tempFile),
         model: 'whisper-1',
@@ -280,11 +316,8 @@ class VoiceHandler {
         textLength: transcription.text?.length
       });
 
-      // Calculate cost (Whisper: $0.006 per minute)
-      // audioBuffer is already raw bytes, not base64
-      const durationSeconds = audioBuffer.length / 8000; // 8kHz sample rate
+      // Whisper cost: $0.006 per minute
       const whisperCost = (durationSeconds / 60) * 0.006;
-
       this.costs.whisper += whisperCost;
       this.costs.total += whisperCost;
 
@@ -296,7 +329,6 @@ class VoiceHandler {
       });
       throw error;
     } finally {
-      // Clean up temp file
       try {
         if (fs.existsSync(tempFile)) {
           fs.unlinkSync(tempFile);

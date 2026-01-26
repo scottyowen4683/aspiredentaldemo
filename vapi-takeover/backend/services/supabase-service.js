@@ -137,15 +137,18 @@ class SupabaseService {
   // ===========================================================================
 
   async createConversation({ orgId, assistantId, sessionId, channel }) {
-    // Try with all fields first, then fall back to minimal fields
+    logger.info('Creating conversation:', { orgId, assistantId, sessionId, channel });
+
+    // First attempt: Try with session_id column (migration schema)
     const fullData = {
       org_id: orgId,
       assistant_id: assistantId,
       session_id: sessionId,
       channel: channel || 'voice',
       is_voice: channel === 'voice',
+      provider: 'aspire', // Mark as our platform
       started_at: new Date().toISOString(),
-      transcript: [] // Initialize empty transcript array
+      transcript: []
     };
 
     let { data, error } = await supabase
@@ -154,40 +157,62 @@ class SupabaseService {
       .select()
       .single();
 
-    // If failed (likely missing columns), try with minimal fields
-    if (error) {
-      logger.warn('Full insert failed, trying minimal:', error.message);
-
-      const minimalData = {
-        org_id: orgId,
-        assistant_id: assistantId,
-        channel: channel || 'voice',
-        started_at: new Date().toISOString()
-      };
-
-      const result = await supabase
-        .from('conversations')
-        .insert(minimalData)
-        .select()
-        .single();
-
-      data = result.data;
-      error = result.error;
-
-      // Store sessionId mapping for lookup
-      if (data) {
-        this._sessionMap = this._sessionMap || new Map();
-        this._sessionMap.set(sessionId, data.id);
-      }
+    if (data) {
+      logger.info('Conversation created (full):', { id: data.id, org_id: data.org_id });
+      return data;
     }
 
-    if (error) {
-      logger.error('Error creating conversation:', error);
-      throw error;
+    logger.warn('Full insert failed:', error?.message);
+
+    // Second attempt: Without session_id (it might not exist)
+    const withoutSessionId = {
+      org_id: orgId,
+      assistant_id: assistantId,
+      channel: channel || 'voice',
+      is_voice: channel === 'voice',
+      provider: 'aspire',
+      started_at: new Date().toISOString(),
+      transcript: []
+    };
+
+    const result2 = await supabase
+      .from('conversations')
+      .insert(withoutSessionId)
+      .select()
+      .single();
+
+    if (result2.data) {
+      logger.info('Conversation created (no session_id):', { id: result2.data.id });
+      // Map session to conversation ID for lookups
+      this._sessionMap = this._sessionMap || new Map();
+      this._sessionMap.set(sessionId, result2.data.id);
+      return result2.data;
     }
 
-    logger.info('Conversation created:', { conversationId: data.id, sessionId });
-    return data;
+    logger.warn('Second insert failed:', result2.error?.message);
+
+    // Third attempt: Absolute minimal (just required fields)
+    const minimal = {
+      org_id: orgId,
+      assistant_id: assistantId,
+      started_at: new Date().toISOString()
+    };
+
+    const result3 = await supabase
+      .from('conversations')
+      .insert(minimal)
+      .select()
+      .single();
+
+    if (result3.data) {
+      logger.info('Conversation created (minimal):', { id: result3.data.id });
+      this._sessionMap = this._sessionMap || new Map();
+      this._sessionMap.set(sessionId, result3.data.id);
+      return result3.data;
+    }
+
+    logger.error('All insert attempts failed:', result3.error);
+    throw result3.error || new Error('Failed to create conversation');
   }
 
   async getConversation(sessionId) {
