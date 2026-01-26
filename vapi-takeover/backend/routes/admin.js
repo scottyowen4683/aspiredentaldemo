@@ -576,6 +576,75 @@ router.post('/configure-twilio-webhook', async (req, res) => {
 });
 
 // =============================================================================
+// DEBUG ENDPOINTS
+// =============================================================================
+
+// GET /api/admin/debug/assistants-by-phone - List all assistants with phone numbers (for debugging)
+router.get('/debug/assistants-by-phone', async (req, res) => {
+  try {
+    const { data, error } = await supabaseService.client
+      .from('assistants')
+      .select('id, friendly_name, phone_number, active, bot_type, org_id, created_at')
+      .not('phone_number', 'is', null)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    res.json({
+      success: true,
+      count: data?.length || 0,
+      assistants: data?.map(a => ({
+        id: a.id,
+        name: a.friendly_name,
+        phone: a.phone_number,
+        active: a.active,
+        bot_type: a.bot_type,
+        org_id: a.org_id
+      })) || []
+    });
+  } catch (error) {
+    logger.error('Debug assistants error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// POST /api/admin/debug/activate-assistant - Activate an assistant for voice routing
+router.post('/debug/activate-assistant', async (req, res) => {
+  try {
+    const { assistant_id } = req.body;
+
+    if (!assistant_id) {
+      return res.status(400).json({ success: false, error: 'assistant_id is required' });
+    }
+
+    const { data, error } = await supabaseService.client
+      .from('assistants')
+      .update({ active: true })
+      .eq('id', assistant_id)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    logger.info('Assistant activated:', { id: assistant_id, name: data.friendly_name });
+
+    res.json({
+      success: true,
+      message: `Assistant "${data.friendly_name}" is now active`,
+      assistant: {
+        id: data.id,
+        name: data.friendly_name,
+        phone: data.phone_number,
+        active: data.active
+      }
+    });
+  } catch (error) {
+    logger.error('Activate assistant error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// =============================================================================
 // STATS & MONITORING
 // =============================================================================
 

@@ -13,6 +13,11 @@ if (!supabaseUrl || !supabaseServiceKey) {
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
 class SupabaseService {
+  // Expose the raw supabase client for direct queries
+  get client() {
+    return supabase;
+  }
+
   // ===========================================================================
   // ORGANIZATIONS
   // ===========================================================================
