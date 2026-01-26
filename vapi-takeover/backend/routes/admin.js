@@ -518,6 +518,86 @@ router.get('/twilio-numbers', async (req, res) => {
   }
 });
 
+// GET /api/admin/twilio-number-details - Get full details about a specific Twilio number
+router.get('/twilio-number-details', async (req, res) => {
+  try {
+    const { phone } = req.query;
+
+    if (!phone) {
+      return res.status(400).json({ success: false, error: 'phone query param required' });
+    }
+
+    const { getPhoneNumberDetails } = await import('../services/twilio-validator.js');
+    const result = await getPhoneNumberDetails(phone);
+
+    // Highlight potential issues
+    if (result.success && result.number) {
+      const issues = [];
+
+      if (result.number.trunkSid) {
+        issues.push(`⚠️ TRUNK_SID is set (${result.number.trunkSid}) - calls route to SIP trunk, not webhook`);
+      }
+
+      if (result.number.voiceApplicationSid) {
+        issues.push(`⚠️ VOICE_APPLICATION_SID is set (${result.number.voiceApplicationSid}) - TwiML app overrides webhook URL`);
+      }
+
+      if (!result.number.voiceUrl) {
+        issues.push('⚠️ NO VOICE_URL configured');
+      }
+
+      if (!result.number.capabilities?.voice) {
+        issues.push('⚠️ Voice capability NOT enabled for this number');
+      }
+
+      result.issues = issues;
+      result.hasIssues = issues.length > 0;
+    }
+
+    res.json(result);
+  } catch (error) {
+    logger.error('Get Twilio number details error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// POST /api/admin/reset-twilio-number - Clear trunk/app associations and set webhook directly
+router.post('/reset-twilio-number', async (req, res) => {
+  try {
+    const { phone_number } = req.body;
+
+    if (!phone_number) {
+      return res.status(400).json({ success: false, error: 'phone_number is required' });
+    }
+
+    const { resetPhoneNumberToWebhook } = await import('../services/twilio-validator.js');
+
+    // Get the base URL for webhooks
+    const baseUrl = process.env.BASE_URL || `https://${req.get('host')}`;
+
+    const result = await resetPhoneNumberToWebhook(
+      phone_number,
+      `${baseUrl}/api/voice/incoming`,
+      `${baseUrl}/api/voice/status`
+    );
+
+    if (!result.success) {
+      return res.status(400).json(result);
+    }
+
+    logger.info('Twilio number reset:', result);
+
+    res.json({
+      success: true,
+      message: `Number ${phone_number} has been reset - trunk and app associations cleared, webhook set directly`,
+      ...result
+    });
+  } catch (error) {
+    logger.error('Reset Twilio number error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // GET /api/admin/ai-status - Check if AI services are configured (OpenAI, ElevenLabs)
 router.get('/ai-status', async (req, res) => {
   const hasOpenAI = !!process.env.OPENAI_API_KEY;
