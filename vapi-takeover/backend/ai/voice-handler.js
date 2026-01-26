@@ -244,11 +244,45 @@ class VoiceHandler {
       // Get conversation history
       const history = await supabaseService.getConversationHistory(this.sessionId);
 
-      // Build messages
+      // Search knowledge base if enabled (RAG)
+      let kbContext = '';
+      if (this.assistant.kb_enabled) {
+        try {
+          // Create embedding for the user's message
+          const embeddingResponse = await openai.embeddings.create({
+            model: 'text-embedding-3-small',
+            input: userMessage
+          });
+
+          const embedding = embeddingResponse.data[0].embedding;
+
+          // Search knowledge base
+          const kbResults = await supabaseService.searchKnowledgeBase(
+            this.assistant.org_id,
+            embedding,
+            this.assistant.kb_match_count || 3 // Fewer results for voice (shorter context)
+          );
+
+          if (kbResults && kbResults.length > 0) {
+            kbContext = '\n\nRelevant information from knowledge base:\n' +
+              kbResults.map(r => `${r.heading ? r.heading + ':\n' : ''}${r.content}`).join('\n\n');
+
+            logger.info('Knowledge base context added', {
+              matchCount: kbResults.length,
+              contextLength: kbContext.length
+            });
+          }
+        } catch (kbError) {
+          logger.error('Knowledge base search failed:', kbError);
+          // Continue without KB context
+        }
+      }
+
+      // Build messages with knowledge base context
       const messages = [
         {
           role: 'system',
-          content: this.assistant.prompt
+          content: this.assistant.prompt + kbContext
         },
         ...history,
         {
