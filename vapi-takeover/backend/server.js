@@ -158,29 +158,47 @@ wss.on('connection', async (ws, req) => {
               logger.info('ElevenLabs greeting received', {
                 audioSizeKB: (greetingAudio.length / 1024).toFixed(2),
                 audioBytes: greetingAudio.length,
-                firstBytes: greetingAudio.slice(0, 20).toString('hex')
+                durationMs: Math.round(greetingAudio.length / 8) // 8 samples per ms at 8kHz
               });
 
-              // Send audio in chunks up to 8KB (Twilio max is 16KB after base64 decode)
-              // Twilio handles buffering internally, no need for artificial delays
-              const MAX_CHUNK_SIZE = 8000; // 8KB chunks = 1 second of audio at 8kHz
+              // Send entire greeting as one large chunk for smooth playback
+              // Twilio buffers internally and this prevents stuttering from chunk boundaries
+              // For very long greetings (>16KB), split into larger chunks
+              const MAX_CHUNK_SIZE = 16000; // 16KB = 2 seconds of smooth audio
 
-              for (let offset = 0; offset < greetingAudio.length; offset += MAX_CHUNK_SIZE) {
-                const chunk = greetingAudio.slice(offset, Math.min(offset + MAX_CHUNK_SIZE, greetingAudio.length));
-                const chunkBase64 = chunk.toString('base64');
-
-                if (ws.readyState === 1) { // WebSocket.OPEN
+              if (greetingAudio.length <= MAX_CHUNK_SIZE) {
+                // Send as single chunk for best quality
+                if (ws.readyState === 1) {
                   ws.send(JSON.stringify({
                     event: 'media',
                     streamSid: streamSid,
                     media: {
-                      payload: chunkBase64
+                      payload: greetingAudio.toString('base64')
                     }
                   }));
-                  logger.debug('Sent audio chunk', { offset, chunkSize: chunk.length });
-                } else {
-                  logger.warn('WebSocket not open, cannot send audio', { readyState: ws.readyState });
-                  break;
+                }
+              } else {
+                // For longer greetings, use larger chunks with small delays
+                for (let offset = 0; offset < greetingAudio.length; offset += MAX_CHUNK_SIZE) {
+                  const chunk = greetingAudio.slice(offset, Math.min(offset + MAX_CHUNK_SIZE, greetingAudio.length));
+
+                  if (ws.readyState === 1) {
+                    ws.send(JSON.stringify({
+                      event: 'media',
+                      streamSid: streamSid,
+                      media: {
+                        payload: chunk.toString('base64')
+                      }
+                    }));
+
+                    // Small delay between large chunks to prevent buffer overflow
+                    if (offset + MAX_CHUNK_SIZE < greetingAudio.length) {
+                      await new Promise(resolve => setTimeout(resolve, 50));
+                    }
+                  } else {
+                    logger.warn('WebSocket not open, cannot send audio', { readyState: ws.readyState });
+                    break;
+                  }
                 }
               }
 
