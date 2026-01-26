@@ -177,14 +177,14 @@ END $$;
 
 -- ============================================================================
 -- 4. INTERACTION LOGS (for billing)
+-- Note: conversation_id references chat_conversations table, so we skip it
 -- ============================================================================
 
-INSERT INTO interaction_logs (id, org_id, assistant_id, conversation_id, interaction_type, duration_seconds, message_count, cost, billing_period_start, billing_period_end, created_at)
+INSERT INTO interaction_logs (id, org_id, assistant_id, interaction_type, duration_seconds, message_count, cost, billing_period_start, billing_period_end, created_at)
 SELECT
   gen_random_uuid(),
   sub.org_id,
   sub.assistant_id,
-  sub.id,
   CASE
     WHEN sub.channel = 'voice' AND random() < 0.7 THEN 'call_inbound'
     WHEN sub.channel = 'voice' THEN 'call_outbound'
@@ -199,9 +199,8 @@ SELECT
   (DATE_TRUNC('month', sub.created_at) + INTERVAL '1 month')::DATE,
   sub.created_at
 FROM (
-  SELECT c.id, c.org_id, c.assistant_id, c.channel::TEXT, c.duration_seconds, c.total_cost, c.created_at
+  SELECT c.org_id, c.assistant_id, c.channel::TEXT, c.duration_seconds, c.total_cost, c.created_at
   FROM conversations c
-  WHERE NOT EXISTS (SELECT 1 FROM interaction_logs il WHERE il.conversation_id = c.id)
   LIMIT 250
 ) sub;
 
