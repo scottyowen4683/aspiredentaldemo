@@ -644,6 +644,36 @@ router.post('/debug/activate-assistant', async (req, res) => {
   }
 });
 
+// GET /api/admin/debug/test-phone-lookup - Test phone lookup function directly
+router.get('/debug/test-phone-lookup', async (req, res) => {
+  try {
+    const { phone } = req.query;
+
+    if (!phone) {
+      return res.status(400).json({ success: false, error: 'phone query param required' });
+    }
+
+    logger.info('Testing phone lookup for:', phone);
+
+    const assistant = await supabaseService.getAssistantByPhoneNumber(phone);
+
+    res.json({
+      success: true,
+      phoneSearched: phone,
+      found: !!assistant,
+      assistant: assistant ? {
+        id: assistant.id,
+        name: assistant.friendly_name,
+        phone: assistant.phone_number,
+        active: assistant.active
+      } : null
+    });
+  } catch (error) {
+    logger.error('Test phone lookup error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // =============================================================================
 // STATS & MONITORING
 // =============================================================================
