@@ -21,17 +21,22 @@ router.post('/echo', (req, res) => {
 // Twilio webhook for incoming calls
 router.post('/incoming', async (req, res) => {
   try {
-    const { From, To, CallSid } = req.body;
+    // Extract and normalize phone numbers (trim whitespace, handle URL encoding)
+    const From = (req.body.From || '').trim();
+    const To = (req.body.To || '').trim();
+    const CallSid = req.body.CallSid;
 
-    logger.info('Incoming voice call - raw request:', {
+    // Ensure + prefix is present (URL encoding can turn + into space)
+    const normalizedTo = To.startsWith('+') ? To : (To ? `+${To}` : '');
+
+    logger.info('Incoming voice call', {
       from: From,
       to: To,
-      callSid: CallSid,
-      bodyKeys: Object.keys(req.body || {}),
-      contentType: req.get('content-type')
+      normalizedTo,
+      callSid: CallSid
     });
 
-    if (!To) {
+    if (!normalizedTo) {
       logger.error('No To field in request body!', { body: req.body });
       const response = new VoiceResponse();
       response.say({ voice: 'Polly.Joanna' }, 'Error: No destination number provided.');
@@ -41,9 +46,7 @@ router.post('/incoming', async (req, res) => {
     }
 
     // Look up assistant by phone number
-    logger.info('Looking up assistant for phone:', To);
-    const assistant = await supabaseService.getAssistantByPhoneNumber(To);
-    logger.info('Lookup result:', { found: !!assistant, phone: To });
+    const assistant = await supabaseService.getAssistantByPhoneNumber(normalizedTo);
 
     if (!assistant) {
       logger.warn('No assistant found for phone number:', To);
