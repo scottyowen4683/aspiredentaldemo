@@ -12,6 +12,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 import supabaseService from './services/supabase-service.js';
 import VoiceHandler from './ai/voice-handler.js';
+import { streamElevenLabsAudio } from './ai/elevenlabs.js';
 
 // Routes
 import chatRouter from './routes/chat.js';
@@ -104,33 +105,72 @@ wss.on('connection', async (ws, req) => {
 
           // Initialize voice handler
           voiceHandler = new VoiceHandler(data.start.callSid, assistantId);
+          const streamSid = data.streamSid; // Capture for use in callbacks
 
           try {
             await voiceHandler.initialize();
 
-            // Set speech end callback
+            // Send initial greeting with ElevenLabs voice IMMEDIATELY
+            // This is what makes it feel like VAPI - instant AI voice response
+            const greeting = voiceHandler.assistant.first_message ||
+              `Hi! How can I help you today?`;
+
+            logger.info('Sending ElevenLabs greeting', { greeting });
+
+            const voiceId = voiceHandler.assistant.elevenlabs_voice_id ||
+              process.env.ELEVENLABS_VOICE_ID ||
+              'EXAVITQu4vr4xnSDxMaL'; // Default: "Sarah" voice
+
+            try {
+              const greetingAudio = await streamElevenLabsAudio(greeting, voiceId);
+              const audioBase64 = greetingAudio.toString('base64');
+
+              // Send greeting audio to Twilio
+              ws.send(JSON.stringify({
+                event: 'media',
+                streamSid: streamSid,
+                media: {
+                  payload: audioBase64
+                }
+              }));
+
+              logger.info('ElevenLabs greeting sent', {
+                audioSizeKB: (greetingAudio.length / 1024).toFixed(2)
+              });
+            } catch (greetingError) {
+              logger.error('Failed to send ElevenLabs greeting:', greetingError);
+              // Continue anyway - conversation can still work
+            }
+
+            // Set speech end callback for ongoing conversation
             voiceHandler.audioBuffer.onSpeechEnd(async () => {
               try {
                 const result = await voiceHandler.onSpeechEnd();
 
-                if (result) {
+                if (result && result.audioStream) {
                   // Send audio response back to Twilio
                   const audioBase64 = result.audioStream.toString('base64');
 
                   ws.send(JSON.stringify({
                     event: 'media',
-                    streamSid: data.streamSid,
+                    streamSid: streamSid,
                     media: {
                       payload: audioBase64
                     }
                   }));
+
+                  logger.info('AI response audio sent', {
+                    transcription: result.transcription,
+                    responsePreview: result.responseText?.substring(0, 50) + '...',
+                    latencyMs: result.latency?.total
+                  });
                 }
               } catch (error) {
                 logger.error('Error processing speech:', error);
               }
             });
 
-            logger.info('Voice handler initialized');
+            logger.info('Voice handler initialized with ElevenLabs');
           } catch (error) {
             logger.error('Failed to initialize voice handler:', error);
             ws.close();

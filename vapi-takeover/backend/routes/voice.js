@@ -107,17 +107,11 @@ router.post('/incoming', async (req, res) => {
     });
 
     // Create TwiML response - optimized for low latency voice AI
+    // NO Polly greeting - the AI will greet with ElevenLabs voice through WebSocket
     const response = new VoiceResponse();
 
-    // Brief greeting, then immediately connect to AI stream
-    // For production, consider removing greeting entirely for instant AI response
-    const greeting = assistant.first_message || `Hi, how can I help you?`;
-    response.say({
-      voice: 'Polly.Joanna'
-    }, greeting);
-
-    // Connect to WebSocket Media Stream for real-time bidirectional voice AI
-    // This streams audio to/from our server for Whisper → GPT → ElevenLabs pipeline
+    // Connect to WebSocket Media Stream IMMEDIATELY for real-time bidirectional voice AI
+    // The AI greeting will be sent through ElevenLabs via WebSocket, not Twilio TTS
     // Use explicit host or fall back to request host header
     const wsHost = process.env.BASE_URL
       ? process.env.BASE_URL.replace('https://', '').replace('http://', '')
