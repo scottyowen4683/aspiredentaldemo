@@ -19,10 +19,10 @@ export async function validateTwilioNumber(phoneNumber) {
   try {
     // Check if Twilio is configured
     if (!twilioClient) {
-      logger.warn('Twilio not configured, skipping validation');
+      logger.error('Twilio not configured - cannot validate phone number');
       return {
-        valid: true, // Allow in development
-        warning: 'Twilio validation skipped - credentials not configured',
+        valid: false,
+        error: 'Twilio credentials not configured. Please set TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN environment variables.',
         number: phoneNumber
       };
     }

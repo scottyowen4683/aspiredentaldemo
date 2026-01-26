@@ -48,6 +48,15 @@ export async function createAssistant(input: CreateAssistantInput, userId?: stri
           body: JSON.stringify({ phone_number: phoneNumber })
         });
 
+        if (!validationResponse.ok) {
+          return {
+            success: false,
+            error: {
+              message: `Failed to validate phone number. Server returned ${validationResponse.status}`
+            }
+          };
+        }
+
         const validationResult = await validationResponse.json();
 
         if (!validationResult.valid) {
@@ -62,8 +71,13 @@ export async function createAssistant(input: CreateAssistantInput, userId?: stri
         // Log successful validation
         console.log('Twilio number validated:', validationResult);
       } catch (validationError) {
-        console.warn('Twilio validation failed, proceeding anyway:', validationError);
-        // Allow creation to proceed if validation service is unavailable
+        console.error('Twilio validation request failed:', validationError);
+        return {
+          success: false,
+          error: {
+            message: 'Unable to validate phone number. Please check that the server is running and try again.'
+          }
+        };
       }
     }
 
@@ -245,6 +259,15 @@ export async function updateAssistant(id: string, input: CreateAssistantInput, u
           body: JSON.stringify({ phone_number: phoneNumber })
         });
 
+        if (!validationResponse.ok) {
+          return {
+            success: false,
+            error: {
+              message: `Failed to validate phone number. Server returned ${validationResponse.status}`
+            }
+          };
+        }
+
         const validationResult = await validationResponse.json();
 
         if (!validationResult.valid) {
@@ -258,7 +281,13 @@ export async function updateAssistant(id: string, input: CreateAssistantInput, u
 
         console.log('Twilio number validated for update:', validationResult);
       } catch (validationError) {
-        console.warn('Twilio validation failed, proceeding anyway:', validationError);
+        console.error('Twilio validation request failed:', validationError);
+        return {
+          success: false,
+          error: {
+            message: 'Unable to validate phone number. Please check that the server is running and try again.'
+          }
+        };
       }
     }
 
