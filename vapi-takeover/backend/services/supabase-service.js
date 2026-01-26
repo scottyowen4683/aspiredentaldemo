@@ -139,144 +139,65 @@ class SupabaseService {
   async createConversation({ orgId, assistantId, sessionId, channel }) {
     logger.info('Creating conversation:', { orgId, assistantId, sessionId, channel });
 
-    // First attempt: Try with session_id column (migration schema)
-    const fullData = {
+    // Match exact schema: session_id is NOT NULL, channel is enum
+    const conversationData = {
       org_id: orgId,
       assistant_id: assistantId,
-      session_id: sessionId,
-      channel: channel || 'voice',
-      is_voice: channel === 'voice',
-      provider: 'aspire', // Mark as our platform
+      session_id: sessionId, // Required - NOT NULL
+      channel: channel || 'voice', // Enum: likely 'voice', 'chat', 'sms'
       started_at: new Date().toISOString(),
       transcript: []
     };
 
-    let { data, error } = await supabase
+    const { data, error } = await supabase
       .from('conversations')
-      .insert(fullData)
+      .insert(conversationData)
       .select()
       .single();
 
-    if (data) {
-      logger.info('Conversation created (full):', { id: data.id, org_id: data.org_id });
-      return data;
+    if (error) {
+      logger.error('Failed to create conversation:', {
+        error: error.message,
+        code: error.code,
+        details: error.details,
+        hint: error.hint,
+        data: conversationData
+      });
+      throw error;
     }
 
-    logger.warn('Full insert failed:', error?.message);
-
-    // Second attempt: Without session_id (it might not exist)
-    const withoutSessionId = {
-      org_id: orgId,
-      assistant_id: assistantId,
-      channel: channel || 'voice',
-      is_voice: channel === 'voice',
-      provider: 'aspire',
-      started_at: new Date().toISOString(),
-      transcript: []
-    };
-
-    const result2 = await supabase
-      .from('conversations')
-      .insert(withoutSessionId)
-      .select()
-      .single();
-
-    if (result2.data) {
-      logger.info('Conversation created (no session_id):', { id: result2.data.id });
-      // Map session to conversation ID for lookups
-      this._sessionMap = this._sessionMap || new Map();
-      this._sessionMap.set(sessionId, result2.data.id);
-      return result2.data;
-    }
-
-    logger.warn('Second insert failed:', result2.error?.message);
-
-    // Third attempt: Absolute minimal (just required fields)
-    const minimal = {
-      org_id: orgId,
-      assistant_id: assistantId,
-      started_at: new Date().toISOString()
-    };
-
-    const result3 = await supabase
-      .from('conversations')
-      .insert(minimal)
-      .select()
-      .single();
-
-    if (result3.data) {
-      logger.info('Conversation created (minimal):', { id: result3.data.id });
-      this._sessionMap = this._sessionMap || new Map();
-      this._sessionMap.set(sessionId, result3.data.id);
-      return result3.data;
-    }
-
-    logger.error('All insert attempts failed:', result3.error);
-    throw result3.error || new Error('Failed to create conversation');
+    logger.info('Conversation created:', { id: data.id, org_id: data.org_id, session_id: data.session_id });
+    return data;
   }
 
   async getConversation(sessionId) {
-    // First check if we have a local mapping (used when session_id column doesn't exist)
-    const mappedId = this._sessionMap?.get(sessionId);
-    if (mappedId) {
-      const { data, error } = await supabase
-        .from('conversations')
-        .select('*')
-        .eq('id', mappedId)
-        .single();
-
-      if (!error && data) return data;
-    }
-
-    // Try with session_id column
-    let { data, error } = await supabase
+    const { data, error } = await supabase
       .from('conversations')
       .select('*')
       .eq('session_id', sessionId)
       .maybeSingle();
 
-    if (data) return data;
-
-    // Log but don't throw - conversation might just not exist yet
-    if (error && error.code !== 'PGRST116') {
-      logger.debug('getConversation query issue:', error.message);
+    if (error) {
+      logger.warn('getConversation error:', error.message);
+      return null;
     }
 
-    return null;
+    return data;
   }
 
   async updateConversation(sessionId, updates) {
-    const updateData = {
-      ...updates,
-      updated_at: new Date().toISOString()
-    };
-
-    // First check if we have a local mapping
-    const mappedId = this._sessionMap?.get(sessionId);
-
-    if (mappedId) {
-      const { data, error } = await supabase
-        .from('conversations')
-        .update(updateData)
-        .eq('id', mappedId)
-        .select()
-        .single();
-
-      if (!error) return data;
-      logger.warn('Update by mapped ID failed:', error.message);
-    }
-
-    // Try with session_id column
-    let { data, error } = await supabase
+    const { data, error } = await supabase
       .from('conversations')
-      .update(updateData)
+      .update({
+        ...updates,
+        updated_at: new Date().toISOString()
+      })
       .eq('session_id', sessionId)
       .select()
-      .maybeSingle();
+      .single();
 
     if (error) {
       logger.error('Error updating conversation:', error.message);
-      // Don't throw - let the call continue
       return null;
     }
 
@@ -284,44 +205,20 @@ class SupabaseService {
   }
 
   async endConversation(sessionId, { endReason, duration, costs }) {
-    // Build updates that work with both schema versions
+    // Match exact schema columns
     const updates = {
       ended_at: new Date().toISOString(),
       end_reason: endReason,
       duration_seconds: duration,
-      call_duration: duration,
-      // Use total_cost (exists in both schemas)
-      total_cost: costs?.total_cost || 0,
-      // Store detailed breakdown in cost_breakdown JSONB (production schema)
-      cost_breakdown: {
-        whisper_cost: costs?.whisper_cost || 0,
-        gpt_cost: costs?.gpt_cost || 0,
-        elevenlabs_cost: costs?.elevenlabs_cost || 0,
-        twilio_cost: costs?.twilio_cost || 0,
-        total: costs?.total_cost || 0
-      }
+      // Individual cost columns (all exist in schema)
+      whisper_cost: costs?.whisper_cost || 0,
+      gpt_cost: costs?.gpt_cost || 0,
+      elevenlabs_cost: costs?.elevenlabs_cost || 0,
+      twilio_cost: costs?.twilio_cost || 0,
+      total_cost: costs?.total_cost || 0
     };
 
-    // Also try to set individual cost columns if they exist (migration schema)
-    if (costs?.whisper_cost) updates.whisper_cost = costs.whisper_cost;
-    if (costs?.gpt_cost) updates.gpt_cost = costs.gpt_cost;
-    if (costs?.elevenlabs_cost) updates.elevenlabs_cost = costs.elevenlabs_cost;
-    if (costs?.twilio_cost) updates.twilio_cost = costs.twilio_cost;
-
-    try {
-      return await this.updateConversation(sessionId, updates);
-    } catch (error) {
-      // If update fails due to missing columns, try with just compatible fields
-      logger.warn('Full update failed, trying minimal update:', error.message);
-      const minimalUpdates = {
-        ended_at: new Date().toISOString(),
-        end_reason: endReason,
-        duration_seconds: duration,
-        total_cost: costs?.total_cost || 0,
-        cost_breakdown: updates.cost_breakdown
-      };
-      return await this.updateConversation(sessionId, minimalUpdates);
-    }
+    return await this.updateConversation(sessionId, updates);
   }
 
   // ===========================================================================
