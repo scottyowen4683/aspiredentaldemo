@@ -82,36 +82,38 @@ class SupabaseService {
       withoutPlus
     });
 
-    // Try exact match first
+    // Try normalized format first (with +)
     let { data, error } = await supabase
       .from('assistants')
       .select('*')
       .eq('phone_number', normalizedNumber)
-      .single();
+      .maybeSingle();
 
     // If not found, try without the + prefix
-    if (!data && !error?.code?.includes('PGRST116')) {
+    if (!data) {
+      logger.info('Not found with +, trying without:', withoutPlus);
       const result = await supabase
         .from('assistants')
         .select('*')
         .eq('phone_number', withoutPlus)
-        .single();
+        .maybeSingle();
       data = result.data;
       error = result.error;
     }
 
     // If still not found, try original format
     if (!data && phoneNumber !== normalizedNumber && phoneNumber !== withoutPlus) {
+      logger.info('Not found, trying original format:', phoneNumber);
       const result = await supabase
         .from('assistants')
         .select('*')
         .eq('phone_number', phoneNumber)
-        .single();
+        .maybeSingle();
       data = result.data;
       error = result.error;
     }
 
-    if (error && !error.code?.includes('PGRST116')) {
+    if (error) {
       logger.error('Error fetching assistant by phone:', error);
     }
 
