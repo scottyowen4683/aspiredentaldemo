@@ -3,13 +3,14 @@ import { supabase } from "@/supabaseClient";
 export interface OrganizationRow {
   id: string;
   name?: string | null;
-  ghl_api_key?: string | null;
-  ghl_location_id?: string | null;
-  ghl_base_url?: string | null;
+  slug?: string | null;
+  contact_email?: string | null;
+  billing_email?: string | null;
+  active?: boolean | null;
 }
 
 export async function fetchOrganizations(): Promise<OrganizationRow[]> {
-  const { data, error } = await supabase.from<OrganizationRow>("organizations").select("id, name, ghl_api_key, ghl_location_id, ghl_base_url");
+  const { data, error } = await supabase.from("organizations").select("id, name, slug, contact_email, billing_email, active");
   if (error) throw error;
   return (data as OrganizationRow[]) || [];
 }
@@ -18,25 +19,21 @@ export async function fetchOrganizations(): Promise<OrganizationRow[]> {
 export interface Organization {
   id: string;
   name: string;
-  bucket_name?: string | null;
-  region: string;
-  secret?: string | null;
-  vapi_webhook_secret?: string;
-  ghl_webhook_secret?: string;
-  // GHL API Settings
-  ghl_api_key?: string | null;
-  ghl_location_id?: string | null;
-  ghl_base_url?: string | null;
-  // Service Plan Configuration
-  service_plan_name?: string | null;
-  monthly_service_fee?: number | null;
-  baseline_human_cost_per_call?: number | null;
-  coverage_hours?: "12hr" | "24hr" | null;
-  time_zone?: string | null;
-  status?: string | null;
-  monthly_token_threshold?: string | null;
-  monthly_minutes_threshold?: string | null;
-  default_rubric?: string | null; // JSON string of Rubric object
+  slug?: string | null;
+  contact_email?: string | null;
+  contact_phone?: string | null;
+  billing_email?: string | null;
+  monthly_interaction_limit?: number | null;
+  price_per_interaction?: number | null;
+  flat_rate_fee?: number | null;
+  included_interactions?: number | null;
+  overage_rate_per_1000?: number | null;
+  current_period_start?: string | null;
+  current_period_end?: string | null;
+  current_period_interactions?: number | null;
+  total_interactions?: number | null;
+  settings?: any | null;
+  active?: boolean | null;
   created_at: string;
   updated_at: string;
   // Computed fields
@@ -61,29 +58,27 @@ export async function getAllOrganizations(): Promise<{
   error?: string;
 }> {
   try {
-    // Get organizations first - explicitly select all needed fields including service plan and GHL API fields
+    // Get organizations with actual schema columns
     const { data: organizationsData, error: orgError } = await supabase
       .from('organizations')
       .select(`
         id,
         name,
-        bucket_name,
-        region,
-        secret,
-        vapi_webhook_secret,
-        ghl_webhook_secret,
-        ghl_api_key,
-        ghl_location_id,
-        ghl_base_url,
-        service_plan_name,
-        monthly_service_fee,
-        baseline_human_cost_per_call,
-        coverage_hours,
-        time_zone,
-        status,
-        monthly_token_threshold,
-        monthly_minutes_threshold,
-        default_rubric,
+        slug,
+        contact_email,
+        contact_phone,
+        billing_email,
+        monthly_interaction_limit,
+        price_per_interaction,
+        flat_rate_fee,
+        included_interactions,
+        overage_rate_per_1000,
+        current_period_start,
+        current_period_end,
+        current_period_interactions,
+        total_interactions,
+        settings,
+        active,
         created_at,
         updated_at
       `)
@@ -104,11 +99,9 @@ export async function getAllOrganizations(): Promise<{
       };
     }
 
-
-
     // Get stats for all organizations using JOIN-like queries with IN clause
     const organizationIds = organizationsData.map(org => org.id);
-    
+
     // Get counts for all organizations at once using parallel queries
     const [usersData, assistantsData, conversationsData] = await Promise.all([
       supabase
@@ -145,31 +138,27 @@ export async function getAllOrganizations(): Promise<{
     const organizations: Organization[] = organizationsData.map((org: any) => ({
       id: org.id,
       name: org.name,
-      region: org.region,
-      bucket_name: org.bucket_name,
-      secret: org.secret,
+      slug: org.slug,
+      contact_email: org.contact_email,
+      contact_phone: org.contact_phone,
+      billing_email: org.billing_email,
+      monthly_interaction_limit: org.monthly_interaction_limit,
+      price_per_interaction: org.price_per_interaction,
+      flat_rate_fee: org.flat_rate_fee,
+      included_interactions: org.included_interactions,
+      overage_rate_per_1000: org.overage_rate_per_1000,
+      current_period_start: org.current_period_start,
+      current_period_end: org.current_period_end,
+      current_period_interactions: org.current_period_interactions,
+      total_interactions: org.total_interactions,
+      settings: org.settings,
+      active: org.active,
       created_at: org.created_at,
       updated_at: org.updated_at,
-      vapi_webhook_secret: org.vapi_webhook_secret,
-      ghl_webhook_secret: org.ghl_webhook_secret,
-      // GHL API Settings
-      ghl_api_key: org.ghl_api_key,
-      ghl_location_id: org.ghl_location_id,
-      ghl_base_url: org.ghl_base_url,
-      // Service Plan Configuration
-      service_plan_name: org.service_plan_name,
-      monthly_service_fee: org.monthly_service_fee,
-      baseline_human_cost_per_call: org.baseline_human_cost_per_call,
-      coverage_hours: org.coverage_hours,
-      time_zone: org.time_zone,
       // Computed fields
       assistantCount: assistantCounts[org.id] || 0,
       userCount: userCounts[org.id] || 0,
       conversationCount: conversationCounts[org.id] || 0,
-      status: org.status || 'active',
-      monthly_token_threshold: org.monthly_token_threshold,
-      monthly_minutes_threshold: org.monthly_minutes_threshold,
-      default_rubric: org.default_rubric,
     }));
 
     return {

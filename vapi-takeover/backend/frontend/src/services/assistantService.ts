@@ -136,33 +136,30 @@ export async function fetchAssistants(): Promise<AssistantRow[]> {
 export async function fetchAssistantsWithConversationCounts(): Promise<(AssistantRow & { conversation_count: number })[]> {
   // First get all assistants
   const assistants = await fetchAssistants();
-  
-  // Then get conversation counts and last score for each assistant
+
+  // Then get conversation counts for each assistant
   const assistantsWithCounts = await Promise.all(
     assistants.map(async (assistant) => {
-      // Get conversation count
-      const { count, error } = await supabase
-        .from("conversations")
-        .select("*", { count: "exact", head: true })
-        .eq("assistant_id", assistant.id);
-      
-      // Get last score timestamp directly using assistant_id (much more efficient)
-      const { data: lastScoreData } = await supabase
-        .from("scores")
-        .select("created_at")
-        .eq("assistant_id", assistant.id)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      
-      return {
-        ...assistant,
-        conversation_count: error ? 0 : (count || 0),
-        last_score: lastScoreData?.created_at || null
-      };
+      try {
+        // Get conversation count
+        const { count, error } = await supabase
+          .from("conversations")
+          .select("*", { count: "exact", head: true })
+          .eq("assistant_id", assistant.id);
+
+        return {
+          ...assistant,
+          conversation_count: error ? 0 : (count || 0)
+        };
+      } catch {
+        return {
+          ...assistant,
+          conversation_count: 0
+        };
+      }
     })
   );
-  
+
   return assistantsWithCounts;
 }
 
