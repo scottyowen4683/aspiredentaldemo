@@ -506,6 +506,27 @@ router.get('/twilio-status', async (req, res) => {
   });
 });
 
+// GET /api/admin/ai-status - Check if AI services are configured (OpenAI, ElevenLabs)
+router.get('/ai-status', async (req, res) => {
+  const hasOpenAI = !!process.env.OPENAI_API_KEY;
+  const hasElevenLabs = !!process.env.ELEVENLABS_API_KEY;
+
+  res.json({
+    openai: {
+      configured: hasOpenAI,
+      keyPrefix: hasOpenAI ? process.env.OPENAI_API_KEY.substring(0, 7) + '...' : null
+    },
+    elevenlabs: {
+      configured: hasElevenLabs,
+      keyPrefix: hasElevenLabs ? process.env.ELEVENLABS_API_KEY.substring(0, 8) + '...' : null
+    },
+    allConfigured: hasOpenAI && hasElevenLabs,
+    message: hasOpenAI && hasElevenLabs
+      ? 'All AI services configured'
+      : `Missing: ${!hasOpenAI ? 'OPENAI_API_KEY ' : ''}${!hasElevenLabs ? 'ELEVENLABS_API_KEY' : ''}`.trim()
+  });
+});
+
 // POST /api/admin/validate-twilio-number - Validate Twilio phone number
 router.post('/validate-twilio-number', async (req, res) => {
   try {
