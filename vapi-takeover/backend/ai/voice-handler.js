@@ -55,9 +55,10 @@ function formatKBContext(matches) {
 }
 
 class VoiceHandler {
-  constructor(callSid, assistantId) {
+  constructor(callSid, assistantId, callerNumber = null) {
     this.callSid = callSid;
     this.assistantId = assistantId;
+    this.callerNumber = callerNumber; // Customer phone number
     this.sessionId = callSid; // Use callSid as session ID
     this.conversation = null;
     this.assistant = null;
@@ -100,7 +101,8 @@ class VoiceHandler {
           orgId: this.assistant.org_id,
           assistantId: this.assistant.id,
           sessionId: this.sessionId,
-          channel: 'voice'
+          channel: 'voice',
+          customerPhoneNumber: this.callerNumber
         });
 
         // Add system message

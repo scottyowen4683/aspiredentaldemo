@@ -102,8 +102,9 @@ wss.on('connection', async (ws, req) => {
             callSid: data.start.callSid
           });
 
-          // Get assistant ID from custom parameters (set by Twilio webhook)
+          // Get assistant ID and caller number from custom parameters (set by Twilio webhook)
           const assistantId = data.start.customParameters?.assistantId;
+          const callerNumber = data.start.customParameters?.callerNumber;
           const callSid = data.start.callSid;
 
           if (!assistantId) {
@@ -134,8 +135,8 @@ wss.on('connection', async (ws, req) => {
             });
           }
 
-          // Initialize voice handler
-          voiceHandler = new VoiceHandler(callSid, assistantId);
+          // Initialize voice handler with caller number
+          voiceHandler = new VoiceHandler(callSid, assistantId, callerNumber);
           const streamSid = data.streamSid; // Capture for use in callbacks
 
           try {
@@ -156,6 +157,15 @@ wss.on('connection', async (ws, req) => {
               // Get background sound setting from assistant
               const backgroundSound = voiceHandler.assistant.background_sound || 'none';
               const backgroundVolume = voiceHandler.assistant.background_volume || 0.15;
+
+              // Debug logging for background sound
+              logger.info('Background sound settings', {
+                assistantId: voiceHandler.assistant.id,
+                background_sound_raw: voiceHandler.assistant.background_sound,
+                background_volume_raw: voiceHandler.assistant.background_volume,
+                effectiveSound: backgroundSound,
+                effectiveVolume: backgroundVolume
+              });
 
               const greetingAudio = await streamElevenLabsAudio(greeting, voiceId, {
                 backgroundSound,

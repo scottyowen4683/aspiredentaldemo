@@ -68,6 +68,16 @@ class SupabaseService {
       throw error;
     }
 
+    // Debug: log assistant settings including background sound
+    logger.info('Assistant fetched:', {
+      id: data?.id,
+      friendly_name: data?.friendly_name,
+      background_sound: data?.background_sound,
+      background_volume: data?.background_volume,
+      elevenlabs_voice_id: data?.elevenlabs_voice_id,
+      first_message: data?.first_message?.substring(0, 50)
+    });
+
     return data;
   }
 
@@ -136,8 +146,8 @@ class SupabaseService {
   // CONVERSATIONS
   // ===========================================================================
 
-  async createConversation({ orgId, assistantId, sessionId, channel }) {
-    logger.info('Creating conversation:', { orgId, assistantId, sessionId, channel });
+  async createConversation({ orgId, assistantId, sessionId, channel, customerPhoneNumber }) {
+    logger.info('Creating conversation:', { orgId, assistantId, sessionId, channel, customerPhoneNumber });
 
     // Match exact schema: session_id is NOT NULL, channel is enum
     const conversationData = {
@@ -146,7 +156,8 @@ class SupabaseService {
       session_id: sessionId, // Required - NOT NULL
       channel: channel || 'voice', // Enum: likely 'voice', 'chat', 'sms'
       started_at: new Date().toISOString(),
-      transcript: []
+      transcript: [],
+      customer_phone_number: customerPhoneNumber || null
     };
 
     const { data, error } = await supabase

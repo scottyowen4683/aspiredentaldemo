@@ -73,9 +73,10 @@ export default function Conversations() {
 
   // Helper functions
   const formatDuration = (seconds: number | null) => {
-    if (!seconds) return "N/A";
+    if (!seconds && seconds !== 0) return "N/A";
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
+    if (mins === 0 && secs === 0) return "N/A";
     return `${mins}m ${secs}s`;
   };
 
@@ -117,23 +118,35 @@ export default function Conversations() {
     }
   };
 
+  const getScore = (conversation: any) => {
+    // Support both overall_score (new) and confidence_score (legacy)
+    return conversation.overall_score || conversation.confidence_score || null;
+  };
+
   const isFlagged = (conversation: any) => {
-    return (conversation.confidence_score && conversation.confidence_score < 70) ||
-      !conversation.success_evaluation;
+    const score = getScore(conversation);
+    return (score && score < 70) || !conversation.success_evaluation;
   };
 
   const getConversationStatus = (conversation: any) => {
-    if (conversation.confidence_score > 0 && conversation.scored === true) {
+    const score = getScore(conversation);
+    if (score > 0 && conversation.scored === true) {
       return isFlagged(conversation) ? 'Flagged' : 'Normal';
     }
     return 'Not Evaluated';
   };
 
   const getStatusVariant = (conversation: any) => {
-    if (conversation.confidence_score > 0 && conversation.scored === true) {
+    const score = getScore(conversation);
+    if (score > 0 && conversation.scored === true) {
       return isFlagged(conversation) ? 'destructive' : 'outline';
     }
     return 'secondary';
+  };
+
+  const getDuration = (conversation: any) => {
+    // Support both duration_seconds (new) and call_duration (legacy)
+    return conversation.duration_seconds || conversation.call_duration || null;
   };
 
   const handleRefresh = async () => {
@@ -164,12 +177,11 @@ export default function Conversations() {
       'Timestamp': formatTimestamp(conv.created_at),
       'Assistant': conv.assistants?.friendly_name || "Unknown Assistant",
       'Organization': conv.organizations?.name || "Unknown Organization",
-      'Duration': formatDuration(conv.call_duration),
+      'Phone': conv.customer_phone_number || "N/A",
+      'Duration': formatDuration(getDuration(conv)),
       'Cost': conv.total_cost ? `$${conv.total_cost}` : "N/A",
-      'Score': conv.confidence_score ? `${conv.confidence_score}%` : "N/A",
-      'Confidence': conv.confidence_score ? `${conv.confidence_score}%` : "N/A",
+      'Score': getScore(conv) ? `${getScore(conv)}%` : "N/A",
       'Sentiment': getSentiment(conv),
-      'Provider': conv.provider,
       'Status': isFlagged(conv) ? 'Flagged' : 'Normal',
       'Success': conv.success_evaluation ? 'Yes' : 'No'
     }));
@@ -421,7 +433,7 @@ export default function Conversations() {
                           </div>
                           <div className="flex items-center space-x-2 flex-shrink-0">
                             <Badge variant="destructive" className="text-xs">
-                              {conv.confidence_score ? `${conv.confidence_score}%` : "N/A"}
+                              {getScore(conv) ? `${getScore(conv)}%` : "N/A"}
                             </Badge>
                             <Button
                               variant="ghost"
@@ -505,22 +517,6 @@ export default function Conversations() {
                       </SelectContent>
                     </Select>
                   )}
-                  <Select
-                    value={filters.provider || "all"}
-                    onValueChange={(value) => setFilters(prev => ({
-                      ...prev,
-                      provider: value === "all" ? undefined : value,
-                      page: 1
-                    }))}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="All Providers" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Providers</SelectItem>
-                      <SelectItem value="aspire">Aspire</SelectItem>
-                    </SelectContent>
-                  </Select>
                   <Select
                     value={filters.flagged ? "flagged" : filters.low_confidence ? "low-confidence" : "all"}
                     onValueChange={(value) => {
@@ -676,9 +672,8 @@ export default function Conversations() {
                 </div>
               </div>
             ) : (
-              <div className="overflow-x-auto -mx-3 sm:-mx-6">
-                <div className="inline-block min-w-full align-middle">
-                  <div className="overflow-hidden">
+              <div className="overflow-x-auto">
+                <div className="min-w-[800px]">
                     <Table>
                       <TableHeader>
                         <TableRow>
@@ -689,10 +684,7 @@ export default function Conversations() {
                           <TableHead className="whitespace-nowrap text-xs sm:text-sm hidden md:table-cell">Duration</TableHead>
                           {user?.role === "super_admin" && <TableHead className="whitespace-nowrap text-xs sm:text-sm hidden xl:table-cell">Cost</TableHead>}
                           <TableHead className="whitespace-nowrap text-xs sm:text-sm">Score</TableHead>
-                          <TableHead className="whitespace-nowrap text-xs sm:text-sm hidden lg:table-cell">Confidence</TableHead>
                           <TableHead className="whitespace-nowrap text-xs sm:text-sm hidden md:table-cell">Sentiment</TableHead>
-                          <TableHead className="whitespace-nowrap text-xs sm:text-sm hidden lg:table-cell">Provider</TableHead>
-                          <TableHead className="whitespace-nowrap text-xs sm:text-sm hidden md:table-cell">Escalation</TableHead>
                           <TableHead className="whitespace-nowrap text-xs sm:text-sm hidden sm:table-cell">Status</TableHead>
                           <TableHead className="whitespace-nowrap text-xs sm:text-sm">Actions</TableHead>
                         </TableRow>
@@ -731,39 +723,22 @@ export default function Conversations() {
                                 </TableCell>
                               )}
                               <TableCell className="text-xs sm:text-sm hidden md:table-cell px-2 sm:px-4">
-                                {formatDuration(conv.call_duration)}
+                                {formatDuration(getDuration(conv))}
                               </TableCell>
                               {user?.role === "super_admin" && (
                                 <TableCell className="text-xs sm:text-sm hidden xl:table-cell px-2 sm:px-4">
-                                  {conv.total_cost ? `$${conv.total_cost}` : "N/A"}
+                                  {conv.total_cost ? `$${parseFloat(conv.total_cost).toFixed(4)}` : "N/A"}
                                 </TableCell>
                               )}
                               <TableCell className="px-2 sm:px-4">
-                                <Badge variant={getScoreVariant(conv.confidence_score)} className="text-xs">
-                                  {conv.confidence_score ? `${conv.confidence_score}%` : "N/A"}
+                                <Badge variant={getScoreVariant(getScore(conv))} className="text-xs">
+                                  {getScore(conv) ? `${getScore(conv)}%` : "N/A"}
                                 </Badge>
-                              </TableCell>
-                              <TableCell className="text-xs sm:text-sm hidden lg:table-cell px-2 sm:px-4">
-                                {conv.confidence_score ? `${conv.confidence_score}%` : "N/A"}
                               </TableCell>
                               <TableCell className="hidden md:table-cell px-2 sm:px-4">
                                 <Badge variant={getSentimentVariant(sentiment)} className="text-xs">
                                   {sentiment}
                                 </Badge>
-                              </TableCell>
-                              <TableCell className="capitalize text-xs sm:text-sm hidden lg:table-cell px-2 sm:px-4">
-                                {conv.provider}
-                              </TableCell>
-                              <TableCell className="hidden md:table-cell px-2 sm:px-4">
-                                {conv.escalation ? (
-                                  <Badge variant="destructive" className="text-xs">
-                                    {conv.escalation}
-                                  </Badge>
-                                ) : (
-                                  <Badge variant="outline" className="text-xs">
-                                    None
-                                  </Badge>
-                                )}
                               </TableCell>
                               <TableCell className="hidden sm:table-cell px-2 sm:px-4">
                                 <Badge variant={getStatusVariant(conv)} className="text-xs">
@@ -814,7 +789,6 @@ export default function Conversations() {
                     </Table>
                   </div>
                 </div>
-              </div>
             )}
           </CardContent>
 
