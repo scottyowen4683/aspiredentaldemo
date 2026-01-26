@@ -39,8 +39,12 @@ export async function createAssistant(input: CreateAssistantInput, userId?: stri
     const botType = input.bot_type ?? 'voice';
     const phoneNumber = input.phone_number ?? null;
 
+    // Debug logging - remove after confirming fix works
+    console.log('[createAssistant v2] Starting with:', { friendlyName, botType, phoneNumber, orgId });
+
     // Validate Twilio phone number for voice assistants
     if (botType === 'voice' && phoneNumber) {
+      console.log('[createAssistant v2] Validating Twilio number:', phoneNumber);
       try {
         const validationResponse = await fetch('/api/admin/validate-twilio-number', {
           method: 'POST',
@@ -440,3 +444,4 @@ export async function patchAssistant(id: string, patch: Record<string, unknown>,
     return { success: false, error: err };
   }
 }
+// Build trigger: 1769402337
