@@ -186,8 +186,8 @@ END $$;
 INSERT INTO conversation_scores (id, conversation_id, overall_score, dimension_scores, flags, sentiment, feedback, resident_intent, created_at)
 SELECT
   gen_random_uuid(),
-  c.id,
-  c.overall_score,
+  sub.id,
+  sub.overall_score,
   jsonb_build_object(
     'governance', 70 + (random() * 30),
     'accuracy', 65 + (random() * 35),
@@ -197,30 +197,33 @@ SELECT
   ),
   -- Flags for escalated conversations
   CASE
-    WHEN c.escalation = true THEN
+    WHEN sub.escalation = true THEN
       jsonb_build_object(
         (ARRAY['requires_escalation', 'policy_violation', 'privacy_breach', 'resident_complaint', 'incomplete_resolution', 'compliance_risk', 'technical_limitation', 'customer_request', 'low_confidence', 'billing_dispute'])[1 + (random() * 9)::INTEGER],
         true
       )
-    WHEN c.overall_score < 70 THEN
+    WHEN sub.overall_score < 70 THEN
       jsonb_build_object(
         (ARRAY['low_confidence', 'incomplete_resolution', 'requires_escalation'])[1 + (random() * 2)::INTEGER],
         true
       )
     ELSE '{}'::jsonb
   END,
-  c.sentiment,
+  sub.sentiment,
   CASE
-    WHEN c.overall_score >= 90 THEN 'Excellent interaction. Resident query fully resolved.'
-    WHEN c.overall_score >= 80 THEN 'Good interaction with satisfactory resolution.'
-    WHEN c.overall_score >= 70 THEN 'Acceptable interaction. Some areas for improvement.'
+    WHEN sub.overall_score >= 90 THEN 'Excellent interaction. Resident query fully resolved.'
+    WHEN sub.overall_score >= 80 THEN 'Good interaction with satisfactory resolution.'
+    WHEN sub.overall_score >= 70 THEN 'Acceptable interaction. Some areas for improvement.'
     ELSE 'Interaction needs review. Consider additional training.'
   END,
   (ARRAY['permit_inquiry', 'billing_question', 'service_request', 'complaint', 'information_request', 'appointment_booking', 'document_request', 'general_inquiry'])[1 + (random() * 7)::INTEGER],
-  c.created_at
-FROM conversations c
-WHERE NOT EXISTS (SELECT 1 FROM conversation_scores cs WHERE cs.conversation_id = c.id)
-LIMIT 200;
+  sub.created_at
+FROM (
+  SELECT c.id, c.overall_score, c.escalation, c.sentiment, c.created_at
+  FROM conversations c
+  WHERE NOT EXISTS (SELECT 1 FROM conversation_scores cs WHERE cs.conversation_id = c.id)
+  LIMIT 200
+) sub;
 
 -- ============================================================================
 -- 5. REVIEW QUEUE (flagged conversations)
@@ -229,19 +232,22 @@ LIMIT 200;
 INSERT INTO review_queue (id, org_id, conversation_id, flag_reason, urgency, reviewed, reviewer_id, reviewed_at, notes, created_at)
 SELECT
   gen_random_uuid(),
-  c.org_id,
-  c.id,
+  sub.org_id,
+  sub.id,
   (ARRAY['Low confidence score', 'Policy violation detected', 'Customer complaint', 'Requires escalation', 'Privacy concern', 'Incomplete resolution', 'Compliance issue', 'Billing dispute'])[1 + (random() * 7)::INTEGER],
   (ARRAY['low', 'medium', 'high', 'critical'])[1 + (random() * 3)::INTEGER],
   random() < 0.6, -- 60% reviewed
   NULL,
   CASE WHEN random() < 0.6 THEN NOW() - ((random() * 5)::INTEGER || ' days')::INTERVAL ELSE NULL END,
   CASE WHEN random() < 0.6 THEN 'Reviewed and addressed.' ELSE NULL END,
-  c.created_at
-FROM conversations c
-WHERE c.escalation = true OR c.overall_score < 75
-ON CONFLICT (id) DO NOTHING
-LIMIT 50;
+  sub.created_at
+FROM (
+  SELECT c.id, c.org_id, c.created_at
+  FROM conversations c
+  WHERE c.escalation = true OR c.overall_score < 75
+  LIMIT 50
+) sub
+ON CONFLICT (id) DO NOTHING;
 
 -- ============================================================================
 -- 6. INTERACTION LOGS (for billing)
@@ -250,23 +256,26 @@ LIMIT 50;
 INSERT INTO interaction_logs (id, org_id, assistant_id, conversation_id, interaction_type, duration_seconds, message_count, cost, created_at)
 SELECT
   gen_random_uuid(),
-  c.org_id,
-  c.assistant_id,
-  c.id,
+  sub.org_id,
+  sub.assistant_id,
+  sub.id,
   CASE
-    WHEN c.is_voice AND random() < 0.7 THEN 'call_inbound'
-    WHEN c.is_voice THEN 'call_outbound'
+    WHEN sub.is_voice AND random() < 0.7 THEN 'call_inbound'
+    WHEN sub.is_voice THEN 'call_outbound'
     WHEN random() < 0.8 THEN 'chat_session'
     WHEN random() < 0.5 THEN 'sms_inbound'
     ELSE 'sms_outbound'
   END,
-  c.call_duration,
+  sub.call_duration,
   2 + (random() * 8)::INTEGER,
-  c.total_cost,
-  c.created_at
-FROM conversations c
-WHERE NOT EXISTS (SELECT 1 FROM interaction_logs il WHERE il.conversation_id = c.id)
-LIMIT 250;
+  sub.total_cost,
+  sub.created_at
+FROM (
+  SELECT c.id, c.org_id, c.assistant_id, c.is_voice, c.call_duration, c.total_cost, c.created_at
+  FROM conversations c
+  WHERE NOT EXISTS (SELECT 1 FROM interaction_logs il WHERE il.conversation_id = c.id)
+  LIMIT 250
+) sub;
 
 -- ============================================================================
 -- 7. RESIDENT QUESTIONS (for Top 10 Questions)
