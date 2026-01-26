@@ -219,11 +219,11 @@ router.post('/assistants', async (req, res) => {
       rubric // Optional: assistant-specific rubric
     } = req.body;
 
-    // Validation
-    if (!org_id || !friendly_name || !bot_type || !prompt) {
+    // Validation - prompt is now optional (uses default if not provided)
+    if (!org_id || !friendly_name || !bot_type) {
       return res.status(400).json({
         success: false,
-        error: 'org_id, friendly_name, bot_type, and prompt are required'
+        error: 'org_id, friendly_name, and bot_type are required'
       });
     }
 
@@ -253,7 +253,7 @@ router.post('/assistants', async (req, res) => {
       }
     }
 
-    // Create assistant
+    // Create assistant - prompt is optional, voice-handler uses default if empty
     const { data, error } = await supabaseService.client
       .from('assistants')
       .insert({
@@ -262,7 +262,7 @@ router.post('/assistants', async (req, res) => {
         bot_type,
         phone_number: bot_type === 'voice' ? phone_number : null,
         elevenlabs_voice_id: bot_type === 'voice' ? (elevenlabs_voice_id || process.env.ELEVENLABS_VOICE_DEFAULT) : null,
-        prompt,
+        prompt: prompt || null, // Optional - voice-handler uses DEFAULT_SYSTEM_PROMPT if empty
         model: model || 'gpt-4o-mini',
         rubric: rubric || null
       })
