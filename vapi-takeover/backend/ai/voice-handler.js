@@ -79,28 +79,49 @@ class VoiceHandler {
       // Get assistant configuration
       this.assistant = await supabaseService.getAssistant(this.assistantId);
       if (!this.assistant) {
-        throw new Error(`Assistant not found: ${this.assistantId}`);
+        // Create a minimal fallback assistant config so call can still work
+        logger.warn(`Assistant not found: ${this.assistantId}, using defaults`);
+        this.assistant = {
+          id: this.assistantId,
+          org_id: null,
+          friendly_name: 'Default Assistant',
+          prompt: DEFAULT_SYSTEM_PROMPT,
+          model: 'gpt-4o-mini',
+          temperature: 0.7,
+          max_tokens: 150,
+          kb_enabled: false,
+          elevenlabs_voice_id: process.env.ELEVENLABS_VOICE_ID || 'EXAVITQu4vr4xnSDxMaL'
+        };
       }
 
-      // Create conversation
-      this.conversation = await supabaseService.createConversation({
-        orgId: this.assistant.org_id,
-        assistantId: this.assistant.id,
-        sessionId: this.sessionId,
-        channel: 'voice'
-      });
+      // Try to create conversation - but don't fail if it errors
+      try {
+        this.conversation = await supabaseService.createConversation({
+          orgId: this.assistant.org_id,
+          assistantId: this.assistant.id,
+          sessionId: this.sessionId,
+          channel: 'voice'
+        });
 
-      // Add system message
-      await supabaseService.addMessage({
-        conversationId: this.conversation.id,
-        role: 'system',
-        content: this.assistant.prompt
-      });
+        // Add system message
+        if (this.conversation?.id) {
+          await supabaseService.addMessage({
+            conversationId: this.conversation.id,
+            role: 'system',
+            content: this.assistant.prompt || DEFAULT_SYSTEM_PROMPT
+          });
+        }
+      } catch (convError) {
+        // Log but don't fail - call can work without DB storage
+        logger.warn('Could not create conversation (call will continue):', convError.message);
+        this.conversation = { id: null }; // Dummy so code doesn't break
+      }
 
       logger.info('Voice handler initialized', {
         callSid: this.callSid,
         assistantId: this.assistantId,
-        conversationId: this.conversation.id
+        conversationId: this.conversation?.id || 'none',
+        assistantName: this.assistant.friendly_name
       });
 
       return true;
@@ -153,13 +174,15 @@ class VoiceHandler {
         latencyMs: transcriptionLatency
       });
 
-      // Save user message
-      await supabaseService.addMessage({
-        conversationId: this.conversation.id,
-        role: 'user',
-        content: transcription,
-        latencyMs: transcriptionLatency
-      });
+      // Save user message (if we have a conversation)
+      if (this.conversation?.id) {
+        await supabaseService.addMessage({
+          conversationId: this.conversation.id,
+          role: 'user',
+          content: transcription,
+          latencyMs: transcriptionLatency
+        });
+      }
 
       // Step 2: Generate GPT response
       const gptStart = Date.now();
@@ -174,13 +197,15 @@ class VoiceHandler {
         latencyMs: gptLatency
       });
 
-      // Save assistant message
-      await supabaseService.addMessage({
-        conversationId: this.conversation.id,
-        role: 'assistant',
-        content: gptResponse.text,
-        latencyMs: gptLatency
-      });
+      // Save assistant message (if we have a conversation)
+      if (this.conversation?.id) {
+        await supabaseService.addMessage({
+          conversationId: this.conversation.id,
+          role: 'assistant',
+          content: gptResponse.text,
+          latencyMs: gptLatency
+        });
+      }
 
       // Update costs
       this.costs.gpt += gptResponse.cost;
@@ -469,13 +494,15 @@ class VoiceHandler {
         latencyMs: transcriptionLatency
       });
 
-      // Save user message
-      await supabaseService.addMessage({
-        conversationId: this.conversation.id,
-        role: 'user',
-        content: transcription,
-        latencyMs: transcriptionLatency
-      });
+      // Save user message (if we have a conversation)
+      if (this.conversation?.id) {
+        await supabaseService.addMessage({
+          conversationId: this.conversation.id,
+          role: 'user',
+          content: transcription,
+          latencyMs: transcriptionLatency
+        });
+      }
 
       // Step 2: Generate GPT response
       const gptStart = Date.now();
@@ -489,13 +516,15 @@ class VoiceHandler {
         latencyMs: gptLatency
       });
 
-      // Save assistant message
-      await supabaseService.addMessage({
-        conversationId: this.conversation.id,
-        role: 'assistant',
-        content: gptResponse.text,
-        latencyMs: gptLatency
-      });
+      // Save assistant message (if we have a conversation)
+      if (this.conversation?.id) {
+        await supabaseService.addMessage({
+          conversationId: this.conversation.id,
+          role: 'assistant',
+          content: gptResponse.text,
+          latencyMs: gptLatency
+        });
+      }
 
       // Update costs
       this.costs.gpt += gptResponse.cost;
@@ -561,31 +590,43 @@ class VoiceHandler {
       this.costs.twilio = twilioMinutes * 0.0085;
       this.costs.total += this.costs.twilio;
 
-      // End conversation
-      await supabaseService.endConversation(this.sessionId, {
-        endReason,
-        duration,
-        costs: {
-          whisper_cost: this.costs.whisper,
-          gpt_cost: this.costs.gpt,
-          elevenlabs_cost: this.costs.elevenlabs,
-          twilio_cost: this.costs.twilio,
-          total_cost: this.costs.total
+      // End conversation (only if we have a valid session)
+      if (this.sessionId) {
+        try {
+          await supabaseService.endConversation(this.sessionId, {
+            endReason,
+            duration,
+            costs: {
+              whisper_cost: this.costs.whisper,
+              gpt_cost: this.costs.gpt,
+              elevenlabs_cost: this.costs.elevenlabs,
+              twilio_cost: this.costs.twilio,
+              total_cost: this.costs.total
+            }
+          });
+        } catch (endError) {
+          logger.warn('Could not end conversation:', endError.message);
         }
-      });
+      }
 
-      // Log interaction for billing tracking
-      await supabaseService.logInteraction({
-        orgId: this.assistant.org_id,
-        assistantId: this.assistantId,
-        interactionType: 'call_inbound', // TODO: Detect if outbound from campaign
-        conversationId: this.conversation.id,
-        sessionId: this.sessionId,
-        contactNumber: null, // TODO: Pass caller number from stream params
-        durationSeconds: duration,
-        cost: this.costs.total,
-        campaignId: null // TODO: Pass campaign ID if outbound campaign call
-      });
+      // Log interaction for billing tracking (only if we have org_id)
+      if (this.assistant?.org_id) {
+        try {
+          await supabaseService.logInteraction({
+            orgId: this.assistant.org_id,
+            assistantId: this.assistantId,
+            interactionType: 'call_inbound',
+            conversationId: this.conversation?.id || null,
+            sessionId: this.sessionId,
+            contactNumber: null,
+            durationSeconds: duration,
+            cost: this.costs.total,
+            campaignId: null
+          });
+        } catch (logError) {
+          logger.warn('Could not log interaction:', logError.message);
+        }
+      }
 
       // Auto-score conversation if enabled (optimized for government compliance)
       if (this.assistant.auto_score !== false && this.conversation) {
