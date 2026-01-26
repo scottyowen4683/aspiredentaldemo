@@ -369,12 +369,12 @@ class VoiceHandler {
         }
       ];
 
-      // Call GPT - use gpt-4o-mini for speed, could use gpt-4o for quality
+      // Call GPT - use gpt-4o-mini for speed
       const completion = await openai.chat.completions.create({
         model: this.assistant.model || 'gpt-4o-mini',
         messages,
         temperature: this.assistant.temperature || 0.7,
-        max_tokens: this.assistant.max_tokens || 150, // Keep responses short for voice
+        max_tokens: this.assistant.max_tokens || 150,
       });
 
       const responseText = completion.choices[0].message.content;
@@ -423,6 +423,107 @@ class VoiceHandler {
   }
 
   /**
+   * Generate GPT response with streaming - for pipelining with TTS
+   * Calls onSentence callback for each complete sentence as GPT generates them
+   */
+  async generateResponseStreaming(userMessage, onSentence) {
+    try {
+      // Run embedding and history fetch in parallel for speed
+      const [embeddingResult, history] = await Promise.all([
+        this.assistant.kb_enabled
+          ? openai.embeddings.create({
+              model: 'text-embedding-3-small',
+              input: userMessage
+            })
+          : Promise.resolve(null),
+        supabaseService.getConversationHistory(this.sessionId)
+      ]);
+
+      // Search knowledge base if enabled (RAG)
+      let kbContext = '';
+      if (this.assistant.kb_enabled && embeddingResult) {
+        try {
+          const embedding = embeddingResult.data[0].embedding;
+          const kbResults = await supabaseService.searchKnowledgeBase(
+            this.assistant.org_id,
+            embedding,
+            this.assistant.kb_match_count || 5
+          );
+          if (kbResults && kbResults.length > 0) {
+            kbContext = formatKBContext(kbResults);
+          }
+        } catch (kbError) {
+          logger.error('Knowledge base search failed:', kbError);
+        }
+      }
+
+      const systemPrompt = this.assistant.prompt && this.assistant.prompt.trim()
+        ? this.assistant.prompt
+        : DEFAULT_SYSTEM_PROMPT;
+
+      const messages = [
+        { role: 'system', content: systemPrompt + kbContext },
+        ...history,
+        { role: 'user', content: userMessage }
+      ];
+
+      // Stream GPT response
+      const stream = await openai.chat.completions.create({
+        model: this.assistant.model || 'gpt-4o-mini',
+        messages,
+        temperature: this.assistant.temperature || 0.7,
+        max_tokens: this.assistant.max_tokens || 150,
+        stream: true
+      });
+
+      let fullText = '';
+      let sentenceBuffer = '';
+      let tokensOut = 0;
+
+      for await (const chunk of stream) {
+        const content = chunk.choices[0]?.delta?.content || '';
+        if (content) {
+          fullText += content;
+          sentenceBuffer += content;
+          tokensOut++;
+
+          // Check for sentence boundaries (. ! ? followed by space or end)
+          const sentenceMatch = sentenceBuffer.match(/^(.+?[.!?])(\s|$)/);
+          if (sentenceMatch) {
+            const sentence = sentenceMatch[1].trim();
+            if (sentence.length > 0) {
+              onSentence(sentence);
+            }
+            sentenceBuffer = sentenceBuffer.slice(sentenceMatch[0].length);
+          }
+        }
+      }
+
+      // Send any remaining text
+      if (sentenceBuffer.trim().length > 0) {
+        onSentence(sentenceBuffer.trim());
+      }
+
+      // Estimate tokens (rough)
+      const tokensIn = Math.ceil((systemPrompt.length + kbContext.length + userMessage.length) / 4);
+
+      const GPT_INPUT_COST = 0.15 / 1000000;
+      const GPT_OUTPUT_COST = 0.60 / 1000000;
+      const gptCost = (tokensIn * GPT_INPUT_COST) + (tokensOut * GPT_OUTPUT_COST);
+
+      return {
+        text: fullText,
+        tokensIn,
+        tokensOut,
+        cost: gptCost
+      };
+    } catch (error) {
+      logger.error('GPT streaming failed:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Generate speech with streaming - sends audio chunks immediately as they arrive
    * This is MUCH faster than waiting for full audio
    * @param {string} text - Text to speak
@@ -451,8 +552,9 @@ class VoiceHandler {
   }
 
   /**
-   * Process speech end with STREAMING response - much faster!
-   * Sends audio to Twilio as soon as ElevenLabs generates each chunk
+   * Process speech end with FULL PIPELINE STREAMING - VAPI-like latency!
+   * GPT streams tokens → buffer by sentence → stream to ElevenLabs → Twilio
+   * Audio starts playing while GPT is still generating!
    * @param {function} onAudioChunk - Callback for each audio chunk: (chunk: Buffer) => void
    * @returns {Promise<{transcription, responseText, latency}>}
    */
@@ -473,7 +575,7 @@ class VoiceHandler {
         return null;
       }
 
-      logger.info('Processing speech (streaming)', {
+      logger.info('Processing speech (pipelined streaming)', {
         callSid: this.callSid,
         audioSizeKB: (audioBuffer.length / 1024).toFixed(2)
       });
@@ -494,70 +596,91 @@ class VoiceHandler {
         latencyMs: transcriptionLatency
       });
 
-      // Save user message (if we have a conversation)
+      // Save user message (don't await - do in background)
       if (this.conversation?.id) {
-        await supabaseService.addMessage({
+        supabaseService.addMessage({
           conversationId: this.conversation.id,
           role: 'user',
           content: transcription,
           latencyMs: transcriptionLatency
-        });
+        }).catch(e => logger.warn('Failed to save user message:', e.message));
       }
 
-      // Step 2: Generate GPT response
+      // Step 2 + 3: PIPELINE GPT streaming → ElevenLabs streaming
+      // Each sentence from GPT immediately goes to TTS
       const gptStart = Date.now();
-      const gptResponse = await this.generateResponse(transcription);
-      const gptLatency = Date.now() - gptStart;
+      let firstAudioSent = false;
+      let totalAudioBytes = 0;
+      let sentenceCount = 0;
 
-      logger.info('GPT response generated', {
-        text: gptResponse.text.substring(0, 100) + '...',
-        tokensIn: gptResponse.tokensIn,
-        tokensOut: gptResponse.tokensOut,
-        latencyMs: gptLatency
+      // Queue for serializing TTS calls (sentences must play in order)
+      const ttsQueue = [];
+      let ttsRunning = false;
+
+      const processTTSQueue = async () => {
+        if (ttsRunning || ttsQueue.length === 0) return;
+        ttsRunning = true;
+
+        while (ttsQueue.length > 0) {
+          const sentence = ttsQueue.shift();
+          try {
+            await this.generateSpeechStreaming(sentence, (chunk) => {
+              if (!firstAudioSent) {
+                firstAudioSent = true;
+                logger.info('🚀 First audio chunk (pipelined)!', {
+                  timeToFirstAudioMs: Date.now() - gptStart,
+                  totalLatencyMs: Date.now() - turnStartTime,
+                  sentence: sentence.substring(0, 30) + '...'
+                });
+              }
+              totalAudioBytes += chunk.length;
+              onAudioChunk(chunk);
+            });
+          } catch (ttsError) {
+            logger.error('TTS error for sentence:', ttsError.message);
+          }
+        }
+
+        ttsRunning = false;
+      };
+
+      // Stream GPT and queue sentences for TTS
+      const gptResponse = await this.generateResponseStreaming(transcription, (sentence) => {
+        sentenceCount++;
+        logger.debug('Sentence ready for TTS:', { sentenceCount, sentence: sentence.substring(0, 50) });
+        ttsQueue.push(sentence);
+        processTTSQueue(); // Start TTS if not already running
       });
 
-      // Save assistant message (if we have a conversation)
+      // Wait for all TTS to complete
+      while (ttsQueue.length > 0 || ttsRunning) {
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+
+      const gptLatency = Date.now() - gptStart;
+      const totalLatency = Date.now() - turnStartTime;
+      this.turnCount++;
+
+      // Save assistant message (don't await)
       if (this.conversation?.id) {
-        await supabaseService.addMessage({
+        supabaseService.addMessage({
           conversationId: this.conversation.id,
           role: 'assistant',
           content: gptResponse.text,
           latencyMs: gptLatency
-        });
+        }).catch(e => logger.warn('Failed to save assistant message:', e.message));
       }
 
       // Update costs
       this.costs.gpt += gptResponse.cost;
       this.costs.total += gptResponse.cost;
 
-      // Step 3: STREAM TTS audio with ElevenLabs - sends chunks immediately!
-      const ttsStart = Date.now();
-      let firstChunkSent = false;
-      let totalAudioBytes = 0;
-
-      await this.generateSpeechStreaming(gptResponse.text, (chunk) => {
-        if (!firstChunkSent) {
-          firstChunkSent = true;
-          const firstChunkLatency = Date.now() - ttsStart;
-          logger.info('First audio chunk sent to Twilio', {
-            firstChunkLatencyMs: firstChunkLatency,
-            totalLatencySoFarMs: Date.now() - turnStartTime
-          });
-        }
-        totalAudioBytes += chunk.length;
-        onAudioChunk(chunk);
-      });
-
-      const ttsLatency = Date.now() - ttsStart;
-      const totalLatency = Date.now() - turnStartTime;
-      this.turnCount++;
-
-      logger.info('Streaming turn complete', {
+      logger.info('Pipelined turn complete', {
         turnNumber: this.turnCount,
         transcriptionMs: transcriptionLatency,
-        gptMs: gptLatency,
-        ttsMs: ttsLatency,
+        gptPlusTtsMs: gptLatency,
         totalMs: totalLatency,
+        sentences: sentenceCount,
         audioBytes: totalAudioBytes
       });
 
@@ -569,7 +692,7 @@ class VoiceHandler {
         latency: {
           transcription: transcriptionLatency,
           gpt: gptLatency,
-          tts: ttsLatency,
+          tts: 0, // Pipelined with GPT
           total: totalLatency
         }
       };
