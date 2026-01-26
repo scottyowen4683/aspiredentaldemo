@@ -28,28 +28,47 @@ router.post('/incoming', async (req, res) => {
 
     // Ensure + prefix is present (URL encoding can turn + into space)
     const normalizedTo = To.startsWith('+') ? To : (To ? `+${To}` : '');
+    const normalizedFrom = From.startsWith('+') ? From : (From ? `+${From}` : '');
 
-    logger.info('Incoming voice call', {
+    // Detect call direction (outbound-api for outbound calls)
+    const direction = req.body.Direction || 'inbound';
+    const isOutbound = direction.includes('outbound');
+
+    logger.info('Voice call received', {
       from: From,
       to: To,
       normalizedTo,
-      callSid: CallSid
+      normalizedFrom,
+      callSid: CallSid,
+      direction
     });
 
-    if (!normalizedTo) {
-      logger.error('No To field in request body!', { body: req.body });
+    // For inbound calls: look up by To (the Twilio number being called)
+    // For outbound calls: look up by From (the Twilio number making the call)
+    const lookupNumber = isOutbound ? normalizedFrom : normalizedTo;
+
+    if (!lookupNumber) {
+      logger.error('No phone number to look up!', { body: req.body });
       const response = new VoiceResponse();
-      response.say({ voice: 'Polly.Joanna' }, 'Error: No destination number provided.');
+      response.say({ voice: 'Polly.Joanna' }, 'Error: No phone number provided.');
       response.hangup();
       res.type('text/xml');
       return res.send(response.toString());
     }
 
-    // Look up assistant by phone number
-    const assistant = await supabaseService.getAssistantByPhoneNumber(normalizedTo);
+    // Look up assistant by the appropriate phone number
+    logger.info('Looking up assistant by:', { lookupNumber, isOutbound });
+    let assistant = await supabaseService.getAssistantByPhoneNumber(lookupNumber);
+
+    // Fallback: if not found, try the other number
+    if (!assistant) {
+      const fallbackNumber = isOutbound ? normalizedTo : normalizedFrom;
+      logger.info('Not found, trying fallback:', fallbackNumber);
+      assistant = await supabaseService.getAssistantByPhoneNumber(fallbackNumber);
+    }
 
     if (!assistant) {
-      logger.warn('No assistant found for phone number:', To);
+      logger.warn('No assistant found for phone numbers:', { To, From });
 
       const response = new VoiceResponse();
       response.say({
