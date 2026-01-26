@@ -17,6 +17,26 @@ router.post('/echo', (req, res) => {
   res.json({ received: req.body });
 });
 
+// Debug: Test TwiML generation without a real call
+router.get('/test-twiml', async (req, res) => {
+  try {
+    const response = new VoiceResponse();
+    response.say({ voice: 'Polly.Joanna' }, 'Hi, how can I help you?');
+    const connect = response.connect();
+    const stream = connect.stream({
+      url: `wss://${req.headers.host}/voice/stream`
+    });
+    stream.parameter({ name: 'assistantId', value: 'test-123' });
+    stream.parameter({ name: 'callerNumber', value: '+1234567890' });
+
+    res.type('text/xml');
+    res.send(response.toString());
+  } catch (error) {
+    logger.error('TwiML test error:', error);
+    res.status(500).json({ error: error.message, stack: error.stack });
+  }
+});
+
 // POST /api/voice/incoming
 // Twilio webhook for incoming calls
 router.post('/incoming', async (req, res) => {
@@ -98,10 +118,17 @@ router.post('/incoming', async (req, res) => {
 
     // Connect to WebSocket Media Stream for real-time bidirectional voice AI
     // This streams audio to/from our server for Whisper → GPT → ElevenLabs pipeline
+    // Use explicit host or fall back to request host header
+    const wsHost = process.env.BASE_URL
+      ? process.env.BASE_URL.replace('https://', '').replace('http://', '')
+      : req.headers.host;
+
     const connect = response.connect();
     const stream = connect.stream({
-      url: `wss://${req.headers.host}/voice/stream`
+      url: `wss://${wsHost}/voice/stream`
     });
+
+    logger.info('WebSocket URL configured', { wsUrl: `wss://${wsHost}/voice/stream` });
 
     // Pass assistant ID and caller number as custom parameters
     stream.parameter({
@@ -126,7 +153,11 @@ router.post('/incoming', async (req, res) => {
     });
 
   } catch (error) {
-    logger.error('Voice incoming error:', error);
+    logger.error('Voice incoming error:', {
+      message: error.message,
+      stack: error.stack,
+      name: error.name
+    });
 
     const response = new VoiceResponse();
     response.say({
