@@ -123,20 +123,42 @@ wss.on('connection', async (ws, req) => {
 
             try {
               const greetingAudio = await streamElevenLabsAudio(greeting, voiceId);
-              const audioBase64 = greetingAudio.toString('base64');
 
-              // Send greeting audio to Twilio
-              ws.send(JSON.stringify({
-                event: 'media',
-                streamSid: streamSid,
-                media: {
-                  payload: audioBase64
-                }
-              }));
-
-              logger.info('ElevenLabs greeting sent', {
+              logger.info('ElevenLabs greeting received', {
                 audioSizeKB: (greetingAudio.length / 1024).toFixed(2)
               });
+
+              // Stream audio to Twilio in 20ms chunks (160 bytes for 8kHz μ-law)
+              // This is critical for proper audio playback
+              const CHUNK_SIZE = 160; // 20ms at 8kHz, 8-bit μ-law
+              let offset = 0;
+
+              const sendNextChunk = () => {
+                if (offset >= greetingAudio.length) {
+                  logger.info('ElevenLabs greeting fully sent');
+                  return;
+                }
+
+                const chunk = greetingAudio.slice(offset, offset + CHUNK_SIZE);
+                const chunkBase64 = chunk.toString('base64');
+
+                ws.send(JSON.stringify({
+                  event: 'media',
+                  streamSid: streamSid,
+                  media: {
+                    payload: chunkBase64
+                  }
+                }));
+
+                offset += CHUNK_SIZE;
+
+                // Send next chunk after 20ms (real-time pacing)
+                setTimeout(sendNextChunk, 20);
+              };
+
+              // Start streaming
+              sendNextChunk();
+
             } catch (greetingError) {
               logger.error('Failed to send ElevenLabs greeting:', greetingError);
               // Continue anyway - conversation can still work
@@ -148,22 +170,39 @@ wss.on('connection', async (ws, req) => {
                 const result = await voiceHandler.onSpeechEnd();
 
                 if (result && result.audioStream) {
-                  // Send audio response back to Twilio
-                  const audioBase64 = result.audioStream.toString('base64');
-
-                  ws.send(JSON.stringify({
-                    event: 'media',
-                    streamSid: streamSid,
-                    media: {
-                      payload: audioBase64
-                    }
-                  }));
-
-                  logger.info('AI response audio sent', {
+                  logger.info('AI response ready', {
                     transcription: result.transcription,
                     responsePreview: result.responseText?.substring(0, 50) + '...',
-                    latencyMs: result.latency?.total
+                    latencyMs: result.latency?.total,
+                    audioSizeKB: (result.audioStream.length / 1024).toFixed(2)
                   });
+
+                  // Stream audio to Twilio in 20ms chunks (160 bytes for 8kHz μ-law)
+                  const CHUNK_SIZE = 160;
+                  let offset = 0;
+
+                  const sendNextChunk = () => {
+                    if (offset >= result.audioStream.length) {
+                      logger.info('AI response audio fully sent');
+                      return;
+                    }
+
+                    const chunk = result.audioStream.slice(offset, offset + CHUNK_SIZE);
+                    const chunkBase64 = chunk.toString('base64');
+
+                    ws.send(JSON.stringify({
+                      event: 'media',
+                      streamSid: streamSid,
+                      media: {
+                        payload: chunkBase64
+                      }
+                    }));
+
+                    offset += CHUNK_SIZE;
+                    setTimeout(sendNextChunk, 20);
+                  };
+
+                  sendNextChunk();
                 }
               } catch (error) {
                 logger.error('Error processing speech:', error);
