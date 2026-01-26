@@ -4,11 +4,11 @@ import { logAuditEvent, AUDIT_ACTIONS } from "@/services/auditService";
 export type KBType = "Link" | "Text" | "PDF";
 
 export interface CreateAssistantInput {
-  provider: string;
+  provider?: string;
   apiKey?: string | null;
   friendlyName?: string | null;
   prompt?: string | null;
-  kbType: KBType;
+  kbType?: KBType;
   kbUrl?: string | null;
   kbText?: string | null;
   kbFile?: File | null;
@@ -16,6 +16,18 @@ export interface CreateAssistantInput {
   transcriptSource?: string | null;
   autoScore?: boolean;
   orgId?: string | null;
+  // Also support snake_case properties from AddAssistantModal
+  org_id?: string | null;
+  friendly_name?: string | null;
+  bot_type?: string | null;
+  phone_number?: string | null;
+  elevenlabs_voice_id?: string | null;
+  model?: string | null;
+  temperature?: number | null;
+  max_tokens?: number | null;
+  first_message?: string | null;
+  kb_enabled?: boolean | null;
+  auto_score?: boolean | null;
 }
 
 export async function createAssistant(input: CreateAssistantInput, userId?: string) {
@@ -49,19 +61,33 @@ export async function createAssistant(input: CreateAssistantInput, userId?: stri
       kb_path = publicUrlData.publicUrl;
     }
 
+    // Support both camelCase and snake_case inputs (for backwards compatibility)
+    const friendlyName = input.friendlyName ?? input.friendly_name ?? null;
+    const orgId = input.orgId ?? input.org_id ?? null;
+    const autoScore = input.autoScore ?? input.auto_score ?? true;
+    const providerRaw = input.provider ?? 'aspire';
+
     // Normalize provider to lowercase to match Postgres enum values (enums are case-sensitive)
-    const normalizedProvider = typeof input.provider === "string" ? input.provider.trim().toLowerCase() : input.provider;
+    const normalizedProvider = typeof providerRaw === "string" ? providerRaw.trim().toLowerCase() : providerRaw;
 
     const insertObj: Record<string, unknown> = {
       provider: normalizedProvider,
       assistant_key: input.apiKey ?? null,
-      org_id: input.orgId ?? null,
-      friendly_name: input.friendlyName ?? null,
+      org_id: orgId,
+      friendly_name: friendlyName,
       prompt: input.prompt ?? null,
       kb_path: kb_path,
       rubric: input.defaultRubric ?? null,
       transcript_source: input.transcriptSource ?? null,
-      auto_score: input.autoScore ?? true,
+      auto_score: autoScore,
+      // Support additional fields from AddAssistantModal
+      bot_type: input.bot_type ?? null,
+      phone_number: input.phone_number ?? null,
+      elevenlabs_voice_id: input.elevenlabs_voice_id ?? null,
+      model: input.model ?? null,
+      temperature: input.temperature ?? null,
+      max_tokens: input.max_tokens ?? null,
+      kb_enabled: input.kb_enabled ?? false,
     };
 
     const { data, error } = await supabase.from("assistants").insert([insertObj]).select().single();
@@ -73,17 +99,17 @@ export async function createAssistant(input: CreateAssistantInput, userId?: stri
     // Log audit event for assistant creation
     if (userId) {
       await logAuditEvent({
-        org_id: input.orgId || null,
+        org_id: orgId || null,
         user_id: userId,
         assistant_id: data.id,
         action: AUDIT_ACTIONS.ASSISTANT_CREATED,
         details: {
-          assistant_name: input.friendlyName || 'Unnamed Assistant',
+          assistant_name: friendlyName || 'Unnamed Assistant',
           provider: normalizedProvider,
           kb_type: input.kbType,
           has_kb: !!kb_path,
           has_custom_rubric: !!input.defaultRubric,
-          auto_score_enabled: input.autoScore,
+          auto_score_enabled: autoScore,
           transcript_source: input.transcriptSource,
           action_timestamp: new Date().toISOString()
         }
@@ -189,18 +215,31 @@ export async function updateAssistant(id: string, input: CreateAssistantInput, u
       kb_path = publicUrlData.publicUrl;
     }
 
-    const normalizedProvider = typeof input.provider === "string" ? input.provider.trim().toLowerCase() : input.provider;
+    // Support both camelCase and snake_case inputs
+    const friendlyName = input.friendlyName ?? input.friendly_name ?? null;
+    const orgId = input.orgId ?? input.org_id ?? null;
+    const autoScore = input.autoScore ?? input.auto_score ?? true;
+    const providerRaw = input.provider ?? 'aspire';
+    const normalizedProvider = typeof providerRaw === "string" ? providerRaw.trim().toLowerCase() : providerRaw;
 
     const updateObj: Record<string, unknown> = {
       provider: normalizedProvider,
       assistant_key: input.apiKey ?? null,
-      org_id: input.orgId ?? null,
-      friendly_name: input.friendlyName ?? null,
+      org_id: orgId,
+      friendly_name: friendlyName,
       prompt: input.prompt ?? null,
       kb_path: kb_path,
       rubric: input.defaultRubric ?? null,
       transcript_source: input.transcriptSource ?? null,
-      auto_score: input.autoScore ?? true,
+      auto_score: autoScore,
+      // Support additional fields from AddAssistantModal
+      bot_type: input.bot_type ?? null,
+      phone_number: input.phone_number ?? null,
+      elevenlabs_voice_id: input.elevenlabs_voice_id ?? null,
+      model: input.model ?? null,
+      temperature: input.temperature ?? null,
+      max_tokens: input.max_tokens ?? null,
+      kb_enabled: input.kb_enabled ?? false,
     };
 
     const { data, error } = await supabase.from("assistants").update(updateObj).eq("id", id).select().single();
@@ -209,27 +248,27 @@ export async function updateAssistant(id: string, input: CreateAssistantInput, u
     // Log audit event for assistant update
     if (userId && originalAssistant) {
       const changes: Record<string, { from: any; to: any }> = {};
-      
-      if (originalAssistant.friendly_name !== input.friendlyName) {
-        changes.name = { from: originalAssistant.friendly_name, to: input.friendlyName };
+
+      if (originalAssistant.friendly_name !== friendlyName) {
+        changes.name = { from: originalAssistant.friendly_name, to: friendlyName };
       }
       if (originalAssistant.provider !== normalizedProvider) {
         changes.provider = { from: originalAssistant.provider, to: normalizedProvider };
       }
-      if (originalAssistant.auto_score !== input.autoScore) {
-        changes.auto_score = { from: originalAssistant.auto_score, to: input.autoScore };
+      if (originalAssistant.auto_score !== autoScore) {
+        changes.auto_score = { from: originalAssistant.auto_score, to: autoScore };
       }
       if (!!originalAssistant.kb_path !== !!kb_path) {
         changes.kb_updated = { from: !!originalAssistant.kb_path, to: !!kb_path };
       }
 
       await logAuditEvent({
-        org_id: input.orgId || originalAssistant.org_id || null,
+        org_id: orgId || originalAssistant.org_id || null,
         user_id: userId,
         assistant_id: id,
         action: AUDIT_ACTIONS.ASSISTANT_UPDATED,
         details: {
-          assistant_name: input.friendlyName || originalAssistant.friendly_name || 'Unnamed Assistant',
+          assistant_name: friendlyName || originalAssistant.friendly_name || 'Unnamed Assistant',
           changes,
           kb_type: input.kbType,
           has_kb: !!kb_path,
