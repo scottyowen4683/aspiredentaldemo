@@ -99,34 +99,33 @@ export async function createAssistant(input: CreateAssistantInput, userId?: stri
 export interface AssistantRow {
   id: string;
   org_id?: string | null;
-  provider?: string | null;
-  assistant_key?: string | null;
   friendly_name?: string | null;
+  bot_type?: string | null;
+  active?: boolean | null;
+  phone_number?: string | null;
+  elevenlabs_voice_id?: string | null;
+  widget_config?: any | null;
   prompt?: string | null;
-  kb_path?: string | null;
-  rubric?: string | null;
-  transcript_source?: string | null;
+  model?: string | null;
+  temperature?: number | null;
+  max_tokens?: number | null;
+  kb_enabled?: boolean | null;
+  kb_match_count?: number | null;
+  total_interactions?: number | null;
+  avg_interaction_time?: number | null;
+  performance_rank?: number | null;
   auto_score?: boolean | null;
-  pause_ingest?: boolean | null;
-  pause_auto_score?: boolean | null;
-  retention?: string | null;
-  prompt_version?: number | null;
-  kb_version?: number | null;
-  rubric_version?: number | null;
-  last_ingest?: string | null;
-  last_score?: string | null;
-  error_count?: number | null;
-  assistant_type?: string | null;
-  from_api?: boolean | null;
   created_at?: string | null;
   updated_at?: string | null;
+  // Computed fields
+  conversation_count?: number;
 }
 
 export async function fetchAssistants(): Promise<AssistantRow[]> {
   const { data, error } = await supabase
-    .from<AssistantRow>("assistants")
+    .from("assistants")
     .select(
-      `id, provider, assistant_key, org_id, friendly_name, prompt, kb_path, rubric, transcript_source, auto_score, pause_ingest, pause_auto_score, retention, prompt_version, kb_version, rubric_version, last_ingest, last_score, error_count, assistant_type, from_api, created_at, updated_at`
+      `id, org_id, friendly_name, bot_type, active, phone_number, elevenlabs_voice_id, widget_config, prompt, model, temperature, max_tokens, kb_enabled, kb_match_count, total_interactions, avg_interaction_time, performance_rank, auto_score, created_at, updated_at`
     )
     .order("created_at", { ascending: false });
 
