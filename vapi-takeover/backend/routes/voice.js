@@ -70,12 +70,11 @@ router.post('/incoming', async (req, res) => {
     // Create TwiML response
     const response = new VoiceResponse();
 
-    // Optional: Play greeting (first_message from assistant)
-    if (assistant.first_message) {
-      response.say({
-        voice: 'Polly.Joanna'
-      }, assistant.first_message);
-    }
+    // Always play a greeting so we know the webhook connected
+    const greeting = assistant.first_message || `Hello! You've reached ${assistant.friendly_name || 'the Aspire AI assistant'}. Please hold while I connect you.`;
+    response.say({
+      voice: 'Polly.Joanna'
+    }, greeting);
 
     // Enable call recording
     response.record({
