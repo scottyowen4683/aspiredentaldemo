@@ -1,9 +1,9 @@
 // ai/voice-handler.js - Complete voice pipeline (VAPI replacement)
-import OpenAI from 'openai';
+import OpenAI, { toFile } from 'openai';
 import logger from '../services/logger.js';
 import supabaseService from '../services/supabase-service.js';
 import { streamElevenLabsAudio } from './elevenlabs.js';
-import { BufferManager } from '../audio/buffer-manager.js';
+import { BufferManager, ulawToWav } from '../audio/buffer-manager.js';
 import { scoreConversation } from './rubric-scorer.js';
 
 const openai = new OpenAI({
@@ -181,11 +181,16 @@ class VoiceHandler {
 
   async transcribeAudio(audioBuffer) {
     try {
-      // Convert base64 to buffer
-      const buffer = Buffer.from(audioBuffer, 'base64');
+      // Convert μ-law base64 audio from Twilio to WAV format for Whisper
+      const wavBuffer = ulawToWav(audioBuffer);
 
-      // Create file-like object for Whisper
-      const file = new File([buffer], 'audio.wav', { type: 'audio/wav' });
+      logger.debug('Audio converted to WAV', {
+        inputSizeKB: (audioBuffer.length / 1024).toFixed(2),
+        outputSizeKB: (wavBuffer.length / 1024).toFixed(2)
+      });
+
+      // Create file object compatible with OpenAI Node.js SDK
+      const file = await toFile(wavBuffer, 'audio.wav', { type: 'audio/wav' });
 
       // Call Whisper API
       const transcription = await openai.audio.transcriptions.create({
@@ -196,8 +201,9 @@ class VoiceHandler {
       });
 
       // Calculate cost (Whisper: $0.006 per minute)
-      // Assuming 16kHz, 16-bit mono audio
-      const durationSeconds = buffer.length / (16000 * 2);
+      // Twilio μ-law is 8kHz, 8-bit mono - calculate duration from original buffer
+      const ulawBytes = Buffer.from(audioBuffer, 'base64').length;
+      const durationSeconds = ulawBytes / 8000; // 8kHz sample rate
       const whisperCost = (durationSeconds / 60) * 0.006;
 
       this.costs.whisper += whisperCost;
