@@ -5,37 +5,36 @@
 
 -- Clear existing test data (optional - uncomment if you want fresh start)
 -- DELETE FROM conversation_scores;
--- DELETE FROM review_queue;
 -- DELETE FROM conversation_messages;
 -- DELETE FROM conversations;
 -- DELETE FROM interaction_logs;
 -- DELETE FROM knowledge_chunks;
 -- DELETE FROM campaign_contacts;
 -- DELETE FROM outbound_campaigns;
--- DELETE FROM resident_questions;
 -- DELETE FROM assistants;
--- DELETE FROM organizations WHERE name LIKE 'Test%' OR name LIKE 'Demo%';
+-- DELETE FROM organizations WHERE name LIKE 'Test%' OR name LIKE 'Demo%' OR name LIKE '%Council%' OR name LIKE '%Municipality%';
 
 -- ============================================================================
 -- 1. ORGANIZATIONS (with billing tiers)
 -- ============================================================================
 
-INSERT INTO organizations (id, name, slug, flat_rate_fee, included_interactions, overage_rate_per_1000, monthly_service_fee, baseline_human_cost_per_call, current_period_interactions, status, created_at)
+INSERT INTO organizations (id, name, slug, flat_rate_fee, included_interactions, overage_rate_per_1000, current_period_interactions, total_interactions, active, created_at)
 VALUES
-  ('11111111-1111-1111-1111-111111111111', 'Greenfield City Council', 'greenfield', 2500.00, 5000, 45.00, 2500.00, 7.50, 3250, 'active', NOW() - INTERVAL '60 days'),
-  ('22222222-2222-2222-2222-222222222222', 'Riverside Municipality', 'riverside', 5000.00, 12000, 40.00, 5000.00, 8.00, 9500, 'active', NOW() - INTERVAL '45 days'),
-  ('33333333-3333-3333-3333-333333333333', 'Lakewood Township', 'lakewood', 1500.00, 3000, 50.00, 1500.00, 7.00, 3800, 'active', NOW() - INTERVAL '30 days'),
-  ('44444444-4444-4444-4444-444444444444', 'Mountain View District', 'mountainview', 3500.00, 8000, 42.00, 3500.00, 7.50, 6200, 'active', NOW() - INTERVAL '20 days'),
-  ('55555555-5555-5555-5555-555555555555', 'Coastal County Admin', 'coastal', 7500.00, 20000, 35.00, 7500.00, 9.00, 15000, 'active', NOW() - INTERVAL '90 days')
+  ('11111111-1111-1111-1111-111111111111', 'Greenfield City Council', 'greenfield', 2500.00, 5000, 45.00, 3250, 12500, true, NOW() - INTERVAL '60 days'),
+  ('22222222-2222-2222-2222-222222222222', 'Riverside Municipality', 'riverside', 5000.00, 12000, 40.00, 9500, 35000, true, NOW() - INTERVAL '45 days'),
+  ('33333333-3333-3333-3333-333333333333', 'Lakewood Township', 'lakewood', 1500.00, 3000, 50.00, 3800, 8500, true, NOW() - INTERVAL '30 days'),
+  ('44444444-4444-4444-4444-444444444444', 'Mountain View District', 'mountainview', 3500.00, 8000, 42.00, 6200, 18000, true, NOW() - INTERVAL '20 days'),
+  ('55555555-5555-5555-5555-555555555555', 'Coastal County Admin', 'coastal', 7500.00, 20000, 35.00, 15000, 62000, true, NOW() - INTERVAL '90 days')
 ON CONFLICT (id) DO UPDATE SET
   name = EXCLUDED.name,
-  current_period_interactions = EXCLUDED.current_period_interactions;
+  current_period_interactions = EXCLUDED.current_period_interactions,
+  total_interactions = EXCLUDED.total_interactions;
 
 -- ============================================================================
 -- 2. ASSISTANTS (voice and chat)
 -- ============================================================================
 
-INSERT INTO assistants (id, org_id, friendly_name, assistant_type, phone_number, elevenlabs_voice_id, prompt, model, temperature, max_tokens, kb_enabled, auto_score, active, created_at)
+INSERT INTO assistants (id, org_id, friendly_name, bot_type, phone_number, elevenlabs_voice_id, prompt, model, temperature, max_tokens, kb_enabled, auto_score, active, created_at)
 VALUES
   -- Greenfield assistants
   ('aaaa1111-1111-1111-1111-111111111111', '11111111-1111-1111-1111-111111111111', 'Greenfield General Inquiries', 'voice', '+14155551001', '21m00Tcm4TlvDq8ikWAM', 'You are a helpful assistant for Greenfield City Council. Help residents with general inquiries about city services, permits, and events.', 'gpt-4o-mini', 0.7, 800, true, true, true, NOW() - INTERVAL '55 days'),
@@ -92,9 +91,9 @@ DECLARE
     '55555555-5555-5555-5555-555555555555'::UUID
   ];
   is_voice_assistant BOOLEAN[] := ARRAY[true, false, true, false, true, false, true, false];
-  sentiments TEXT[] := ARRAY['positive', 'neutral', 'negative', 'positive', 'neutral'];
-  end_reasons TEXT[] := ARRAY['completed', 'completed', 'completed', 'escalated', 'timeout', 'hangup'];
+  end_reasons TEXT[] := ARRAY['completed', 'completed', 'completed', 'timeout', 'hangup', 'error'];
   i INTEGER;
+  j INTEGER;
   conv_id UUID;
   assistant_idx INTEGER;
   days_ago INTEGER;
@@ -107,7 +106,7 @@ DECLARE
   elevenlabs_cost NUMERIC;
   twilio_cost NUMERIC;
   total_cost NUMERIC;
-  was_escalated BOOLEAN;
+  channel_val TEXT;
 BEGIN
   FOR i IN 1..250 LOOP
     conv_id := gen_random_uuid();
@@ -117,7 +116,7 @@ BEGIN
     is_voice := is_voice_assistant[assistant_idx];
     duration_sec := CASE WHEN is_voice THEN 60 + (random() * 300)::INTEGER ELSE 30 + (random() * 120)::INTEGER END;
     score := 50 + (random() * 50);
-    was_escalated := random() < 0.15; -- 15% escalation rate
+    channel_val := CASE WHEN is_voice THEN 'voice' ELSE 'chat' END;
 
     -- Calculate costs
     gpt_cost := 0.001 + (random() * 0.02);
@@ -128,29 +127,26 @@ BEGIN
 
     INSERT INTO conversations (
       id, org_id, assistant_id, session_id, channel,
-      started_at, ended_at, call_duration,
+      started_at, ended_at, duration_seconds,
       gpt_cost, whisper_cost, elevenlabs_cost, twilio_cost, total_cost,
-      tokens_in, tokens_out, overall_score, confidence_score,
-      escalation, end_reason, sentiment, is_voice, scored,
+      tokens_in, tokens_out, overall_score,
+      end_reason, success, scored,
       created_at, updated_at
     ) VALUES (
       conv_id,
       org_for_assistant[assistant_idx],
       assistant_ids[assistant_idx],
       'session_' || i || '_' || substr(md5(random()::text), 1, 8),
-      CASE WHEN is_voice THEN 'voice' ELSE 'chat' END,
+      channel_val::channel_type,
       NOW() - (days_ago || ' days')::INTERVAL + (hour_of_day || ' hours')::INTERVAL,
       NOW() - (days_ago || ' days')::INTERVAL + (hour_of_day || ' hours')::INTERVAL + (duration_sec || ' seconds')::INTERVAL,
       duration_sec,
       gpt_cost, whisper_cost, elevenlabs_cost, twilio_cost, total_cost,
       100 + (random() * 500)::INTEGER, -- tokens_in
       50 + (random() * 300)::INTEGER,  -- tokens_out
-      score,
-      70 + (random() * 25), -- confidence
-      was_escalated,
+      score::INTEGER,
       end_reasons[1 + (random() * 5)::INTEGER],
-      sentiments[1 + (random() * 4)::INTEGER],
-      is_voice,
+      random() > 0.15, -- 85% success rate
       true,
       NOW() - (days_ago || ' days')::INTERVAL,
       NOW() - (days_ago || ' days')::INTERVAL
@@ -160,7 +156,7 @@ BEGIN
     -- Add conversation messages (2-6 per conversation)
     FOR j IN 1..(2 + (random() * 4)::INTEGER) LOOP
       INSERT INTO conversation_messages (
-        id, conversation_id, role, content, latency_ms, created_at
+        id, conversation_id, role, content, latency_ms, timestamp
       ) VALUES (
         gen_random_uuid(),
         conv_id,
@@ -180,153 +176,53 @@ BEGIN
 END $$;
 
 -- ============================================================================
--- 4. CONVERSATION SCORES (with flags for deferrals)
+-- 4. INTERACTION LOGS (for billing)
 -- ============================================================================
 
-INSERT INTO conversation_scores (id, conversation_id, overall_score, dimension_scores, flags, sentiment, feedback, resident_intent, created_at)
-SELECT
-  gen_random_uuid(),
-  sub.id,
-  sub.overall_score,
-  jsonb_build_object(
-    'governance', 70 + (random() * 30),
-    'accuracy', 65 + (random() * 35),
-    'quality', 70 + (random() * 30),
-    'resolution', 60 + (random() * 40),
-    'accountability', 75 + (random() * 25)
-  ),
-  -- Flags for escalated conversations
-  CASE
-    WHEN sub.escalation = true THEN
-      jsonb_build_object(
-        (ARRAY['requires_escalation', 'policy_violation', 'privacy_breach', 'resident_complaint', 'incomplete_resolution', 'compliance_risk', 'technical_limitation', 'customer_request', 'low_confidence', 'billing_dispute'])[1 + (random() * 9)::INTEGER],
-        true
-      )
-    WHEN sub.overall_score < 70 THEN
-      jsonb_build_object(
-        (ARRAY['low_confidence', 'incomplete_resolution', 'requires_escalation'])[1 + (random() * 2)::INTEGER],
-        true
-      )
-    ELSE '{}'::jsonb
-  END,
-  sub.sentiment,
-  CASE
-    WHEN sub.overall_score >= 90 THEN 'Excellent interaction. Resident query fully resolved.'
-    WHEN sub.overall_score >= 80 THEN 'Good interaction with satisfactory resolution.'
-    WHEN sub.overall_score >= 70 THEN 'Acceptable interaction. Some areas for improvement.'
-    ELSE 'Interaction needs review. Consider additional training.'
-  END,
-  (ARRAY['permit_inquiry', 'billing_question', 'service_request', 'complaint', 'information_request', 'appointment_booking', 'document_request', 'general_inquiry'])[1 + (random() * 7)::INTEGER],
-  sub.created_at
-FROM (
-  SELECT c.id, c.overall_score, c.escalation, c.sentiment, c.created_at
-  FROM conversations c
-  WHERE NOT EXISTS (SELECT 1 FROM conversation_scores cs WHERE cs.conversation_id = c.id)
-  LIMIT 200
-) sub;
-
--- ============================================================================
--- 5. REVIEW QUEUE (flagged conversations)
--- ============================================================================
-
-INSERT INTO review_queue (id, org_id, conversation_id, flag_reason, urgency, reviewed, reviewer_id, reviewed_at, notes, created_at)
-SELECT
-  gen_random_uuid(),
-  sub.org_id,
-  sub.id,
-  (ARRAY['Low confidence score', 'Policy violation detected', 'Customer complaint', 'Requires escalation', 'Privacy concern', 'Incomplete resolution', 'Compliance issue', 'Billing dispute'])[1 + (random() * 7)::INTEGER],
-  (ARRAY['low', 'medium', 'high', 'critical'])[1 + (random() * 3)::INTEGER],
-  random() < 0.6, -- 60% reviewed
-  NULL,
-  CASE WHEN random() < 0.6 THEN NOW() - ((random() * 5)::INTEGER || ' days')::INTERVAL ELSE NULL END,
-  CASE WHEN random() < 0.6 THEN 'Reviewed and addressed.' ELSE NULL END,
-  sub.created_at
-FROM (
-  SELECT c.id, c.org_id, c.created_at
-  FROM conversations c
-  WHERE c.escalation = true OR c.overall_score < 75
-  LIMIT 50
-) sub
-ON CONFLICT (id) DO NOTHING;
-
--- ============================================================================
--- 6. INTERACTION LOGS (for billing)
--- ============================================================================
-
-INSERT INTO interaction_logs (id, org_id, assistant_id, conversation_id, interaction_type, duration_seconds, message_count, cost, created_at)
+INSERT INTO interaction_logs (id, org_id, assistant_id, conversation_id, interaction_type, duration_seconds, message_count, cost, billing_period_start, billing_period_end, created_at)
 SELECT
   gen_random_uuid(),
   sub.org_id,
   sub.assistant_id,
   sub.id,
   CASE
-    WHEN sub.is_voice AND random() < 0.7 THEN 'call_inbound'
-    WHEN sub.is_voice THEN 'call_outbound'
+    WHEN sub.channel = 'voice' AND random() < 0.7 THEN 'call_inbound'
+    WHEN sub.channel = 'voice' THEN 'call_outbound'
     WHEN random() < 0.8 THEN 'chat_session'
     WHEN random() < 0.5 THEN 'sms_inbound'
     ELSE 'sms_outbound'
   END,
-  sub.call_duration,
+  sub.duration_seconds,
   2 + (random() * 8)::INTEGER,
   sub.total_cost,
+  DATE_TRUNC('month', sub.created_at)::DATE,
+  (DATE_TRUNC('month', sub.created_at) + INTERVAL '1 month')::DATE,
   sub.created_at
 FROM (
-  SELECT c.id, c.org_id, c.assistant_id, c.is_voice, c.call_duration, c.total_cost, c.created_at
+  SELECT c.id, c.org_id, c.assistant_id, c.channel::TEXT, c.duration_seconds, c.total_cost, c.created_at
   FROM conversations c
   WHERE NOT EXISTS (SELECT 1 FROM interaction_logs il WHERE il.conversation_id = c.id)
   LIMIT 250
 ) sub;
 
 -- ============================================================================
--- 7. RESIDENT QUESTIONS (for Top 10 Questions)
+-- 5. KNOWLEDGE CHUNKS (for KB search)
 -- ============================================================================
 
-INSERT INTO resident_questions (id, org_id, assistant_id, intent, question_text, frequency, created_at)
+INSERT INTO knowledge_chunks (id, org_id, tenant_id, heading, content, source_file, created_at)
 VALUES
-  -- Greenfield questions
-  (gen_random_uuid(), '11111111-1111-1111-1111-111111111111', 'aaaa1111-1111-1111-1111-111111111111', 'permit_inquiry', 'How do I apply for a building permit?', 145, NOW() - INTERVAL '5 days'),
-  (gen_random_uuid(), '11111111-1111-1111-1111-111111111111', 'aaaa1111-1111-1111-1111-111111111111', 'hours', 'What are your office hours?', 132, NOW() - INTERVAL '3 days'),
-  (gen_random_uuid(), '11111111-1111-1111-1111-111111111111', 'aaaa2222-2222-2222-2222-222222222222', 'billing', 'How can I pay my water bill online?', 98, NOW() - INTERVAL '7 days'),
-  (gen_random_uuid(), '11111111-1111-1111-1111-111111111111', 'aaaa2222-2222-2222-2222-222222222222', 'events', 'What events are happening this month?', 87, NOW() - INTERVAL '2 days'),
-
-  -- Riverside questions
-  (gen_random_uuid(), '22222222-2222-2222-2222-222222222222', 'bbbb1111-1111-1111-1111-111111111111', 'utility', 'How do I set up automatic bill pay?', 156, NOW() - INTERVAL '4 days'),
-  (gen_random_uuid(), '22222222-2222-2222-2222-222222222222', 'bbbb1111-1111-1111-1111-111111111111', 'service_request', 'How do I report a pothole?', 124, NOW() - INTERVAL '6 days'),
-  (gen_random_uuid(), '22222222-2222-2222-2222-222222222222', 'bbbb2222-2222-2222-2222-222222222222', 'permit', 'What permits do I need for a fence?', 89, NOW() - INTERVAL '1 day'),
-
-  -- Lakewood questions
-  (gen_random_uuid(), '33333333-3333-3333-3333-333333333333', 'cccc1111-1111-1111-1111-111111111111', 'zoning', 'Can I run a business from home?', 78, NOW() - INTERVAL '8 days'),
-  (gen_random_uuid(), '33333333-3333-3333-3333-333333333333', 'cccc1111-1111-1111-1111-111111111111', 'tax', 'When are property taxes due?', 112, NOW() - INTERVAL '5 days'),
-
-  -- Mountain View questions
-  (gen_random_uuid(), '44444444-4444-4444-4444-444444444444', 'dddd1111-1111-1111-1111-111111111111', 'registration', 'How do I register for recreation programs?', 95, NOW() - INTERVAL '3 days'),
-  (gen_random_uuid(), '44444444-4444-4444-4444-444444444444', 'dddd1111-1111-1111-1111-111111111111', 'parking', 'Where can I get a parking permit?', 67, NOW() - INTERVAL '9 days'),
-
-  -- Coastal questions
-  (gen_random_uuid(), '55555555-5555-5555-5555-555555555555', 'eeee1111-1111-1111-1111-111111111111', 'license', 'How do I renew my business license?', 189, NOW() - INTERVAL '2 days'),
-  (gen_random_uuid(), '55555555-5555-5555-5555-555555555555', 'eeee1111-1111-1111-1111-111111111111', 'records', 'How can I request public records?', 134, NOW() - INTERVAL '4 days'),
-  (gen_random_uuid(), '55555555-5555-5555-5555-555555555555', 'eeee2222-2222-2222-2222-222222222222', 'complaint', 'How do I file a noise complaint?', 76, NOW() - INTERVAL '6 days'),
-  (gen_random_uuid(), '55555555-5555-5555-5555-555555555555', 'eeee2222-2222-2222-2222-222222222222', 'appointment', 'How do I schedule an appointment?', 145, NOW() - INTERVAL '1 day')
+  (gen_random_uuid(), '11111111-1111-1111-1111-111111111111', 'greenfield', 'Building Permits', 'To apply for a building permit, visit our office at 123 Main St or apply online through our portal. Required documents include site plans, construction drawings, and proof of contractor license. Processing time is typically 5-10 business days.', 'permits-guide.pdf', NOW() - INTERVAL '30 days'),
+  (gen_random_uuid(), '11111111-1111-1111-1111-111111111111', 'greenfield', 'Office Hours', 'Greenfield City Council offices are open Monday through Friday, 8:00 AM to 5:00 PM. We are closed on weekends and federal holidays. For after-hours emergencies, call our emergency line at 555-0199.', 'general-info.txt', NOW() - INTERVAL '30 days'),
+  (gen_random_uuid(), '22222222-2222-2222-2222-222222222222', 'riverside', 'Utility Billing', 'Pay your utility bills online at riverside.gov/pay, by phone at 555-0200, or by mail. Automatic payment plans are available. Bills are due on the 15th of each month. Late fees of 5% apply after 30 days.', 'billing-faq.pdf', NOW() - INTERVAL '25 days'),
+  (gen_random_uuid(), '33333333-3333-3333-3333-333333333333', 'lakewood', 'Zoning Regulations', 'Lakewood Township zoning is divided into residential, commercial, and industrial zones. Home-based businesses require a special use permit. Contact the zoning office for specific questions about your property.', 'zoning-guide.pdf', NOW() - INTERVAL '20 days'),
+  (gen_random_uuid(), '55555555-5555-5555-5555-555555555555', 'coastal', 'Business Licensing', 'All businesses operating in Coastal County require a valid business license. Licenses must be renewed annually by December 31. Fees vary based on business type and revenue. Apply online or in person.', 'business-license.pdf', NOW() - INTERVAL '60 days')
 ON CONFLICT (id) DO NOTHING;
 
 -- ============================================================================
--- 8. KNOWLEDGE CHUNKS (for KB search)
+-- 6. OUTBOUND CAMPAIGNS (sample campaigns)
 -- ============================================================================
 
-INSERT INTO knowledge_chunks (id, org_id, heading, content, source_file, created_at)
-VALUES
-  (gen_random_uuid(), '11111111-1111-1111-1111-111111111111', 'Building Permits', 'To apply for a building permit, visit our office at 123 Main St or apply online through our portal. Required documents include site plans, construction drawings, and proof of contractor license. Processing time is typically 5-10 business days.', 'permits-guide.pdf', NOW() - INTERVAL '30 days'),
-  (gen_random_uuid(), '11111111-1111-1111-1111-111111111111', 'Office Hours', 'Greenfield City Council offices are open Monday through Friday, 8:00 AM to 5:00 PM. We are closed on weekends and federal holidays. For after-hours emergencies, call our emergency line at 555-0199.', 'general-info.txt', NOW() - INTERVAL '30 days'),
-  (gen_random_uuid(), '22222222-2222-2222-2222-222222222222', 'Utility Billing', 'Pay your utility bills online at riverside.gov/pay, by phone at 555-0200, or by mail. Automatic payment plans are available. Bills are due on the 15th of each month. Late fees of 5% apply after 30 days.', 'billing-faq.pdf', NOW() - INTERVAL '25 days'),
-  (gen_random_uuid(), '33333333-3333-3333-3333-333333333333', 'Zoning Regulations', 'Lakewood Township zoning is divided into residential, commercial, and industrial zones. Home-based businesses require a special use permit. Contact the zoning office for specific questions about your property.', 'zoning-guide.pdf', NOW() - INTERVAL '20 days'),
-  (gen_random_uuid(), '55555555-5555-5555-5555-555555555555', 'Business Licensing', 'All businesses operating in Coastal County require a valid business license. Licenses must be renewed annually by December 31. Fees vary based on business type and revenue. Apply online or in person.', 'business-license.pdf', NOW() - INTERVAL '60 days')
-ON CONFLICT (id) DO NOTHING;
-
--- ============================================================================
--- 9. OUTBOUND CAMPAIGNS (sample campaigns)
--- ============================================================================
-
-INSERT INTO outbound_campaigns (id, org_id, assistant_id, name, status, total_contacts, completed_contacts, successful_contacts, failed_contacts, call_hours_start, call_hours_end, timezone, max_concurrent_calls, created_at)
+INSERT INTO outbound_campaigns (id, org_id, assistant_id, name, status, total_contacts, contacted, successful, failed, call_hours_start, call_hours_end, timezone, max_concurrent_calls, created_at)
 VALUES
   (gen_random_uuid(), '22222222-2222-2222-2222-222222222222', 'bbbb1111-1111-1111-1111-111111111111', 'Utility Payment Reminder', 'completed', 500, 485, 412, 73, '09:00', '17:00', 'America/Los_Angeles', 5, NOW() - INTERVAL '15 days'),
   (gen_random_uuid(), '55555555-5555-5555-5555-555555555555', 'eeee1111-1111-1111-1111-111111111111', 'License Renewal Outreach', 'active', 1200, 650, 520, 130, '08:00', '18:00', 'America/New_York', 10, NOW() - INTERVAL '5 days'),
@@ -334,20 +230,20 @@ VALUES
 ON CONFLICT (id) DO NOTHING;
 
 -- ============================================================================
--- 10. UPDATE STATISTICS
+-- 7. UPDATE STATISTICS
 -- ============================================================================
 
--- Update organization interaction counts
+-- Update organization interaction counts based on actual conversations
 UPDATE organizations o
 SET
-  current_period_interactions = (
+  current_period_interactions = COALESCE((
     SELECT COUNT(*) FROM conversations c
     WHERE c.org_id = o.id
     AND c.created_at >= DATE_TRUNC('month', CURRENT_DATE)
-  ),
-  total_interactions = (
+  ), 0),
+  total_interactions = COALESCE((
     SELECT COUNT(*) FROM conversations c WHERE c.org_id = o.id
-  );
+  ), 0);
 
 -- ============================================================================
 -- VERIFICATION QUERIES (run these to verify data)
@@ -361,9 +257,8 @@ SELECT 'Assistants' as table_name, COUNT(*) as count FROM assistants;
 
 -- Check conversation counts by org
 SELECT o.name, COUNT(c.id) as conversations,
-       SUM(CASE WHEN c.is_voice THEN 1 ELSE 0 END) as voice_calls,
-       SUM(CASE WHEN NOT c.is_voice THEN 1 ELSE 0 END) as chat_sessions,
-       SUM(CASE WHEN c.escalation THEN 1 ELSE 0 END) as escalations,
+       SUM(CASE WHEN c.channel = 'voice' THEN 1 ELSE 0 END) as voice_calls,
+       SUM(CASE WHEN c.channel = 'chat' THEN 1 ELSE 0 END) as chat_sessions,
        ROUND(AVG(c.overall_score)::numeric, 1) as avg_score,
        ROUND(SUM(c.total_cost)::numeric, 2) as total_cost
 FROM organizations o
@@ -377,20 +272,25 @@ FROM interaction_logs
 GROUP BY interaction_type
 ORDER BY count DESC;
 
--- Check review queue status
+-- Check billing summary by org
 SELECT
-  CASE WHEN reviewed THEN 'Reviewed' ELSE 'Pending' END as status,
-  urgency,
-  COUNT(*) as count
-FROM review_queue
-GROUP BY reviewed, urgency
-ORDER BY reviewed, urgency;
+  o.name,
+  o.flat_rate_fee,
+  o.included_interactions,
+  o.current_period_interactions,
+  GREATEST(0, o.current_period_interactions - o.included_interactions) as overage,
+  CASE
+    WHEN o.current_period_interactions > o.included_interactions
+    THEN o.flat_rate_fee + CEIL((o.current_period_interactions - o.included_interactions)::DECIMAL / 1000) * o.overage_rate_per_1000
+    ELSE o.flat_rate_fee
+  END as total_bill
+FROM organizations o
+ORDER BY total_bill DESC;
 
--- Check top questions
-SELECT org_id, question_text, frequency
-FROM resident_questions
-ORDER BY frequency DESC
-LIMIT 10;
+-- Check campaigns
+SELECT name, status, total_contacts, contacted, successful, failed
+FROM outbound_campaigns
+ORDER BY created_at DESC;
 
 -- Success message
 SELECT 'Test data seeded successfully! Check the tables above for verification.' as status;
