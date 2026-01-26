@@ -268,18 +268,74 @@ class SupabaseService {
   // ===========================================================================
 
   async searchKnowledgeBase(tenantId, queryEmbedding, matchCount = 5) {
-    const { data, error } = await supabase.rpc('match_knowledge_chunks', {
-      query_embedding: queryEmbedding,
-      match_tenant_id: tenantId,
-      match_count: matchCount,
-      similarity_threshold: 0.7
+    // Ensure tenant_id is a string (DB stores it as text)
+    const tenantIdStr = String(tenantId);
+
+    // Try the moretonbaypilot parameter naming first (p_tenant_id format)
+    let { data, error } = await supabase.rpc('match_knowledge_chunks', {
+      p_tenant_id: tenantIdStr,
+      p_query_embedding: queryEmbedding,
+      p_match_count: matchCount
     });
+
+    // If that fails, try alternative parameter naming
+    if (error) {
+      logger.info('Trying alternative RPC parameters...');
+      const result = await supabase.rpc('match_knowledge_chunks', {
+        query_embedding: queryEmbedding,
+        match_tenant_id: tenantIdStr,
+        match_count: matchCount,
+        similarity_threshold: 0.7
+      });
+      data = result.data;
+      error = result.error;
+    }
 
     if (error) {
       logger.error('Error searching knowledge base:', error);
-      return [];
+
+      // Fallback: direct query with cosine similarity if RPC doesn't exist
+      logger.info('Trying fallback direct query...');
+      const fallbackResult = await supabase
+        .from('knowledge_chunks')
+        .select('id, content, source, section, metadata, embedding')
+        .eq('tenant_id', tenantIdStr)
+        .eq('active', true)
+        .limit(matchCount * 2); // Get more and filter by similarity client-side
+
+      if (fallbackResult.error) {
+        logger.error('Fallback query also failed:', fallbackResult.error);
+        return [];
+      }
+
+      // Simple cosine similarity calculation
+      const cosineSimilarity = (a, b) => {
+        let dotProduct = 0;
+        let normA = 0;
+        let normB = 0;
+        for (let i = 0; i < a.length; i++) {
+          dotProduct += a[i] * b[i];
+          normA += a[i] * a[i];
+          normB += b[i] * b[i];
+        }
+        return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+      };
+
+      // Score and sort results
+      const scored = (fallbackResult.data || [])
+        .map(chunk => ({
+          ...chunk,
+          similarity: chunk.embedding ? cosineSimilarity(queryEmbedding, chunk.embedding) : 0
+        }))
+        .filter(chunk => chunk.similarity > 0.7)
+        .sort((a, b) => b.similarity - a.similarity)
+        .slice(0, matchCount);
+
+      logger.info('Fallback KB search results:', { count: scored.length });
+      return scored;
     }
 
+    logger.info('KB search results:', { count: data?.length || 0 });
     return data || [];
   }
 

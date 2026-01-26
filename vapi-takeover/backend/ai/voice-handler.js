@@ -13,6 +13,47 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
+// Default system prompt - used when assistant has no custom prompt
+// This matches the moretonbaypilot chatbot behavior
+const DEFAULT_SYSTEM_PROMPT = `You are a helpful, friendly assistant for Aspire AI.
+
+IMPORTANT INSTRUCTIONS:
+1. Answer questions using the knowledge base information provided below as your PRIMARY source of truth
+2. Be conversational and natural - this is a voice call, so keep responses concise (2-3 sentences max)
+3. If the knowledge base contains the answer, use it confidently
+4. If the knowledge base does NOT contain the answer, say "I don't have that specific information, but I can help you find the right person to speak with"
+5. Never make up information that isn't in the knowledge base
+6. Be warm and professional
+
+Remember: You're speaking on a phone call, so be brief and clear.`;
+
+/**
+ * Format KB results like moretonbaypilot for better context
+ */
+function formatKBContext(matches) {
+  if (!Array.isArray(matches) || matches.length === 0) return '';
+
+  const lines = [];
+  lines.push('\n\nKNOWLEDGE BASE INFORMATION (use this as your source of truth):');
+  lines.push('-----------------------------------------------------------');
+
+  for (let i = 0; i < matches.length; i++) {
+    const m = matches[i] || {};
+    const source = m.source || 'Knowledge Base';
+    const section = m.section || m.heading || '';
+    const content = m.content || '';
+    const similarity = typeof m.similarity === 'number' ? m.similarity.toFixed(3) : '';
+
+    lines.push(`\n[${i + 1}] Source: ${source}`);
+    if (section) lines.push(`[${i + 1}] Section: ${section}`);
+    if (similarity) lines.push(`[${i + 1}] Relevance: ${similarity}`);
+    lines.push(`[${i + 1}] Content:\n${content}`);
+  }
+
+  lines.push('\n-----------------------------------------------------------');
+  return lines.join('\n');
+}
+
 class VoiceHandler {
   constructor(callSid, assistantId) {
     this.callSid = callSid;
@@ -243,36 +284,41 @@ class VoiceHandler {
 
   async generateResponse(userMessage) {
     try {
-      // Get conversation history
-      const history = await supabaseService.getConversationHistory(this.sessionId);
+      // Run embedding and history fetch in parallel for speed
+      const [embeddingResult, history] = await Promise.all([
+        this.assistant.kb_enabled
+          ? openai.embeddings.create({
+              model: 'text-embedding-3-small',
+              input: userMessage
+            })
+          : Promise.resolve(null),
+        supabaseService.getConversationHistory(this.sessionId)
+      ]);
 
       // Search knowledge base if enabled (RAG)
       let kbContext = '';
-      if (this.assistant.kb_enabled) {
+      if (this.assistant.kb_enabled && embeddingResult) {
         try {
-          // Create embedding for the user's message
-          const embeddingResponse = await openai.embeddings.create({
-            model: 'text-embedding-3-small',
-            input: userMessage
-          });
+          const embedding = embeddingResult.data[0].embedding;
 
-          const embedding = embeddingResponse.data[0].embedding;
-
-          // Search knowledge base
+          // Search knowledge base using tenant_id (org_id as string)
           const kbResults = await supabaseService.searchKnowledgeBase(
             this.assistant.org_id,
             embedding,
-            this.assistant.kb_match_count || 3 // Fewer results for voice (shorter context)
+            this.assistant.kb_match_count || 5 // Match moretonbaypilot default
           );
 
           if (kbResults && kbResults.length > 0) {
-            kbContext = '\n\nRelevant information from knowledge base:\n' +
-              kbResults.map(r => `${r.heading ? r.heading + ':\n' : ''}${r.content}`).join('\n\n');
+            // Format KB context like moretonbaypilot
+            kbContext = formatKBContext(kbResults);
 
             logger.info('Knowledge base context added', {
               matchCount: kbResults.length,
-              contextLength: kbContext.length
+              contextLength: kbContext.length,
+              topSimilarity: kbResults[0]?.similarity
             });
+          } else {
+            logger.info('No KB results found for query', { query: userMessage.substring(0, 50) });
           }
         } catch (kbError) {
           logger.error('Knowledge base search failed:', kbError);
@@ -280,11 +326,16 @@ class VoiceHandler {
         }
       }
 
+      // Use assistant's custom prompt, or fall back to default
+      const systemPrompt = this.assistant.prompt && this.assistant.prompt.trim()
+        ? this.assistant.prompt
+        : DEFAULT_SYSTEM_PROMPT;
+
       // Build messages with knowledge base context
       const messages = [
         {
           role: 'system',
-          content: this.assistant.prompt + kbContext
+          content: systemPrompt + kbContext
         },
         ...history,
         {
@@ -293,7 +344,7 @@ class VoiceHandler {
         }
       ];
 
-      // Call GPT
+      // Call GPT - use gpt-4o-mini for speed, could use gpt-4o for quality
       const completion = await openai.chat.completions.create({
         model: this.assistant.model || 'gpt-4o-mini',
         messages,
