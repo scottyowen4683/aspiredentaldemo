@@ -88,16 +88,16 @@ export default function SuperAdminOrganizationDashboard() {
   const detailedCostBreakdown = costData?.length > 0 ? {
     llm: costData.reduce((sum, day) => sum + day.llmCost, 0),
     ttsStC: costData.reduce((sum, day) => sum + day.ttsStCost, 0),
-    vapi: costData.reduce((sum, day) => sum + day.vapiCost, 0),
-    other: costData.reduce((sum, day) => sum + (day.totalCost - day.llmCost - day.ttsStCost - day.vapiCost), 0)
-  } : { llm: 0, ttsStC: 0, vapi: 0, other: 0 };
+    platform: costData.reduce((sum, day) => sum + (day.platformCost || 0), 0),
+    other: costData.reduce((sum, day) => sum + (day.totalCost - day.llmCost - day.ttsStCost - (day.platformCost || 0)), 0)
+  } : { llm: 0, ttsStC: 0, platform: 0, other: 0 };
 
   const costBreakdownPercentages = totalCost > 0 ? {
     llm: Math.round((detailedCostBreakdown.llm / totalCost) * 100),
     ttsStC: Math.round((detailedCostBreakdown.ttsStC / totalCost) * 100),
-    vapi: Math.round((detailedCostBreakdown.vapi / totalCost) * 100),
+    platform: Math.round((detailedCostBreakdown.platform / totalCost) * 100),
     other: Math.round((detailedCostBreakdown.other / totalCost) * 100)
-  } : { llm: 0, ttsStC: 0, vapi: 0, other: 0 };
+  } : { llm: 0, ttsStC: 0, platform: 0, other: 0 };
 
   const handleRefresh = () => {
     window.location.reload();
@@ -191,9 +191,9 @@ export default function SuperAdminOrganizationDashboard() {
               <Server className="h-4 w-4 text-green-600" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">${detailedCostBreakdown.vapi.toFixed(2)}</div>
+              <div className="text-2xl font-bold">${detailedCostBreakdown.platform.toFixed(2)}</div>
               <p className="text-xs text-muted-foreground">
-                {costBreakdownPercentages.vapi}% of total spend
+                {costBreakdownPercentages.platform}% of total spend
               </p>
             </CardContent>
           </Card>
@@ -343,13 +343,13 @@ export default function SuperAdminOrganizationDashboard() {
                   <Progress value={costBreakdownPercentages.ttsStC} className="h-2" />
                   
                   <div className="flex justify-between items-center">
-                    <span className="text-sm font-medium">Voice Platform</span>
+                    <span className="text-sm font-medium">Platform Services</span>
                     <div className="flex items-center space-x-2">
-                      <span className="text-sm">${detailedCostBreakdown.vapi.toFixed(2)}</span>
-                      <Badge variant="outline">{costBreakdownPercentages.vapi}%</Badge>
+                      <span className="text-sm">${detailedCostBreakdown.platform.toFixed(2)}</span>
+                      <Badge variant="outline">{costBreakdownPercentages.platform}%</Badge>
                     </div>
                   </div>
-                  <Progress value={costBreakdownPercentages.vapi} className="h-2" />
+                  <Progress value={costBreakdownPercentages.platform} className="h-2" />
                   
                   {detailedCostBreakdown.other > 0 && (
                     <>

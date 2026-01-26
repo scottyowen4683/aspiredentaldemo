@@ -204,7 +204,7 @@ export interface CostBreakdown {
   totalCost: number;
   llmCost: number;
   ttsStCost: number;
-  vapiCost: number;
+  platformCost: number;
   conversationCount: number;
 }
 
@@ -258,7 +258,7 @@ export const useCostAnalytics = (orgId: string | null, days: number = 30) => {
               totalCost: 0,
               llmCost: 0,
               ttsStCost: 0,
-              vapiCost: 0,
+              platformCost: 0,
               conversationCount: 0
             };
           }
@@ -273,8 +273,8 @@ export const useCostAnalytics = (orgId: string | null, days: number = 30) => {
           if (breakdown.tts || breakdown.stt) {
             dailyCosts[date].ttsStCost += (breakdown.tts || 0) + (breakdown.stt || 0);
           }
-          if (breakdown.vapi) {
-            dailyCosts[date].vapiCost += breakdown.vapi;
+          if (breakdown.platform) {
+            dailyCosts[date].platformCost += breakdown.platform;
           }
         });
 
@@ -287,7 +287,7 @@ export const useCostAnalytics = (orgId: string | null, days: number = 30) => {
             totalCost: 0,
             llmCost: 0,
             ttsStCost: 0,
-            vapiCost: 0,
+            platformCost: 0,
             conversationCount: 0
           });
         }

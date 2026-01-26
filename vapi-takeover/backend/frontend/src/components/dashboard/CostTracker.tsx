@@ -47,17 +47,17 @@ export const CostTracker: React.FC<CostTrackerProps> = ({
   };
 
   const getCostBreakdownPercentages = () => {
-    if (totalCost === 0) return { llm: 0, ttsStC: 0, vapi: 0, other: 0 };
-    
+    if (totalCost === 0) return { llm: 0, ttsStC: 0, platform: 0, other: 0 };
+
     const totalLlm = costData.reduce((sum, day) => sum + day.llmCost, 0);
     const totalTtsStC = costData.reduce((sum, day) => sum + day.ttsStCost, 0);
-    const totalVapi = costData.reduce((sum, day) => sum + day.vapiCost, 0);
-    const totalOther = totalCost - totalLlm - totalTtsStC - totalVapi;
-    
+    const totalPlatform = costData.reduce((sum, day) => sum + (day.platformCost || 0), 0);
+    const totalOther = totalCost - totalLlm - totalTtsStC - totalPlatform;
+
     return {
       llm: Math.round((totalLlm / totalCost) * 100),
       ttsStC: Math.round((totalTtsStC / totalCost) * 100),
-      vapi: Math.round((totalVapi / totalCost) * 100),
+      platform: Math.round((totalPlatform / totalCost) * 100),
       other: Math.round((totalOther / totalCost) * 100)
     };
   };
@@ -208,9 +208,9 @@ export const CostTracker: React.FC<CostTrackerProps> = ({
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-sm text-muted-foreground">Platform</span>
-                <span className="text-sm font-medium text-foreground">{breakdown.vapi}%</span>
+                <span className="text-sm font-medium text-foreground">{breakdown.platform}%</span>
               </div>
-              <Progress value={breakdown.vapi} className="h-2" />
+              <Progress value={breakdown.platform} className="h-2" />
             </div>
             
             <div className="space-y-2">
