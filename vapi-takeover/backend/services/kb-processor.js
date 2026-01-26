@@ -133,20 +133,16 @@ export async function processKnowledgeBase(options) {
       totalEmbeddingCost += cost;
 
       // Save to Supabase
+      // Uses existing schema columns: content, source_file, tenant_id
       const { data, error } = await supabaseService.client
         .from('knowledge_chunks')
         .insert({
           org_id,
-          assistant_id,
-          source: fileName,
-          chunk_text: chunk,
-          embedding,
-          metadata: {
-            chunk_index: i,
-            total_chunks: chunks.length,
-            original_filename: fileName,
-            file_type: mimeType
-          }
+          tenant_id: org_id, // Use org_id as tenant_id for backward compatibility
+          content: chunk,
+          source_file: fileName,
+          chunk_index: i,
+          embedding
         })
         .select()
         .single();
