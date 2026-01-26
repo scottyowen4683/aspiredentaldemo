@@ -166,16 +166,21 @@ export class BufferManager {
 
   /**
    * Get all accumulated audio and clear buffer
-   * @returns {string} Concatenated base64 audio
+   * @returns {Buffer} Concatenated raw audio buffer (NOT base64)
    */
   flush() {
-    const audio = this.chunks.join('');
+    // Decode each base64 chunk and concatenate into single buffer
+    const buffers = this.chunks.map(chunk => Buffer.from(chunk, 'base64'));
+    const totalBuffer = Buffer.concat(buffers);
+
     logger.info('Flushing audio buffer', {
       chunks: this.chunks.length,
-      totalBase64Length: audio.length
+      totalBytes: totalBuffer.length,
+      estimatedDurationSec: (totalBuffer.length / 8000).toFixed(2)
     });
+
     this.reset();
-    return audio;
+    return totalBuffer;
   }
 
   /**
@@ -202,12 +207,14 @@ export class BufferManager {
 
 /**
  * Convert Twilio μ-law audio to PCM WAV for Whisper
- * @param {string} ulawBase64 - Base64 encoded μ-law audio
+ * @param {Buffer} ulawBuffer - Raw μ-law audio buffer (already decoded from base64)
  * @returns {Buffer} WAV file buffer
  */
-export function ulawToWav(ulawBase64) {
-  // Decode base64
-  const ulawBuffer = Buffer.from(ulawBase64, 'base64');
+export function ulawToWav(ulawBuffer) {
+  // Ensure we have a buffer
+  if (!Buffer.isBuffer(ulawBuffer)) {
+    throw new Error('ulawToWav expects a Buffer, not a string');
+  }
 
   logger.info('Converting μ-law to WAV', {
     inputBytes: ulawBuffer.length,

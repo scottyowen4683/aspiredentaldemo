@@ -183,16 +183,18 @@ class VoiceHandler {
   }
 
   async transcribeAudio(audioBuffer) {
+    // audioBuffer is now a raw Buffer (already decoded from base64 chunks)
     // Write to temp file - most reliable method for OpenAI SDK
     const tempFile = path.join(os.tmpdir(), `whisper-${this.callSid}-${Date.now()}.wav`);
 
     try {
-      // Convert μ-law base64 audio from Twilio to WAV format for Whisper
+      // Convert μ-law audio buffer to WAV format for Whisper
       const wavBuffer = ulawToWav(audioBuffer);
 
       logger.info('Audio converted to WAV', {
         inputSizeKB: (audioBuffer.length / 1024).toFixed(2),
         outputSizeKB: (wavBuffer.length / 1024).toFixed(2),
+        durationSec: (audioBuffer.length / 8000).toFixed(2),
         tempFile
       });
 
@@ -213,8 +215,8 @@ class VoiceHandler {
       });
 
       // Calculate cost (Whisper: $0.006 per minute)
-      const ulawBytes = Buffer.from(audioBuffer, 'base64').length;
-      const durationSeconds = ulawBytes / 8000; // 8kHz sample rate
+      // audioBuffer is already raw bytes, not base64
+      const durationSeconds = audioBuffer.length / 8000; // 8kHz sample rate
       const whisperCost = (durationSeconds / 60) * 0.006;
 
       this.costs.whisper += whisperCost;
