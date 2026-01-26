@@ -125,39 +125,35 @@ wss.on('connection', async (ws, req) => {
               const greetingAudio = await streamElevenLabsAudio(greeting, voiceId);
 
               logger.info('ElevenLabs greeting received', {
-                audioSizeKB: (greetingAudio.length / 1024).toFixed(2)
+                audioSizeKB: (greetingAudio.length / 1024).toFixed(2),
+                audioBytes: greetingAudio.length,
+                firstBytes: greetingAudio.slice(0, 20).toString('hex')
               });
 
-              // Stream audio to Twilio in 20ms chunks (160 bytes for 8kHz μ-law)
-              // This is critical for proper audio playback
-              const CHUNK_SIZE = 160; // 20ms at 8kHz, 8-bit μ-law
-              let offset = 0;
+              // Send audio in chunks up to 8KB (Twilio max is 16KB after base64 decode)
+              // Twilio handles buffering internally, no need for artificial delays
+              const MAX_CHUNK_SIZE = 8000; // 8KB chunks = 1 second of audio at 8kHz
 
-              const sendNextChunk = () => {
-                if (offset >= greetingAudio.length) {
-                  logger.info('ElevenLabs greeting fully sent');
-                  return;
-                }
-
-                const chunk = greetingAudio.slice(offset, offset + CHUNK_SIZE);
+              for (let offset = 0; offset < greetingAudio.length; offset += MAX_CHUNK_SIZE) {
+                const chunk = greetingAudio.slice(offset, Math.min(offset + MAX_CHUNK_SIZE, greetingAudio.length));
                 const chunkBase64 = chunk.toString('base64');
 
-                ws.send(JSON.stringify({
-                  event: 'media',
-                  streamSid: streamSid,
-                  media: {
-                    payload: chunkBase64
-                  }
-                }));
+                if (ws.readyState === 1) { // WebSocket.OPEN
+                  ws.send(JSON.stringify({
+                    event: 'media',
+                    streamSid: streamSid,
+                    media: {
+                      payload: chunkBase64
+                    }
+                  }));
+                  logger.debug('Sent audio chunk', { offset, chunkSize: chunk.length });
+                } else {
+                  logger.warn('WebSocket not open, cannot send audio', { readyState: ws.readyState });
+                  break;
+                }
+              }
 
-                offset += CHUNK_SIZE;
-
-                // Send next chunk after 20ms (real-time pacing)
-                setTimeout(sendNextChunk, 20);
-              };
-
-              // Start streaming
-              sendNextChunk();
+              logger.info('ElevenLabs greeting fully sent');
 
             } catch (greetingError) {
               logger.error('Failed to send ElevenLabs greeting:', greetingError);
@@ -177,32 +173,25 @@ wss.on('connection', async (ws, req) => {
                     audioSizeKB: (result.audioStream.length / 1024).toFixed(2)
                   });
 
-                  // Stream audio to Twilio in 20ms chunks (160 bytes for 8kHz μ-law)
-                  const CHUNK_SIZE = 160;
-                  let offset = 0;
+                  // Send audio in chunks up to 8KB
+                  const MAX_CHUNK_SIZE = 8000;
 
-                  const sendNextChunk = () => {
-                    if (offset >= result.audioStream.length) {
-                      logger.info('AI response audio fully sent');
-                      return;
-                    }
-
-                    const chunk = result.audioStream.slice(offset, offset + CHUNK_SIZE);
+                  for (let offset = 0; offset < result.audioStream.length; offset += MAX_CHUNK_SIZE) {
+                    const chunk = result.audioStream.slice(offset, Math.min(offset + MAX_CHUNK_SIZE, result.audioStream.length));
                     const chunkBase64 = chunk.toString('base64');
 
-                    ws.send(JSON.stringify({
-                      event: 'media',
-                      streamSid: streamSid,
-                      media: {
-                        payload: chunkBase64
-                      }
-                    }));
+                    if (ws.readyState === 1) {
+                      ws.send(JSON.stringify({
+                        event: 'media',
+                        streamSid: streamSid,
+                        media: {
+                          payload: chunkBase64
+                        }
+                      }));
+                    }
+                  }
 
-                    offset += CHUNK_SIZE;
-                    setTimeout(sendNextChunk, 20);
-                  };
-
-                  sendNextChunk();
+                  logger.info('AI response audio fully sent');
                 }
               } catch (error) {
                 logger.error('Error processing speech:', error);
