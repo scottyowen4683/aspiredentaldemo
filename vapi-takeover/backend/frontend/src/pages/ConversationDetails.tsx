@@ -193,9 +193,9 @@ export default function ConversationDetails() {
   };
 
   const getStatusText = (conversation: any) => {
-
-    if (conversation.confidence_score > 0 && conversation.scored === true) {
-
+    // Use overall_score (our schema) or confidence_score (legacy)
+    const score = conversation.overall_score || conversation.confidence_score;
+    if (score > 0 && conversation.scored === true) {
       if (conversation.success_evaluation === true) return "Success";
       if (conversation.success_evaluation === false) return "Failed";
       return "Evaluated";
@@ -204,7 +204,9 @@ export default function ConversationDetails() {
   };
 
   const getStatusVariant = (conversation: any) => {
-    if (conversation.confidence_score > 0 && conversation.scored === true) {
+    // Use overall_score (our schema) or confidence_score (legacy)
+    const score = conversation.overall_score || conversation.confidence_score;
+    if (score > 0 && conversation.scored === true) {
       if (conversation.success_evaluation === true) return "default";
       if (conversation.success_evaluation === false) return "destructive";
       return "outline";
@@ -498,7 +500,7 @@ export default function ConversationDetails() {
                 <Clock className="h-5 w-5 text-muted-foreground" />
                 <div>
                   <div className="text-2xl font-bold text-foreground">
-                    {formatDuration(conversation.call_duration)}
+                    {formatDuration(conversation.duration_seconds || conversation.call_duration)}
                   </div>
                   <div className="text-sm text-muted-foreground">Duration</div>
                 </div>
@@ -528,15 +530,15 @@ export default function ConversationDetails() {
                 <AlertCircle className="h-5 w-5 text-muted-foreground" />
                 <div>
                   <div className="text-2xl font-bold text-foreground">
-                    {conversation.confidence_score ? (
-                      <Badge variant={conversation.confidence_score >= 80 ? "default" : conversation.confidence_score >= 60 ? "secondary" : "destructive"}>
-                        {conversation.confidence_score}%
+                    {(conversation.overall_score || conversation.confidence_score) ? (
+                      <Badge variant={(conversation.overall_score || conversation.confidence_score) >= 80 ? "default" : (conversation.overall_score || conversation.confidence_score) >= 60 ? "secondary" : "destructive"}>
+                        {conversation.overall_score || conversation.confidence_score}%
                       </Badge>
                     ) : (
                       <Badge variant="secondary">N/A</Badge>
                     )}
                   </div>
-                  <div className="text-sm text-muted-foreground">Confidence Score</div>
+                  <div className="text-sm text-muted-foreground">Overall Score</div>
                 </div>
               </div>
             </CardContent>

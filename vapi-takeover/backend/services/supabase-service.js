@@ -227,11 +227,16 @@ class SupabaseService {
   // ===========================================================================
 
   async addMessage({ conversationId, role, content, functionName, functionArgs, latencyMs }) {
-    // Build message object
+    // Map role to frontend-expected format: 'assistant' -> 'bot'
+    const displayRole = role === 'assistant' ? 'bot' : role;
+    const speaker = role === 'user' ? 'User' : (role === 'assistant' ? 'AI Assistant' : 'System');
+
+    // Build message object in frontend-expected format
     const message = {
-      role,
-      content,
-      timestamp: new Date().toISOString(),
+      role: displayRole,
+      message: content,  // Frontend expects 'message', not 'content'
+      speaker: speaker,
+      timestamp: Date.now(),  // Frontend expects Unix timestamp
       ...(functionName && { function_name: functionName }),
       ...(functionArgs && { function_args: functionArgs }),
       ...(latencyMs && { latency_ms: latencyMs })
@@ -251,14 +256,22 @@ class SupabaseService {
         return message;
       }
 
-      // Append to existing transcript or create new array
-      const currentTranscript = Array.isArray(conversation?.transcript) ? conversation.transcript : [];
-      const newTranscript = [...currentTranscript, message];
+      // Get existing conversation_flow array or create new one
+      const currentTranscript = conversation?.transcript || {};
+      const currentFlow = Array.isArray(currentTranscript.conversation_flow)
+        ? currentTranscript.conversation_flow
+        : [];
+      const newFlow = [...currentFlow, message];
+
+      // Build new transcript object in frontend-expected format
+      const newTranscript = {
+        conversation_flow: newFlow
+      };
 
       // Build plain text version for transcript_text column (for portal display)
-      const transcriptText = newTranscript
+      const transcriptText = newFlow
         .filter(msg => msg.role !== 'system')
-        .map(msg => `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content}`)
+        .map(msg => `${msg.speaker}: ${msg.message}`)
         .join('\n');
 
       // Update conversation with new transcript (both JSONB and plain text)
@@ -302,7 +315,11 @@ class SupabaseService {
       return [];
     }
 
-    return data?.transcript || [];
+    // Return conversation_flow array (frontend format)
+    const transcript = data?.transcript || {};
+    return Array.isArray(transcript.conversation_flow)
+      ? transcript.conversation_flow
+      : (Array.isArray(transcript) ? transcript : []);
   }
 
   async getConversationHistory(sessionId, limit = 20) {
@@ -310,16 +327,19 @@ class SupabaseService {
     const conversation = await this.getConversation(sessionId);
     if (!conversation) return [];
 
-    // Get messages from transcript field
-    const messages = conversation.transcript || [];
+    // Get messages from transcript.conversation_flow field (frontend format)
+    const transcript = conversation.transcript || {};
+    const messages = Array.isArray(transcript.conversation_flow)
+      ? transcript.conversation_flow
+      : (Array.isArray(transcript) ? transcript : []); // Fallback for old format
 
     // Return in OpenAI format (filter system messages for context)
     return messages
       .filter(msg => msg.role !== 'system')
       .slice(-limit)
       .map(msg => ({
-        role: msg.role,
-        content: msg.content
+        role: msg.role === 'bot' ? 'assistant' : msg.role, // Convert back for OpenAI
+        content: msg.message || msg.content // Support both formats
       }));
   }
 
