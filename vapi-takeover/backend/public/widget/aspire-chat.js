@@ -598,11 +598,14 @@
   }
 
   // Initialize widget
-  window.AspireChat = new AspireChatWidget();
+  const widget = new AspireChatWidget();
 
   // Expose API for programmatic control
-  window.AspireChat.open = () => window.AspireChat.open();
-  window.AspireChat.close = () => window.AspireChat.close();
-  window.AspireChat.toggle = () => window.AspireChat.toggle();
+  window.AspireChat = {
+    open: () => widget.open(),
+    close: () => widget.close(),
+    toggle: () => widget.toggle(),
+    sendMessage: (msg) => { widget.input.value = msg; widget.sendMessage(); }
+  };
 
 })();
