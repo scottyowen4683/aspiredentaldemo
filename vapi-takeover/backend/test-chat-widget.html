@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Aspire AI Chat Widget Test</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 40px 20px;
+      background: #f5f5f5;
+    }
+    h1 {
+      color: #333;
+    }
+    .info-box {
+      background: white;
+      border-radius: 8px;
+      padding: 20px;
+      margin: 20px 0;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .info-box h2 {
+      margin-top: 0;
+      color: #8B5CF6;
+    }
+    code {
+      background: #f0f0f0;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 14px;
+    }
+    .test-section {
+      background: white;
+      border-radius: 8px;
+      padding: 20px;
+      margin: 20px 0;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .test-item {
+      padding: 10px 0;
+      border-bottom: 1px solid #eee;
+    }
+    .test-item:last-child {
+      border-bottom: none;
+    }
+    .arrow {
+      color: #8B5CF6;
+      font-size: 20px;
+    }
+  </style>
+</head>
+<body>
+  <h1>🤖 Aspire AI Chat Widget Test</h1>
+
+  <div class="info-box">
+    <h2>Widget Configuration</h2>
+    <p><strong>Assistant ID:</strong> <code>a2c1de9b-b358-486b-b9e6-a8b4f9e4385d</code></p>
+    <p><strong>API URL:</strong> <code>https://aspire-ai-platform.fly.dev</code></p>
+    <p><strong>Title:</strong> Moreton Bay Pilot Chat</p>
+    <p><strong>Position:</strong> Bottom Right</p>
+  </div>
+
+  <div class="test-section">
+    <h2>Test Checklist</h2>
+    <div class="test-item">
+      <span class="arrow">→</span> Look for the chat bubble in the <strong>bottom-right corner</strong>
+    </div>
+    <div class="test-item">
+      <span class="arrow">→</span> Click it to open the chat window
+    </div>
+    <div class="test-item">
+      <span class="arrow">→</span> You should see the greeting: "Hello! I'm Moreton Bay Pilot Chat..."
+    </div>
+    <div class="test-item">
+      <span class="arrow">→</span> Try sending a message and check for a response
+    </div>
+    <div class="test-item">
+      <span class="arrow">→</span> After chatting, check the Conversations page in the portal
+    </div>
+  </div>
+
+  <div class="info-box">
+    <h2>Sample Questions to Test</h2>
+    <ul>
+      <li>"What services do you offer?"</li>
+      <li>"How can I contact you?"</li>
+      <li>"Tell me about Moreton Bay"</li>
+      <li>"What are your hours?"</li>
+    </ul>
+  </div>
+
+  <div class="info-box">
+    <h2>Troubleshooting</h2>
+    <p>If the widget doesn't appear:</p>
+    <ul>
+      <li>Open browser DevTools (F12) and check Console for errors</li>
+      <li>Check Network tab to see if the widget script loaded</li>
+      <li>Verify the API URL is accessible</li>
+    </ul>
+  </div>
+
+  <!-- Aspire AI Chat Widget -->
+  <script
+    src="https://aspire-ai-platform.fly.dev/widget/aspire-chat.js"
+    data-assistant-id="a2c1de9b-b358-486b-b9e6-a8b4f9e4385d"
+    data-api-url="https://aspire-ai-platform.fly.dev"
+    data-primary-color="#8B5CF6"
+    data-greeting="Hello! I'm Moreton Bay Pilot Chat. How can I help you today?"
+    data-title="Moreton Bay Pilot Chat"
+    data-position="bottom-right"
+    async>
+  </script>
+</body>
+</html>
