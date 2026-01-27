@@ -154,10 +154,11 @@ wss.on('connection', async (ws, req) => {
               'EXAVITQu4vr4xnSDxMaL'; // Default: "Sarah" voice
 
             try {
-              // Get background sound setting from assistant (default: office for natural sound)
-              // Enforce minimum volume of 0.40 - lower values are inaudible on phone
-              const backgroundSound = voiceHandler.assistant.background_sound || 'office';
-              const backgroundVolume = Math.max(voiceHandler.assistant.background_volume || 0.40, 0.40);
+              // DISABLED: Synthetic background noise causes crackling on phone audio
+              // TODO: Re-enable when we have proper pre-recorded ambient audio files
+              // const backgroundSound = voiceHandler.assistant.background_sound || 'office';
+              const backgroundSound = 'none'; // Force disable synthetic noise
+              const backgroundVolume = 0.40; // Not used when backgroundSound is 'none'
 
               // Debug logging for background sound
               logger.info('Background sound settings', {
@@ -165,7 +166,8 @@ wss.on('connection', async (ws, req) => {
                 background_sound_raw: voiceHandler.assistant.background_sound,
                 background_volume_raw: voiceHandler.assistant.background_volume,
                 effectiveSound: backgroundSound,
-                effectiveVolume: backgroundVolume
+                effectiveVolume: backgroundVolume,
+                note: 'Synthetic noise disabled - causes crackling'
               });
 
               const greetingAudio = await streamElevenLabsAudio(greeting, voiceId, {
