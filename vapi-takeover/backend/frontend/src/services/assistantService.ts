@@ -630,9 +630,9 @@ export async function generatePilotSlug(companyName: string): Promise<string> {
       .from("assistants")
       .select("id")
       .eq("pilot_slug", finalSlug)
-      .single();
+      .maybeSingle();
 
-    if (!data) break; // Slug is unique
+    if (!data) break; // Slug is unique (null means no existing row)
     counter++;
     finalSlug = `${baseSlug}-${counter}`;
   }
