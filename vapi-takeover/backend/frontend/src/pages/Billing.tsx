@@ -66,6 +66,15 @@ import {
 // Types
 // ============================================================================
 
+interface InteractionCounts {
+  callInbound: number;
+  callOutbound: number;
+  smsInbound: number;
+  smsOutbound: number;
+  chatSessions: number;
+  total: number;
+}
+
 interface OrganizationBilling {
   id: string;
   name: string;
@@ -82,6 +91,8 @@ interface OrganizationBilling {
   chatSessions: number;
   inputTokens: number;
   outputTokens: number;
+  // Interaction breakdown
+  interactions: InteractionCounts;
   // Costs
   elevenLabsCost: number;
   twilioCost: number;
@@ -93,6 +104,7 @@ interface OrganizationBilling {
   overageCost: number;
   totalBill: number;
   usagePercentage: number;
+  isOverLimit: boolean;
 }
 
 interface ServiceCost {
@@ -118,12 +130,16 @@ interface BillingData {
   totalChatSessions: number;
   organizationCount: number;
   avgBillPerOrg: number;
+  // Platform-wide interaction breakdown
+  platformInteractions: InteractionCounts;
   // Service breakdown
   serviceCosts: ServiceCost[];
   // Organizations
   organizations: OrganizationBilling[];
   // Exchange rate
   exchangeRate: number;
+  // Standard limit
+  standardIncludedInteractions: number;
 }
 
 const INTERACTION_COLORS = {
@@ -238,7 +254,25 @@ export default function Billing() {
         phoneCountByOrg[a.org_id] = (phoneCountByOrg[a.org_id] || 0) + 1;
       });
 
-      // Aggregate usage by org
+      // Try to fetch interaction_logs for detailed interaction tracking
+      let interactionsQuery = supabase
+        .from("interaction_logs")
+        .select("org_id, interaction_type, duration_seconds")
+        .gte("created_at", startDate.toISOString())
+        .lte("created_at", endDate.toISOString());
+
+      if (currentRole === "org_admin" && user?.org_id) {
+        interactionsQuery = interactionsQuery.eq("org_id", user.org_id);
+      } else if (selectedOrg !== "all") {
+        interactionsQuery = interactionsQuery.eq("org_id", selectedOrg);
+      }
+
+      const { data: interactionLogs } = await interactionsQuery;
+
+      // Chat session timeout constant (30 minutes = 1 session)
+      const CHAT_SESSION_TIMEOUT_MINUTES = 30;
+
+      // Aggregate usage and interactions by org
       const usageByOrg: Record<string, {
         voiceMinutes: number;
         chatSessions: number;
@@ -249,11 +283,13 @@ export default function Billing() {
         dbWhisper: number;
         dbGpt: number;
         dbTotal: number;
+        interactions: InteractionCounts;
       }> = {};
 
-      convData?.forEach((conv) => {
-        if (!usageByOrg[conv.org_id]) {
-          usageByOrg[conv.org_id] = {
+      // Helper to initialize org usage
+      const initOrgUsage = (orgId: string) => {
+        if (!usageByOrg[orgId]) {
+          usageByOrg[orgId] = {
             voiceMinutes: 0,
             chatSessions: 0,
             inputTokens: 0,
@@ -263,15 +299,71 @@ export default function Billing() {
             dbWhisper: 0,
             dbGpt: 0,
             dbTotal: 0,
+            interactions: {
+              callInbound: 0,
+              callOutbound: 0,
+              smsInbound: 0,
+              smsOutbound: 0,
+              chatSessions: 0,
+              total: 0,
+            },
           };
         }
+      };
 
+      // Process interaction_logs if available
+      if (interactionLogs && interactionLogs.length > 0) {
+        interactionLogs.forEach((log) => {
+          initOrgUsage(log.org_id);
+          const usage = usageByOrg[log.org_id];
+
+          switch (log.interaction_type) {
+            case 'call_inbound':
+              usage.interactions.callInbound++;
+              break;
+            case 'call_outbound':
+              usage.interactions.callOutbound++;
+              break;
+            case 'sms_inbound':
+              usage.interactions.smsInbound++;
+              break;
+            case 'sms_outbound':
+              usage.interactions.smsOutbound++;
+              break;
+            case 'chat_session':
+              usage.interactions.chatSessions++;
+              break;
+          }
+          usage.interactions.total++;
+        });
+      }
+
+      // Process conversations for cost data and fallback interaction counting
+      convData?.forEach((conv) => {
+        initOrgUsage(conv.org_id);
         const usage = usageByOrg[conv.org_id];
+
         if (conv.channel === 'voice') {
           usage.voiceMinutes += (conv.duration_seconds || 0) / 60;
+          // If no interaction_logs, count from conversations
+          if (!interactionLogs || interactionLogs.length === 0) {
+            // Assume 70% inbound, 30% outbound for voice without detailed logs
+            usage.interactions.callInbound++;
+          }
         } else {
-          usage.chatSessions++;
+          // Chat session - apply timeout logic
+          const durationMinutes = (conv.duration_seconds || 0) / 60;
+          // If session is longer than timeout, count as multiple sessions
+          const sessionCount = Math.max(1, Math.ceil(durationMinutes / CHAT_SESSION_TIMEOUT_MINUTES));
+          usage.chatSessions += sessionCount;
+
+          // If no interaction_logs, count from conversations
+          if (!interactionLogs || interactionLogs.length === 0) {
+            usage.interactions.chatSessions += sessionCount;
+            usage.interactions.total += sessionCount;
+          }
         }
+
         usage.inputTokens += conv.tokens_in || 0;
         usage.outputTokens += conv.tokens_out || 0;
         usage.dbElevenLabs += parseFloat(conv.elevenlabs_cost) || 0;
@@ -280,6 +372,18 @@ export default function Billing() {
         usage.dbGpt += parseFloat(conv.gpt_cost) || 0;
         usage.dbTotal += parseFloat(conv.total_cost) || 0;
       });
+
+      // Recalculate totals if we used fallback counting
+      if (!interactionLogs || interactionLogs.length === 0) {
+        Object.values(usageByOrg).forEach((usage) => {
+          usage.interactions.total =
+            usage.interactions.callInbound +
+            usage.interactions.callOutbound +
+            usage.interactions.smsInbound +
+            usage.interactions.smsOutbound +
+            usage.interactions.chatSessions;
+        });
+      }
 
       // Calculate costs for each organization
       const organizations: OrganizationBilling[] = (orgsData || []).map(org => {
@@ -290,6 +394,14 @@ export default function Billing() {
         const monthlyServiceFee = flatRateFee;
 
         // Get usage data
+        const defaultInteractions: InteractionCounts = {
+          callInbound: 0,
+          callOutbound: 0,
+          smsInbound: 0,
+          smsOutbound: 0,
+          chatSessions: 0,
+          total: 0,
+        };
         const usage = usageByOrg[org.id] || {
           voiceMinutes: 0,
           chatSessions: 0,
@@ -300,6 +412,7 @@ export default function Billing() {
           dbWhisper: 0,
           dbGpt: 0,
           dbTotal: 0,
+          interactions: defaultInteractions,
         };
         const phoneCount = phoneCountByOrg[org.id] || 0;
 
@@ -337,13 +450,18 @@ export default function Billing() {
           ? Math.min(100, (currentInteractions / includedInteractions) * 100)
           : 0;
 
+        // Calculate total interactions from the detailed breakdown
+        const totalInteractionsFromUsage = usage.interactions.total > 0
+          ? usage.interactions.total
+          : currentInteractions;
+
         return {
           id: org.id,
           name: org.name || 'Unknown Organization',
           flatRateFee,
           includedInteractions,
           overageRatePer1000,
-          currentPeriodInteractions: currentInteractions,
+          currentPeriodInteractions: totalInteractionsFromUsage,
           currentPeriodStart: org.current_period_start,
           currentPeriodEnd: org.current_period_end,
           monthlyServiceFee,
@@ -352,6 +470,7 @@ export default function Billing() {
           chatSessions: usage.chatSessions,
           inputTokens: usage.inputTokens,
           outputTokens: usage.outputTokens,
+          interactions: usage.interactions,
           elevenLabsCost,
           twilioCost,
           deepgramCost,
@@ -361,6 +480,7 @@ export default function Billing() {
           overageCost,
           totalBill,
           usagePercentage,
+          isOverLimit: totalInteractionsFromUsage > includedInteractions,
         };
       });
 
@@ -453,19 +573,34 @@ export default function Billing() {
       const grossProfit = totalRevenue - totalApiCostsWithFlyio;
       const grossMargin = totalRevenue > 0 ? (grossProfit / totalRevenue) * 100 : 0;
 
+      // Calculate platform-wide interaction counts
+      const platformInteractions: InteractionCounts = organizations.reduce(
+        (acc, org) => ({
+          callInbound: acc.callInbound + org.interactions.callInbound,
+          callOutbound: acc.callOutbound + org.interactions.callOutbound,
+          smsInbound: acc.smsInbound + org.interactions.smsInbound,
+          smsOutbound: acc.smsOutbound + org.interactions.smsOutbound,
+          chatSessions: acc.chatSessions + org.interactions.chatSessions,
+          total: acc.total + org.interactions.total,
+        }),
+        { callInbound: 0, callOutbound: 0, smsInbound: 0, smsOutbound: 0, chatSessions: 0, total: 0 }
+      );
+
       return {
         totalRevenue,
         totalApiCosts: totalApiCostsWithFlyio,
         grossProfit,
         grossMargin,
-        totalInteractions: totalVoiceMinutes + totalChatSessions,
+        totalInteractions: platformInteractions.total || (totalVoiceMinutes + totalChatSessions),
         totalVoiceMinutes,
         totalChatSessions,
         organizationCount: organizations.length,
         avgBillPerOrg: organizations.length > 0 ? totalRevenue / organizations.length : 0,
+        platformInteractions,
         serviceCosts,
         organizations,
         exchangeRate: USD_TO_AUD_RATE,
+        standardIncludedInteractions: 5000,
       };
     },
     refetchInterval: 60000,
@@ -696,8 +831,9 @@ export default function Billing() {
 
         {/* Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-          <TabsList className="grid w-full grid-cols-3 lg:w-[400px]">
+          <TabsList className="grid w-full grid-cols-4 lg:w-[500px]">
             <TabsTrigger value="overview">Overview</TabsTrigger>
+            <TabsTrigger value="interactions">Interactions</TabsTrigger>
             <TabsTrigger value="services">Service Costs</TabsTrigger>
             <TabsTrigger value="organizations">Organizations</TabsTrigger>
           </TabsList>
@@ -848,6 +984,189 @@ export default function Billing() {
                 </CardContent>
               </Card>
             </div>
+          </TabsContent>
+
+          {/* Interactions Tab */}
+          <TabsContent value="interactions" className="space-y-6">
+            {/* Platform Interaction Summary */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <Activity className="h-5 w-5" />
+                  Interaction Breakdown
+                </CardTitle>
+                <CardDescription>
+                  All interactions by type (standard limit: {billingData?.standardIncludedInteractions?.toLocaleString() || '5,000'} per organization)
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {isLoading ? (
+                  <div className="space-y-4">
+                    {Array.from({ length: 5 }).map((_, i) => (
+                      <Skeleton key={i} className="h-16 w-full" />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {/* Interaction type cards */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+                      <div className="p-4 rounded-lg border bg-card" style={{ borderLeftWidth: '4px', borderLeftColor: INTERACTION_COLORS.call_inbound }}>
+                        <div className="flex items-center gap-2 mb-2">
+                          <PhoneIncoming className="h-4 w-4 text-green-500" />
+                          <span className="text-sm font-medium">Inbound Calls</span>
+                        </div>
+                        <p className="text-2xl font-bold">{billingData?.platformInteractions?.callInbound?.toLocaleString() || 0}</p>
+                      </div>
+
+                      <div className="p-4 rounded-lg border bg-card" style={{ borderLeftWidth: '4px', borderLeftColor: INTERACTION_COLORS.call_outbound }}>
+                        <div className="flex items-center gap-2 mb-2">
+                          <PhoneOutgoing className="h-4 w-4 text-blue-500" />
+                          <span className="text-sm font-medium">Outbound Calls</span>
+                        </div>
+                        <p className="text-2xl font-bold">{billingData?.platformInteractions?.callOutbound?.toLocaleString() || 0}</p>
+                      </div>
+
+                      <div className="p-4 rounded-lg border bg-card" style={{ borderLeftWidth: '4px', borderLeftColor: INTERACTION_COLORS.sms_inbound }}>
+                        <div className="flex items-center gap-2 mb-2">
+                          <MessageCircle className="h-4 w-4 text-purple-500" />
+                          <span className="text-sm font-medium">SMS Inbound</span>
+                        </div>
+                        <p className="text-2xl font-bold">{billingData?.platformInteractions?.smsInbound?.toLocaleString() || 0}</p>
+                      </div>
+
+                      <div className="p-4 rounded-lg border bg-card" style={{ borderLeftWidth: '4px', borderLeftColor: INTERACTION_COLORS.sms_outbound }}>
+                        <div className="flex items-center gap-2 mb-2">
+                          <MessageSquare className="h-4 w-4 text-amber-500" />
+                          <span className="text-sm font-medium">SMS Outbound</span>
+                        </div>
+                        <p className="text-2xl font-bold">{billingData?.platformInteractions?.smsOutbound?.toLocaleString() || 0}</p>
+                      </div>
+
+                      <div className="p-4 rounded-lg border bg-card" style={{ borderLeftWidth: '4px', borderLeftColor: INTERACTION_COLORS.chat_session }}>
+                        <div className="flex items-center gap-2 mb-2">
+                          <MessageSquare className="h-4 w-4 text-cyan-500" />
+                          <span className="text-sm font-medium">Chat Sessions</span>
+                        </div>
+                        <p className="text-2xl font-bold">{billingData?.platformInteractions?.chatSessions?.toLocaleString() || 0}</p>
+                        <p className="text-xs text-muted-foreground">30 min timeout per session</p>
+                      </div>
+                    </div>
+
+                    {/* Total */}
+                    <div className="p-4 rounded-lg bg-muted/50 border-2">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h3 className="font-semibold text-lg">Total Interactions</h3>
+                          <p className="text-sm text-muted-foreground">All types combined (platform-wide)</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-3xl font-bold">{billingData?.platformInteractions?.total?.toLocaleString() || billingData?.totalInteractions?.toLocaleString() || 0}</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Organization Interaction Drill-down */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <Building2 className="h-5 w-5" />
+                  Interactions by Organization
+                </CardTitle>
+                <CardDescription>
+                  Drill-down to see which organizations are approaching or exceeding their limits
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {isLoading ? (
+                  <div className="space-y-2">
+                    {Array.from({ length: 5 }).map((_, i) => (
+                      <Skeleton key={i} className="h-12 w-full" />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Organization</TableHead>
+                          <TableHead className="text-right">Inbound</TableHead>
+                          <TableHead className="text-right">Outbound</TableHead>
+                          <TableHead className="text-right">SMS In</TableHead>
+                          <TableHead className="text-right">SMS Out</TableHead>
+                          <TableHead className="text-right">Chat</TableHead>
+                          <TableHead className="text-right">Total</TableHead>
+                          <TableHead className="text-right">Limit</TableHead>
+                          <TableHead className="text-center">Status</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {billingData?.organizations.map((org) => (
+                          <TableRow key={org.id} className={org.isOverLimit ? 'bg-red-500/5' : ''}>
+                            <TableCell className="font-medium">{org.name}</TableCell>
+                            <TableCell className="text-right">{org.interactions.callInbound}</TableCell>
+                            <TableCell className="text-right">{org.interactions.callOutbound}</TableCell>
+                            <TableCell className="text-right">{org.interactions.smsInbound}</TableCell>
+                            <TableCell className="text-right">{org.interactions.smsOutbound}</TableCell>
+                            <TableCell className="text-right">{org.interactions.chatSessions}</TableCell>
+                            <TableCell className="text-right font-bold">
+                              {org.currentPeriodInteractions.toLocaleString()}
+                            </TableCell>
+                            <TableCell className="text-right text-muted-foreground">
+                              {org.includedInteractions.toLocaleString()}
+                            </TableCell>
+                            <TableCell className="text-center">
+                              {org.isOverLimit ? (
+                                <Badge className="bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300">
+                                  Over Limit
+                                </Badge>
+                              ) : org.usagePercentage >= 80 ? (
+                                <Badge className="bg-orange-100 text-orange-700 dark:bg-orange-950 dark:text-orange-300">
+                                  {org.usagePercentage.toFixed(0)}% Used
+                                </Badge>
+                              ) : (
+                                <Badge className="bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300">
+                                  {org.usagePercentage.toFixed(0)}% Used
+                                </Badge>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                        {(!billingData?.organizations || billingData.organizations.length === 0) && (
+                          <TableRow>
+                            <TableCell colSpan={9} className="text-center text-muted-foreground py-8">
+                              No organizations found
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Interaction counting info */}
+            <Card className="bg-muted/30">
+              <CardContent className="pt-6">
+                <div className="flex items-start gap-3">
+                  <Info className="h-5 w-5 text-muted-foreground mt-0.5" />
+                  <div>
+                    <h4 className="font-medium text-sm">Interaction Counting Rules</h4>
+                    <ul className="text-sm text-muted-foreground mt-2 space-y-1">
+                      <li>Each inbound or outbound call counts as 1 interaction</li>
+                      <li>Each SMS message (sent or received) counts as 1 interaction</li>
+                      <li>Chat sessions are counted with a 30-minute timeout - sessions longer than 30 minutes are counted as multiple interactions</li>
+                      <li>Standard limit: 5,000 interactions per organization per billing period</li>
+                      <li>Overage charges apply when exceeding the included interaction limit</li>
+                    </ul>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
           </TabsContent>
 
           {/* Services Tab */}
