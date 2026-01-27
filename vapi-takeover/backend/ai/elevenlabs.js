@@ -11,16 +11,23 @@ const __dirname = path.dirname(__filename);
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
 const ELEVENLABS_API_URL = 'https://api.elevenlabs.io/v1';
 
-// Background audio cache - cleared on deploy to regenerate with updated settings
+// Audio caches
 let backgroundAudioCache = {};
+let fillerAudioCache = {}; // Pre-generated filler phrases for instant playback
 
-// Clear cache on module load to ensure fresh generation with current settings
-backgroundAudioCache = {};
+// Filler phrases - short acknowledgments for instant feedback
+const FILLER_PHRASES = [
+  'Sure.',
+  'Okay.',
+  'One moment.',
+  'Let me check.',
+  'Alright.'
+];
 
 /**
  * Generate synthetic background noise (μ-law 8kHz format)
  * Creates 10 seconds of loopable ambient noise
- * Uses proper μ-law encoding with audible brown noise
+ * μ-law encoding requires significant deviation from 127 to be audible
  * @param {string} type - Type: 'office' (soft murmur), 'cafe' (busier), 'white'
  * @returns {Buffer}
  */
@@ -30,39 +37,39 @@ function generateBackgroundNoise(type) {
   const samples = sampleRate * duration;
   const buffer = Buffer.alloc(samples);
 
-  // Brown noise parameters - much more audible
+  // μ-law requires large amplitude to be audible (127 ± 30-50 minimum)
   let amplitude, smoothing;
 
   switch (type) {
     case 'office':
-      amplitude = 8; // Audible office hum
-      smoothing = 0.98; // Smooth brown noise
+      amplitude = 35; // Clearly audible office ambience
+      smoothing = 0.995; // Very smooth = low frequency hum
       break;
     case 'cafe':
-      amplitude = 12; // Busier ambient sound
-      smoothing = 0.95;
+      amplitude = 45; // More noticeable ambient noise
+      smoothing = 0.99;
       break;
     case 'white':
     default:
-      amplitude = 6;
-      smoothing = 0.99;
+      amplitude = 25;
+      smoothing = 0.997;
   }
 
-  // Generate brown noise (integrated white noise - sounds more natural)
+  // Generate brown noise with proper amplitude for μ-law
   let value = 0;
   for (let i = 0; i < samples; i++) {
     // White noise input
     const white = (Math.random() * 2 - 1);
 
-    // Integrate for brown noise (low frequency rumble)
+    // Integrate for brown noise (creates low frequency rumble)
     value = value * smoothing + white * (1 - smoothing);
 
-    // Scale and convert to μ-law
-    // μ-law: 127 is silence, deviation creates sound
-    // Positive and negative deviations from 127 create the waveform
-    const scaled = value * amplitude;
-    const sample = 127 + Math.round(scaled);
+    // Normalize to prevent runaway and scale to audible amplitude
+    // Brown noise can accumulate, so we need soft limiting
+    const normalized = Math.tanh(value * 3) * amplitude;
 
+    // μ-law: 127 is silence center point
+    const sample = 127 + Math.round(normalized);
     buffer[i] = Math.max(0, Math.min(255, sample));
   }
 
@@ -70,7 +77,8 @@ function generateBackgroundNoise(type) {
     samples,
     duration: `${duration}s`,
     amplitude,
-    smoothing
+    smoothing,
+    sampleRange: `${Math.min(...buffer)}-${Math.max(...buffer)}`
   });
   return buffer;
 }
@@ -373,4 +381,67 @@ export async function getSubscriptionInfo() {
     logger.error('Failed to fetch ElevenLabs subscription:', error);
     throw error;
   }
+}
+
+/**
+ * Pre-generate filler phrases for a voice (call on startup for instant playback)
+ * @param {string} voiceId - ElevenLabs voice ID
+ * @param {Object} options - Background sound options
+ * @returns {Promise<void>}
+ */
+export async function preGenerateFillerPhrases(voiceId, options = {}) {
+  const { backgroundSound = 'office', backgroundVolume = 0.20 } = options;
+
+  if (!ELEVENLABS_API_KEY) {
+    logger.warn('Cannot pre-generate fillers: ELEVENLABS_API_KEY not set');
+    return;
+  }
+
+  const cacheKey = `${voiceId}-${backgroundSound}`;
+  if (fillerAudioCache[cacheKey]) {
+    logger.info('Filler phrases already cached', { voiceId, count: fillerAudioCache[cacheKey].length });
+    return;
+  }
+
+  logger.info('Pre-generating filler phrases', { voiceId, count: FILLER_PHRASES.length });
+  fillerAudioCache[cacheKey] = [];
+
+  for (const phrase of FILLER_PHRASES) {
+    try {
+      const audio = await streamElevenLabsAudio(phrase, voiceId, { backgroundSound, backgroundVolume });
+      fillerAudioCache[cacheKey].push(audio);
+      logger.debug('Filler phrase generated', { phrase, bytes: audio.length });
+    } catch (error) {
+      logger.warn('Failed to generate filler phrase:', phrase, error.message);
+    }
+  }
+
+  logger.info('Filler phrases ready', { voiceId, cached: fillerAudioCache[cacheKey].length });
+}
+
+/**
+ * Get a random pre-generated filler phrase audio (instant, no TTS delay)
+ * @param {string} voiceId - ElevenLabs voice ID
+ * @param {string} backgroundSound - Background sound type used during generation
+ * @returns {Buffer|null} Pre-generated audio or null if not available
+ */
+export function getInstantFillerAudio(voiceId, backgroundSound = 'office') {
+  const cacheKey = `${voiceId}-${backgroundSound}`;
+  const cached = fillerAudioCache[cacheKey];
+
+  if (!cached || cached.length === 0) {
+    return null;
+  }
+
+  // Return random filler to add variety
+  const index = Math.floor(Math.random() * cached.length);
+  return cached[index];
+}
+
+/**
+ * Check if filler phrases are ready for a voice
+ */
+export function hasFillerPhrasesReady(voiceId, backgroundSound = 'office') {
+  const cacheKey = `${voiceId}-${backgroundSound}`;
+  return fillerAudioCache[cacheKey]?.length > 0;
 }

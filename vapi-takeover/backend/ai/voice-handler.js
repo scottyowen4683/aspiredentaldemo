@@ -5,7 +5,7 @@ import os from 'os';
 import path from 'path';
 import logger from '../services/logger.js';
 import supabaseService from '../services/supabase-service.js';
-import { streamElevenLabsAudio, streamElevenLabsTTS } from './elevenlabs.js';
+import { streamElevenLabsAudio, streamElevenLabsTTS, preGenerateFillerPhrases, getInstantFillerAudio, hasFillerPhrasesReady } from './elevenlabs.js';
 import { BufferManager, ulawToWav } from '../audio/buffer-manager.js';
 import { scoreConversation } from './rubric-scorer.js';
 import { sendContactRequestNotification } from '../services/email-service.js';
@@ -225,6 +225,18 @@ class VoiceHandler {
         conversationId: this.conversation?.id || 'none',
         assistantName: this.assistant.friendly_name
       });
+
+      // Pre-generate filler phrases in background (don't block initialization)
+      const voiceId = this.assistant.elevenlabs_voice_id || process.env.ELEVENLABS_VOICE_DEFAULT;
+      const backgroundSound = this.assistant.background_sound || 'office';
+      const backgroundVolume = this.assistant.background_volume || 0.20;
+
+      if (voiceId && !hasFillerPhrasesReady(voiceId, backgroundSound)) {
+        // Generate in background - don't await
+        preGenerateFillerPhrases(voiceId, { backgroundSound, backgroundVolume })
+          .then(() => logger.info('Filler phrases ready for instant playback'))
+          .catch(e => logger.warn('Filler pre-generation failed:', e.message));
+      }
 
       return true;
     } catch (error) {
@@ -878,7 +890,23 @@ class VoiceHandler {
         audioSizeKB: (audioBuffer.length / 1024).toFixed(2)
       });
 
-      // Step 1: Transcribe with Whisper
+      // INSTANT FEEDBACK: Send pre-generated filler audio IMMEDIATELY
+      // This plays while transcription and GPT process (eliminates perceived silence)
+      const voiceId = this.assistant.elevenlabs_voice_id || process.env.ELEVENLABS_VOICE_DEFAULT;
+      const backgroundSound = this.assistant.background_sound || 'office';
+      const fillerAudio = getInstantFillerAudio(voiceId, backgroundSound);
+
+      if (fillerAudio) {
+        logger.info('Sending instant filler audio', { bytes: fillerAudio.length });
+        // Send filler in chunks to Twilio (smooth playback)
+        const CHUNK_SIZE = 640; // 80ms at 8kHz
+        for (let i = 0; i < fillerAudio.length; i += CHUNK_SIZE) {
+          const chunk = fillerAudio.slice(i, Math.min(i + CHUNK_SIZE, fillerAudio.length));
+          onAudioChunk(chunk);
+        }
+      }
+
+      // Step 1: Transcribe with Whisper (filler audio plays during this)
       const transcriptionStart = Date.now();
       const transcription = await this.transcribeAudio(audioBuffer);
       const transcriptionLatency = Date.now() - transcriptionStart;
@@ -904,59 +932,41 @@ class VoiceHandler {
         }).catch(e => logger.warn('Failed to save user message:', e.message));
       }
 
-      // NOTE: Filler phrases removed - they created audio discontinuity/fuzz
-      // Instead, the prompt instructs the AI to start with brief acknowledgment
-      // This keeps audio continuous without separate TTS calls
-
       // Step 2 + 3: PIPELINE GPT streaming → ElevenLabs streaming
-      // Each sentence from GPT immediately goes to TTS
+      // Collect full response first, then stream TTS for smoother audio
       const gptStart = Date.now();
       let firstAudioSent = false;
       let totalAudioBytes = 0;
       let sentenceCount = 0;
 
-      // Queue for serializing TTS calls (sentences must play in order)
-      const ttsQueue = [];
-      let ttsRunning = false;
-
-      const processTTSQueue = async () => {
-        if (ttsRunning || ttsQueue.length === 0) return;
-        ttsRunning = true;
-
-        while (ttsQueue.length > 0) {
-          const sentence = ttsQueue.shift();
-          try {
-            await this.generateSpeechStreaming(sentence, (chunk) => {
-              if (!firstAudioSent) {
-                firstAudioSent = true;
-                logger.info('🚀 First audio chunk (pipelined)!', {
-                  timeToFirstAudioMs: Date.now() - gptStart,
-                  totalLatencyMs: Date.now() - turnStartTime,
-                  sentence: sentence.substring(0, 30) + '...'
-                });
-              }
-              totalAudioBytes += chunk.length;
-              onAudioChunk(chunk);
-            });
-          } catch (ttsError) {
-            logger.error('TTS error for sentence:', ttsError.message);
-          }
-        }
-
-        ttsRunning = false;
-      };
-
-      // Stream GPT and queue sentences for TTS
+      // Collect all sentences from GPT streaming
+      const sentences = [];
       const gptResponse = await this.generateResponseStreaming(transcription, (sentence) => {
         sentenceCount++;
-        logger.debug('Sentence ready for TTS:', { sentenceCount, sentence: sentence.substring(0, 50) });
-        ttsQueue.push(sentence);
-        processTTSQueue(); // Start TTS if not already running
+        logger.debug('Sentence ready:', { sentenceCount, sentence: sentence.substring(0, 50) });
+        sentences.push(sentence);
       });
 
-      // Wait for all TTS to complete
-      while (ttsQueue.length > 0 || ttsRunning) {
-        await new Promise(resolve => setTimeout(resolve, 50));
+      // Now stream TTS for the full response as ONE call (smoother audio, no gaps)
+      const fullText = sentences.join(' ');
+
+      if (fullText.trim()) {
+        logger.info('Streaming TTS for full response', {
+          textLength: fullText.length,
+          sentences: sentenceCount
+        });
+
+        await this.generateSpeechStreaming(fullText, (chunk) => {
+          if (!firstAudioSent) {
+            firstAudioSent = true;
+            logger.info('🚀 First audio chunk!', {
+              timeToFirstAudioMs: Date.now() - gptStart,
+              totalLatencyMs: Date.now() - turnStartTime
+            });
+          }
+          totalAudioBytes += chunk.length;
+          onAudioChunk(chunk);
+        });
       }
 
       const gptLatency = Date.now() - gptStart;
