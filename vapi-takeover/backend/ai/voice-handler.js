@@ -936,42 +936,72 @@ class VoiceHandler {
         }).catch(e => logger.warn('Failed to save user message:', e.message));
       }
 
-      // Step 2 + 3: PIPELINE GPT streaming → ElevenLabs streaming
-      // Collect full response first, then stream TTS for smoother audio
+      // Step 2 + 3: TRUE STREAMING - TTS starts on FIRST sentence while GPT continues
+      // This gives VAPI-like low latency
       const gptStart = Date.now();
       let firstAudioSent = false;
       let totalAudioBytes = 0;
       let sentenceCount = 0;
 
-      // Collect all sentences from GPT streaming
-      const sentences = [];
+      // TTS queue - process sentences in order as they arrive from GPT
+      const ttsQueue = [];
+      let ttsRunning = false;
+      let allSentencesReceived = false;
+
+      const processTTSQueue = async () => {
+        if (ttsRunning) return;
+        ttsRunning = true;
+
+        while (ttsQueue.length > 0 || !allSentencesReceived) {
+          if (ttsQueue.length === 0) {
+            // Wait briefly for more sentences
+            await new Promise(r => setTimeout(r, 20));
+            continue;
+          }
+
+          const sentence = ttsQueue.shift();
+          try {
+            // Use NON-streaming TTS per sentence (complete audio buffer, no chunks)
+            // This sounds better than streaming chunks
+            const audioBuffer = await streamElevenLabsAudio(sentence, voiceId, {
+              backgroundSound,
+              backgroundVolume: this.assistant.background_volume || 0.40
+            });
+
+            if (!firstAudioSent) {
+              firstAudioSent = true;
+              logger.info('🚀 First audio!', {
+                timeToFirstAudioMs: Date.now() - gptStart,
+                totalLatencyMs: Date.now() - turnStartTime,
+                sentence: sentence.substring(0, 30)
+              });
+            }
+
+            totalAudioBytes += audioBuffer.length;
+            onAudioChunk(audioBuffer);
+
+          } catch (ttsError) {
+            logger.error('TTS error:', ttsError.message);
+          }
+        }
+
+        ttsRunning = false;
+      };
+
+      // Start TTS processing immediately (runs in parallel with GPT)
+      const ttsPromise = processTTSQueue();
+
+      // Stream GPT - each sentence goes to TTS queue immediately
       const gptResponse = await this.generateResponseStreaming(transcription, (sentence) => {
         sentenceCount++;
-        logger.debug('Sentence ready:', { sentenceCount, sentence: sentence.substring(0, 50) });
-        sentences.push(sentence);
+        logger.debug('Sentence to TTS:', { sentenceCount, len: sentence.length });
+        ttsQueue.push(sentence);
       });
 
-      // Now stream TTS for the full response as ONE call (smoother audio, no gaps)
-      const fullText = sentences.join(' ');
+      allSentencesReceived = true;
 
-      if (fullText.trim()) {
-        logger.info('Streaming TTS for full response', {
-          textLength: fullText.length,
-          sentences: sentenceCount
-        });
-
-        await this.generateSpeechStreaming(fullText, (chunk) => {
-          if (!firstAudioSent) {
-            firstAudioSent = true;
-            logger.info('🚀 First audio chunk!', {
-              timeToFirstAudioMs: Date.now() - gptStart,
-              totalLatencyMs: Date.now() - turnStartTime
-            });
-          }
-          totalAudioBytes += chunk.length;
-          onAudioChunk(chunk);
-        });
-      }
+      // Wait for all TTS to complete
+      await ttsPromise;
 
       const gptLatency = Date.now() - gptStart;
       const totalLatency = Date.now() - turnStartTime;
