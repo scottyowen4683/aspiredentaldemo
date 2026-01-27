@@ -599,7 +599,7 @@ export async function fetchAssistantByPilotSlug(slug: string): Promise<Assistant
     .eq("pilot_slug", slug)
     .eq("pilot_enabled", true)
     .eq("active", true)
-    .single();
+    .maybeSingle();
 
   if (error) {
     console.error("Error fetching pilot assistant:", error);

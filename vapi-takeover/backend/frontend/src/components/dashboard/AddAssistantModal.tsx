@@ -394,7 +394,7 @@ export function AddAssistantModal({ open, onOpenChange, initialData, onSuccess }
         bot_type: formData.assistantType,
         phone_number: formData.assistantType === "voice" ? formData.phoneNumber : null,
         elevenlabs_voice_id: formData.assistantType === "voice" ? getEffectiveVoiceId() : null,
-        prompt: formData.useDefaultPrompt ? null : (formData.prompt || null),
+        prompt: formData.useDefaultPrompt ? "[Uses Default Prompt]" : (formData.prompt || ""),
         use_default_prompt: formData.useDefaultPrompt,
         model: formData.model,
         temperature: formData.temperature,
