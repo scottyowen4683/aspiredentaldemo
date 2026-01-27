@@ -69,9 +69,11 @@ async function sendEmail({ to, subject, html }) {
  * @param {string} metadata.assistantName - Name of the assistant
  * @param {string} metadata.conversationId - Conversation ID
  * @param {string} metadata.channel - chat or voice
+ * @param {string} metadata.notificationEmail - Optional override email from assistant settings
  */
 export async function sendContactRequestNotification(request, metadata = {}) {
-  const recipientEmail = NOTIFICATION_EMAIL;
+  // Use assistant's configured notification email if provided, otherwise fall back to env vars
+  const recipientEmail = metadata.notificationEmail || NOTIFICATION_EMAIL;
 
   if (!recipientEmail) {
     logger.warn('NOTIFICATION_EMAIL not configured, skipping notification');
