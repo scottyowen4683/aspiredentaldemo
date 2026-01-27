@@ -77,8 +77,8 @@ app.use('/api/campaigns', campaignsRouter);
 
 // SPA catch-all: serve index.html for all non-API routes (React Router handles client-side routing)
 app.get('*', (req, res, next) => {
-  // Skip API routes and static files
-  if (req.path.startsWith('/api/') || req.path.startsWith('/voice/')) {
+  // Skip API routes, voice routes, and static widget files
+  if (req.path.startsWith('/api/') || req.path.startsWith('/voice/') || req.path.startsWith('/widget/')) {
     return next();
   }
   res.sendFile(join(__dirname, 'public', 'index.html'));

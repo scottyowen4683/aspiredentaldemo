@@ -45,14 +45,20 @@ RUN npm install --omit=dev
 # Copy backend source code
 COPY . .
 
+# Save widget folder before removing public
+RUN if [ -d public/widget ]; then cp -r public/widget /tmp/widget-backup; fi
+
 # Remove the frontend source and any existing public folder
 RUN rm -rf frontend public
 
 # Copy built frontend from Stage 1
 COPY --from=frontend-builder /app/public ./public
 
+# Restore widget folder (it's part of the backend, not the React build)
+RUN if [ -d /tmp/widget-backup ]; then cp -r /tmp/widget-backup ./public/widget; fi
+
 # Debug: List what's in public folder
-RUN ls -la ./public/ && head -20 ./public/index.html
+RUN ls -la ./public/ && ls -la ./public/widget/ 2>/dev/null || echo "No widget folder"
 
 # Expose port (Fly.io sets PORT env var to 8080)
 EXPOSE 8080
