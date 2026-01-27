@@ -287,20 +287,32 @@ After capturing, confirm what you've recorded and let them know someone will fol
               requestType: args.request_type
             });
 
-            // Send email notification (async, don't wait)
-            sendContactRequestNotification(args, {
-              assistantName: assistant.friendly_name || assistant.name,
-              conversationId: conversation.id,
-              channel: 'chat'
-            }).catch(err => {
-              logger.error('Failed to send contact request email:', err);
-            });
+            // Send email notification and get reference ID
+            let referenceId = null;
+            try {
+              const emailResult = await sendContactRequestNotification(args, {
+                assistantName: assistant.friendly_name || assistant.name,
+                conversationId: conversation.id,
+                channel: 'chat'
+              });
+              referenceId = emailResult?.referenceId;
+              logger.info('Contact request email sent', { referenceId });
+            } catch (emailErr) {
+              logger.error('Failed to send contact request email:', emailErr);
+            }
 
-            // If no text response, generate a confirmation
+            // Generate a friendly confirmation with reference number
             if (!aiResponse) {
-              aiResponse = `I've captured your ${args.request_type.replace('_', ' ')}. ` +
-                (args.address ? `The address is ${args.address}. ` : '') +
-                `Our team will follow up on this shortly.`;
+              const requestTypeLabel = args.request_type.replace('_', ' ');
+              aiResponse = `Thank you, ${args.name || 'I'}! I've logged your ${requestTypeLabel}`;
+              if (args.address) {
+                aiResponse += ` regarding ${args.address}`;
+              }
+              aiResponse += '.';
+              if (referenceId) {
+                aiResponse += ` Your reference number is **${referenceId}**.`;
+              }
+              aiResponse += ` Our team will be in touch soon to follow up.\n\nIs there anything else I can help you with today?`;
             }
           } catch (fnError) {
             logger.error('Error processing function call:', fnError);

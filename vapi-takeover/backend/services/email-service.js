@@ -185,11 +185,17 @@ export async function sendContactRequestNotification(request, metadata = {}) {
     </html>
   `;
 
-  return sendEmail({
+  const result = await sendEmail({
     to: recipientEmail,
     subject: `[${(request.urgency || 'MEDIUM').toUpperCase()}] New ${requestLabel}: ${request.request_details.substring(0, 50)}...`,
     html
   });
+
+  // Return the reference ID so it can be used in the chat response
+  return {
+    ...result,
+    referenceId
+  };
 }
 
 /**
