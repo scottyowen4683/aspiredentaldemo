@@ -317,23 +317,19 @@ wss.on('connection', async (ws, req) => {
             };
 
             // Set up speech end callbacks
-            // Priority: Streaming transcriber (fastest) > VAD buffer (fallback)
+            // When streaming is available, use it exclusively (no VAD race condition)
+            // VAD is only used as fallback when streaming is NOT available
 
             if (voiceHandler.streamingTranscriber) {
-              // Use Deepgram streaming - transcription is ready instantly when speech ends!
+              // Use Deepgram streaming ONLY - it has built-in VAD
+              // This avoids race condition between VAD and streaming
               voiceHandler.onStreamingSpeechEnd = async (transcript) => {
-                logger.info('🚀 Using STREAMING transcription (fast path)', { transcript: transcript.substring(0, 30) });
+                logger.info('🚀 Using STREAMING transcription', { transcript: transcript.substring(0, 30) });
                 await processSpeechAndRespond(true);
               };
 
-              // Also set VAD callback as backup (in case streaming misses something)
-              voiceHandler.audioBuffer.onSpeechEnd(async () => {
-                // Only process if not already processing and no pending streaming transcript
-                if (!voiceHandler.isProcessing && !voiceHandler.pendingTranscript) {
-                  logger.info('VAD fallback triggered');
-                  await processSpeechAndRespond(false);
-                }
-              });
+              // Don't set up VAD callback - streaming handles everything
+              logger.info('Using Deepgram streaming exclusively (VAD disabled)');
             } else {
               // No streaming transcriber - use VAD only
               voiceHandler.audioBuffer.onSpeechEnd(async () => {

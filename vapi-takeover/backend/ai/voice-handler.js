@@ -236,7 +236,8 @@ class VoiceHandler {
       // Pre-generate filler phrases in background (don't block initialization)
       const voiceId = this.assistant.elevenlabs_voice_id || process.env.ELEVENLABS_VOICE_DEFAULT;
       const backgroundSound = this.assistant.background_sound || 'office';
-      const backgroundVolume = this.assistant.background_volume || 0.20;
+      // Enforce minimum 0.40 volume - lower values are inaudible on phone
+      const backgroundVolume = Math.max(this.assistant.background_volume || 0.40, 0.40);
 
       if (voiceId && !hasFillerPhrasesReady(voiceId, backgroundSound)) {
         // Generate in background - don't await

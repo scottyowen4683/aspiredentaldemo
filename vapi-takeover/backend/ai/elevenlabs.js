@@ -37,22 +37,23 @@ function generateBackgroundNoise(type) {
   const samples = sampleRate * duration;
   const buffer = Buffer.alloc(samples);
 
-  // μ-law needs BIG amplitude to be audible on phone (60-80 range)
+  // Lower amplitude for subtle background - high values cause crackling
+  // Combined with 0.40 volume mix, this gives audible but not harsh background
   let amplitude, smoothing;
 
   switch (type) {
     case 'office':
-      amplitude = 65; // Very audible office ambience
-      smoothing = 0.997; // Smooth brown noise
+      amplitude = 35; // Subtle office ambience (high volume mix compensates)
+      smoothing = 0.998; // Very smooth brown noise to avoid clicks
       break;
     case 'cafe':
-      amplitude = 75; // Clearly noticeable ambient noise
-      smoothing = 0.995;
+      amplitude = 45; // Slightly more noticeable ambient noise
+      smoothing = 0.997;
       break;
     case 'white':
     default:
-      amplitude = 50;
-      smoothing = 0.998;
+      amplitude = 30;
+      smoothing = 0.999; // Very smooth
   }
 
   // Generate brown noise with high amplitude for phone audio
@@ -397,7 +398,8 @@ export async function getSubscriptionInfo() {
  * @returns {Promise<void>}
  */
 export async function preGenerateFillerPhrases(voiceId, options = {}) {
-  const { backgroundSound = 'office', backgroundVolume = 0.20 } = options;
+  // Use 0.40 minimum for audible background on phone
+  const { backgroundSound = 'office', backgroundVolume = 0.40 } = options;
 
   if (!ELEVENLABS_API_KEY) {
     logger.warn('Cannot pre-generate fillers: ELEVENLABS_API_KEY not set');
