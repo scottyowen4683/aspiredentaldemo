@@ -25,8 +25,8 @@ WITH CHECK (
   bucket_id = 'pilot-logos' AND
   EXISTS (
     SELECT 1 FROM assistants a
-    JOIN organization_members om ON om.org_id = a.org_id
-    WHERE om.user_id = auth.uid()
+    JOIN users u ON u.org_id = a.org_id
+    WHERE u.id = auth.uid()
     AND a.id::text = (storage.foldername(name))[1]
   )
 );
@@ -39,8 +39,8 @@ USING (
   bucket_id = 'pilot-logos' AND
   EXISTS (
     SELECT 1 FROM assistants a
-    JOIN organization_members om ON om.org_id = a.org_id
-    WHERE om.user_id = auth.uid()
+    JOIN users u ON u.org_id = a.org_id
+    WHERE u.id = auth.uid()
     AND a.id::text = (storage.foldername(name))[1]
   )
 )
@@ -48,8 +48,8 @@ WITH CHECK (
   bucket_id = 'pilot-logos' AND
   EXISTS (
     SELECT 1 FROM assistants a
-    JOIN organization_members om ON om.org_id = a.org_id
-    WHERE om.user_id = auth.uid()
+    JOIN users u ON u.org_id = a.org_id
+    WHERE u.id = auth.uid()
     AND a.id::text = (storage.foldername(name))[1]
   )
 );
@@ -62,8 +62,8 @@ USING (
   bucket_id = 'pilot-logos' AND
   EXISTS (
     SELECT 1 FROM assistants a
-    JOIN organization_members om ON om.org_id = a.org_id
-    WHERE om.user_id = auth.uid()
+    JOIN users u ON u.org_id = a.org_id
+    WHERE u.id = auth.uid()
     AND a.id::text = (storage.foldername(name))[1]
   )
 );
