@@ -8,10 +8,59 @@ import supabaseService from '../services/supabase-service.js';
 import { streamElevenLabsAudio, streamElevenLabsTTS } from './elevenlabs.js';
 import { BufferManager, ulawToWav } from '../audio/buffer-manager.js';
 import { scoreConversation } from './rubric-scorer.js';
+import { sendContactRequestNotification } from '../services/email-service.js';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
+
+// Filler phrases to use while processing (reduces perceived latency)
+const FILLER_PHRASES = [
+  "Sure, let me check that for you.",
+  "One moment, I'll look into that.",
+  "Let me find that information for you.",
+  "Just a second while I check.",
+  "Sure, let me look that up."
+];
+
+// Function definitions for voice - same as chat
+const VOICE_FUNCTIONS = [
+  {
+    name: 'capture_contact_request',
+    description: 'Use this function when a user provides contact information, wants to lodge a complaint/request, or wants to be contacted. Use for barking dogs, noise complaints, rubbish issues, etc.',
+    parameters: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'The name of the person' },
+        email: { type: 'string', description: 'The email address' },
+        phone: { type: 'string', description: 'The phone number' },
+        address: { type: 'string', description: 'The address related to the request' },
+        request_type: {
+          type: 'string',
+          enum: ['complaint', 'enquiry', 'feedback', 'service_request', 'contact_request', 'other'],
+          description: 'Type of request'
+        },
+        request_details: { type: 'string', description: 'Full details of what the user is requesting' },
+        urgency: { type: 'string', enum: ['low', 'medium', 'high'], description: 'Urgency level' }
+      },
+      required: ['request_type', 'request_details']
+    }
+  }
+];
+
+// Function calling instructions appended to voice prompts
+const FUNCTION_INSTRUCTIONS = `
+
+CAPTURING REQUESTS (IMPORTANT - ALWAYS DO THIS):
+When a user:
+- Wants to lodge a complaint (barking dog, noise, rubbish, etc.)
+- Wants to report an issue (broken footpath, streetlight, etc.)
+- Wants to be contacted or followed up
+- Provides their name, phone, email, or address with a request
+
+You MUST call the capture_contact_request function to log their request.
+Ask for their name and contact details if not provided.
+Always confirm the address related to the issue.`;
 
 // Default system prompt - used when assistant has no custom prompt
 // This matches the moretonbaypilot chatbot behavior with email capture
@@ -404,15 +453,18 @@ class VoiceHandler {
       }
 
       // Use assistant's custom prompt, or fall back to default
-      const systemPrompt = this.assistant.prompt && this.assistant.prompt.trim()
+      const basePrompt = this.assistant.prompt && this.assistant.prompt.trim()
         ? this.assistant.prompt
         : DEFAULT_SYSTEM_PROMPT;
+
+      // Always append function calling instructions
+      const systemPrompt = basePrompt + FUNCTION_INSTRUCTIONS + kbContext;
 
       // Build messages with knowledge base context
       const messages = [
         {
           role: 'system',
-          content: systemPrompt + kbContext
+          content: systemPrompt
         },
         ...history,
         {
@@ -421,17 +473,78 @@ class VoiceHandler {
         }
       ];
 
-      // Call GPT - use gpt-4o-mini for speed
+      // Call GPT with function calling - use gpt-4o-mini for speed
       const completion = await openai.chat.completions.create({
         model: this.assistant.model || 'gpt-4o-mini',
         messages,
         temperature: this.assistant.temperature || 0.7,
         max_tokens: this.assistant.max_tokens || 150,
+        tools: VOICE_FUNCTIONS.map(fn => ({ type: 'function', function: fn })),
+        tool_choice: 'auto'
       });
 
-      const responseText = completion.choices[0].message.content;
+      let responseText = completion.choices[0].message.content || '';
       const tokensIn = completion.usage.prompt_tokens;
       const tokensOut = completion.usage.completion_tokens;
+
+      // Handle function calls (contact capture)
+      const toolCalls = completion.choices[0].message.tool_calls;
+      if (toolCalls && toolCalls.length > 0) {
+        for (const toolCall of toolCalls) {
+          if (toolCall.function.name === 'capture_contact_request') {
+            try {
+              const args = JSON.parse(toolCall.function.arguments);
+              logger.info('Voice: Capturing contact request', args);
+
+              // Store in database
+              await supabaseService.client.from('contact_requests').insert({
+                conversation_id: this.conversation?.id || null,
+                org_id: this.assistant.org_id,
+                assistant_id: this.assistant.id,
+                name: args.name || null,
+                email: args.email || null,
+                phone: args.phone || this.callerNumber || null,
+                address: args.address || null,
+                request_type: args.request_type,
+                request_details: args.request_details,
+                urgency: args.urgency || 'medium',
+                status: 'pending',
+                created_at: new Date().toISOString()
+              });
+
+              // Send email notification
+              let referenceId = null;
+              try {
+                const emailResult = await sendContactRequestNotification(args, {
+                  assistantName: this.assistant.friendly_name || 'Voice Assistant',
+                  conversationId: this.conversation?.id,
+                  channel: 'voice'
+                });
+                referenceId = emailResult?.referenceId;
+                logger.info('Voice: Contact request email sent', { referenceId });
+              } catch (emailErr) {
+                logger.error('Voice: Failed to send contact request email:', emailErr);
+              }
+
+              // Generate confirmation response if AI didn't provide one
+              if (!responseText) {
+                const requestTypeLabel = args.request_type.replace('_', ' ');
+                responseText = `Thank you${args.name ? ` ${args.name}` : ''}! I've logged your ${requestTypeLabel}`;
+                if (args.address) {
+                  responseText += ` regarding ${args.address}`;
+                }
+                responseText += '.';
+                if (referenceId) {
+                  responseText += ` Your reference number is ${referenceId}.`;
+                }
+                responseText += ` Our team will follow up shortly. Is there anything else I can help you with?`;
+              }
+            } catch (fnError) {
+              logger.error('Voice: Error processing function call:', fnError);
+            }
+          }
+        }
+      }
 
       // Calculate cost (GPT-4o-mini pricing)
       const GPT_INPUT_COST = 0.15 / 1000000;
@@ -459,9 +572,9 @@ class VoiceHandler {
         throw new Error('No ElevenLabs voice configured');
       }
 
-      // Get background sound setting from assistant config (default: none)
-      const backgroundSound = this.assistant.background_sound || 'none';
-      const backgroundVolume = this.assistant.background_volume || 0.15;
+      // Get background sound setting from assistant config (default: office for natural sound)
+      const backgroundSound = this.assistant.background_sound || 'office';
+      const backgroundVolume = this.assistant.background_volume || 0.20;
 
       // Get audio from ElevenLabs (non-streaming for backward compatibility)
       const audioStream = await streamElevenLabsAudio(text, voiceId, {
@@ -516,31 +629,55 @@ class VoiceHandler {
         }
       }
 
-      const systemPrompt = this.assistant.prompt && this.assistant.prompt.trim()
+      const basePrompt = this.assistant.prompt && this.assistant.prompt.trim()
         ? this.assistant.prompt
         : DEFAULT_SYSTEM_PROMPT;
 
+      // Add function calling instructions for contact capture
+      const systemPrompt = basePrompt + FUNCTION_INSTRUCTIONS + kbContext;
+
       const messages = [
-        { role: 'system', content: systemPrompt + kbContext },
+        { role: 'system', content: systemPrompt },
         ...history,
         { role: 'user', content: userMessage }
       ];
 
-      // Stream GPT response
+      // Stream GPT response with function calling
       const stream = await openai.chat.completions.create({
         model: this.assistant.model || 'gpt-4o-mini',
         messages,
         temperature: this.assistant.temperature || 0.7,
         max_tokens: this.assistant.max_tokens || 150,
+        tools: VOICE_FUNCTIONS.map(fn => ({ type: 'function', function: fn })),
+        tool_choice: 'auto',
         stream: true
       });
 
       let fullText = '';
       let sentenceBuffer = '';
       let tokensOut = 0;
+      let toolCallsData = {}; // Accumulate tool call data
 
       for await (const chunk of stream) {
-        const content = chunk.choices[0]?.delta?.content || '';
+        const delta = chunk.choices[0]?.delta;
+        const content = delta?.content || '';
+
+        // Handle tool calls in streaming
+        if (delta?.tool_calls) {
+          for (const toolCall of delta.tool_calls) {
+            const idx = toolCall.index;
+            if (!toolCallsData[idx]) {
+              toolCallsData[idx] = { name: '', arguments: '' };
+            }
+            if (toolCall.function?.name) {
+              toolCallsData[idx].name = toolCall.function.name;
+            }
+            if (toolCall.function?.arguments) {
+              toolCallsData[idx].arguments += toolCall.function.arguments;
+            }
+          }
+        }
+
         if (content) {
           fullText += content;
           sentenceBuffer += content;
@@ -561,6 +698,68 @@ class VoiceHandler {
       // Send any remaining text
       if (sentenceBuffer.trim().length > 0) {
         onSentence(sentenceBuffer.trim());
+      }
+
+      // Process any tool calls that were made
+      const toolCalls = Object.values(toolCallsData).filter(tc => tc.name);
+      if (toolCalls.length > 0) {
+        for (const toolCall of toolCalls) {
+          if (toolCall.name === 'capture_contact_request') {
+            try {
+              const args = JSON.parse(toolCall.arguments);
+              logger.info('Voice streaming: Capturing contact request', args);
+
+              // Store in database
+              await supabaseService.client.from('contact_requests').insert({
+                conversation_id: this.conversation?.id || null,
+                org_id: this.assistant.org_id,
+                assistant_id: this.assistant.id,
+                name: args.name || null,
+                email: args.email || null,
+                phone: args.phone || this.callerNumber || null,
+                address: args.address || null,
+                request_type: args.request_type,
+                request_details: args.request_details,
+                urgency: args.urgency || 'medium',
+                status: 'pending',
+                created_at: new Date().toISOString()
+              });
+
+              // Send email notification
+              let referenceId = null;
+              try {
+                const emailResult = await sendContactRequestNotification(args, {
+                  assistantName: this.assistant.friendly_name || 'Voice Assistant',
+                  conversationId: this.conversation?.id,
+                  channel: 'voice'
+                });
+                referenceId = emailResult?.referenceId;
+                logger.info('Voice streaming: Contact request email sent', { referenceId });
+              } catch (emailErr) {
+                logger.error('Voice streaming: Failed to send contact request email:', emailErr);
+              }
+
+              // If no text was generated, create confirmation
+              if (!fullText.trim()) {
+                const requestTypeLabel = args.request_type.replace('_', ' ');
+                fullText = `Thank you${args.name ? ` ${args.name}` : ''}! I've logged your ${requestTypeLabel}`;
+                if (args.address) {
+                  fullText += ` regarding ${args.address}`;
+                }
+                fullText += '.';
+                if (referenceId) {
+                  fullText += ` Your reference number is ${referenceId}.`;
+                }
+                fullText += ` Our team will follow up shortly. Is there anything else I can help you with?`;
+
+                // Send the confirmation as a sentence
+                onSentence(fullText);
+              }
+            } catch (fnError) {
+              logger.error('Voice streaming: Error processing function call:', fnError);
+            }
+          }
+        }
       }
 
       // Estimate tokens (rough)
@@ -597,8 +796,8 @@ class VoiceHandler {
       }
 
       // Get background sound setting from assistant config
-      const backgroundSound = this.assistant.background_sound || 'none';
-      const backgroundVolume = this.assistant.background_volume || 0.15;
+      const backgroundSound = this.assistant.background_sound || 'office';
+      const backgroundVolume = this.assistant.background_volume || 0.20;
 
       // Stream audio from ElevenLabs - chunks go directly to callback
       await streamElevenLabsTTS(text, voiceId, onAudioChunk, {
@@ -670,6 +869,20 @@ class VoiceHandler {
           content: transcription,
           latencyMs: transcriptionLatency
         }).catch(e => logger.warn('Failed to save user message:', e.message));
+      }
+
+      // FILLER PHRASE: Speak immediately to reduce perceived latency
+      // This plays while GPT is generating the real response
+      const fillerPhrase = FILLER_PHRASES[Math.floor(Math.random() * FILLER_PHRASES.length)];
+      logger.info('Playing filler phrase', { phrase: fillerPhrase });
+
+      // Start filler TTS - this plays while GPT generates the response
+      // We await it to ensure filler completes before main response starts
+      try {
+        await this.generateSpeechStreaming(fillerPhrase, onAudioChunk);
+        logger.info('Filler phrase complete');
+      } catch (err) {
+        logger.warn('Filler phrase TTS failed:', err.message);
       }
 
       // Step 2 + 3: PIPELINE GPT streaming → ElevenLabs streaming
