@@ -12,6 +12,50 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
+// Function definitions for OpenAI function calling
+const CHAT_FUNCTIONS = [
+  {
+    name: 'capture_contact_request',
+    description: 'Use this function when a user provides contact information, wants to lodge a complaint/request, or wants to be contacted. This captures their details for follow-up.',
+    parameters: {
+      type: 'object',
+      properties: {
+        name: {
+          type: 'string',
+          description: 'The name of the person (if provided)'
+        },
+        email: {
+          type: 'string',
+          description: 'The email address of the person (if provided)'
+        },
+        phone: {
+          type: 'string',
+          description: 'The phone number of the person (if provided)'
+        },
+        address: {
+          type: 'string',
+          description: 'The address related to the request (if provided, e.g., for barking dog complaints)'
+        },
+        request_type: {
+          type: 'string',
+          enum: ['complaint', 'enquiry', 'feedback', 'service_request', 'contact_request', 'other'],
+          description: 'The type of request'
+        },
+        request_details: {
+          type: 'string',
+          description: 'Full details of what the user is requesting or reporting'
+        },
+        urgency: {
+          type: 'string',
+          enum: ['low', 'medium', 'high'],
+          description: 'The urgency level of the request'
+        }
+      },
+      required: ['request_type', 'request_details']
+    }
+  }
+];
+
 // Default system prompt for chat - used when assistant has no custom prompt
 const DEFAULT_CHAT_PROMPT = `You are a helpful, friendly AI assistant.
 
@@ -29,17 +73,20 @@ RESPONSE STYLE:
 - Offer to help with related questions
 - Be concise but thorough
 
-EMAIL/CONTACT CAPTURE:
-If a user wants to receive information via email, lodge a request, or wants to be contacted:
-1. Ask for their name and email address
-2. Confirm the details by repeating them back
-3. Ask what specific information or help they need
-4. Confirm: "I've noted your request for [topic]. Someone from our team will follow up with you at [email] shortly."
+CAPTURING REQUESTS (IMPORTANT):
+When a user:
+- Wants to lodge a complaint (barking dog, noise, rubbish, etc.)
+- Wants to report an issue (with an address)
+- Wants to be contacted or receive follow-up
+- Provides contact details for any service
 
-When capturing contact details, clearly note:
-- Name: [their name]
-- Email: [their email]
-- Request: [what they need]
+You MUST use the capture_contact_request function to log their request. Include:
+- Their name and contact info (if provided)
+- The address related to the issue (if applicable)
+- The type of request (complaint, enquiry, service_request, etc.)
+- Full details of what they need
+
+After capturing, confirm what you've recorded and let them know someone will follow up.
 
 Always be helpful and guide users to the information they need.`;
 
@@ -167,18 +214,70 @@ router.post('/', async (req, res) => {
       ...history
     ];
 
-    // Call OpenAI
+    // Call OpenAI with function calling enabled
     const completion = await openai.chat.completions.create({
       model: assistant.model || 'gpt-4o-mini',
       messages,
       temperature: assistant.temperature || 0.5,
       max_tokens: assistant.max_tokens || 800,
-      // TODO: Add function calling for email tool
+      tools: CHAT_FUNCTIONS.map(fn => ({ type: 'function', function: fn })),
+      tool_choice: 'auto' // Let the model decide when to use functions
     });
 
-    const aiResponse = completion.choices[0].message.content;
+    let aiResponse = completion.choices[0].message.content || '';
     const tokensIn = completion.usage.prompt_tokens;
     const tokensOut = completion.usage.completion_tokens;
+
+    // Check if the model wants to call a function
+    const toolCalls = completion.choices[0].message.tool_calls;
+    if (toolCalls && toolCalls.length > 0) {
+      for (const toolCall of toolCalls) {
+        if (toolCall.function.name === 'capture_contact_request') {
+          try {
+            const args = JSON.parse(toolCall.function.arguments);
+
+            logger.info('Contact request captured', {
+              conversationId: conversation.id,
+              assistantId,
+              request: args
+            });
+
+            // Store the contact request in the database
+            await supabaseService.client
+              .from('contact_requests')
+              .insert({
+                conversation_id: conversation.id,
+                org_id: assistant.org_id,
+                assistant_id: assistantId,
+                name: args.name || null,
+                email: args.email || null,
+                phone: args.phone || null,
+                address: args.address || null,
+                request_type: args.request_type,
+                request_details: args.request_details,
+                urgency: args.urgency || 'medium',
+                status: 'pending',
+                created_at: new Date().toISOString()
+              });
+
+            logger.info('Contact request stored in database', {
+              conversationId: conversation.id,
+              requestType: args.request_type
+            });
+
+            // If no text response, generate a confirmation
+            if (!aiResponse) {
+              aiResponse = `I've captured your ${args.request_type.replace('_', ' ')}. ` +
+                (args.address ? `The address is ${args.address}. ` : '') +
+                `Our team will follow up on this shortly.`;
+            }
+          } catch (fnError) {
+            logger.error('Error processing function call:', fnError);
+            // Continue with any text response
+          }
+        }
+      }
+    }
 
     // Calculate cost (GPT-4o-mini pricing)
     const GPT_INPUT_COST = 0.15 / 1000000; // $0.15 per 1M tokens
