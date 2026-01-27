@@ -82,26 +82,48 @@ router.post('/', async (req, res) => {
 
     // Search knowledge base if enabled
     let kbContext = '';
+    logger.info('KB check for assistant', {
+      assistantId,
+      kb_enabled: assistant.kb_enabled,
+      org_id: assistant.org_id,
+      kb_match_count: assistant.kb_match_count
+    });
+
     if (assistant.kb_enabled) {
-      // Create embedding for the message
-      const embeddingResponse = await openai.embeddings.create({
-        model: 'text-embedding-3-small',
-        input: message
-      });
+      try {
+        // Create embedding for the message
+        const embeddingResponse = await openai.embeddings.create({
+          model: 'text-embedding-3-small',
+          input: message
+        });
 
-      const embedding = embeddingResponse.data[0].embedding;
+        const embedding = embeddingResponse.data[0].embedding;
+        logger.info('Created embedding for KB search', { embeddingLength: embedding.length });
 
-      // Search knowledge base
-      const kbResults = await supabaseService.searchKnowledgeBase(
-        assistant.org_id, // Use org_id as tenant_id
-        embedding,
-        assistant.kb_match_count || 5
-      );
+        // Search knowledge base
+        const kbResults = await supabaseService.searchKnowledgeBase(
+          assistant.org_id, // Use org_id as tenant_id
+          embedding,
+          assistant.kb_match_count || 5
+        );
 
-      if (kbResults.length > 0) {
-        kbContext = '\n\nRelevant information from knowledge base:\n' +
-          kbResults.map(r => `${r.heading ? r.heading + ':\n' : ''}${r.content}`).join('\n\n');
+        logger.info('KB search results', {
+          resultCount: kbResults?.length || 0,
+          hasResults: kbResults && kbResults.length > 0,
+          topResult: kbResults?.[0]?.content?.substring(0, 100)
+        });
+
+        if (kbResults && kbResults.length > 0) {
+          kbContext = '\n\nRelevant information from knowledge base:\n' +
+            kbResults.map(r => `${r.heading ? r.heading + ':\n' : ''}${r.content}`).join('\n\n');
+          logger.info('KB context added to prompt', { contextLength: kbContext.length });
+        }
+      } catch (kbError) {
+        logger.error('KB search failed:', kbError);
+        // Continue without KB context
       }
+    } else {
+      logger.info('KB not enabled for this assistant');
     }
 
     // Build messages for OpenAI
