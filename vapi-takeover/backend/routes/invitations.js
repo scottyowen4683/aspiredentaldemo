@@ -8,6 +8,78 @@ import { sendInvitationEmail } from '../services/email-service.js';
 const router = express.Router();
 
 /**
+ * GET /api/invitations/validate/:token
+ * Validate an invitation token (public endpoint for Auth page)
+ * Returns invitation details if valid
+ */
+router.get('/validate/:token', async (req, res) => {
+  try {
+    const { token } = req.params;
+
+    if (!token) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing invitation token'
+      });
+    }
+
+    // Find the invitation using service role (bypasses RLS)
+    const { data: invitation, error: inviteError } = await supabaseService.client
+      .from('invites')
+      .select('id, email, org_id, role, accepted, expires_at, organizations(name)')
+      .eq('token', token)
+      .single();
+
+    if (inviteError || !invitation) {
+      logger.warn('Invitation validation failed - not found:', { token: token.substring(0, 8) + '...' });
+      return res.status(404).json({
+        success: false,
+        message: 'Invitation not found or invalid'
+      });
+    }
+
+    // Check if already accepted
+    if (invitation.accepted) {
+      return res.status(400).json({
+        success: false,
+        message: 'This invitation has already been used',
+        accepted: true
+      });
+    }
+
+    // Check expiration
+    const expiresAt = new Date(invitation.expires_at);
+    if (expiresAt < new Date()) {
+      return res.status(400).json({
+        success: false,
+        message: 'This invitation has expired. Please contact your administrator for a new invitation.',
+        expired: true
+      });
+    }
+
+    logger.info('Invitation validated successfully', { email: invitation.email, orgId: invitation.org_id });
+
+    return res.json({
+      success: true,
+      invitation: {
+        email: invitation.email,
+        role: invitation.role,
+        organizationId: invitation.org_id,
+        organizationName: invitation.organizations?.name,
+        expiresAt: invitation.expires_at
+      }
+    });
+
+  } catch (error) {
+    logger.error('Validate invitation error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+});
+
+/**
  * POST /api/invitations/send
  * Send invitation to a user for an organization
  *
@@ -198,11 +270,11 @@ router.post('/send', async (req, res) => {
  * POST /api/invitations/process
  * Process invitation when user signs up
  *
- * Body: { token, userId }
+ * Body: { token, userId, email? }
  */
 router.post('/process', async (req, res) => {
   try {
-    const { token, userId } = req.body;
+    const { token, userId, email: providedEmail } = req.body;
 
     if (!token || !userId) {
       return res.status(400).json({
@@ -251,8 +323,22 @@ router.post('/process', async (req, res) => {
     }
 
     const authUser = authData?.user;
-    const userEmail = authUser?.email || invitation.email;
+    const signupEmail = authUser?.email || providedEmail;
     const userFullName = authUser?.user_metadata?.full_name || '';
+
+    // Validate that the signup email matches the invitation email
+    if (signupEmail && invitation.email.toLowerCase() !== signupEmail.toLowerCase()) {
+      logger.warn('Email mismatch on invitation:', {
+        inviteEmail: invitation.email,
+        signupEmail: signupEmail
+      });
+      return res.status(400).json({
+        success: false,
+        message: `This invitation was sent to ${invitation.email}. Please use that email address to sign up.`
+      });
+    }
+
+    const userEmail = invitation.email; // Always use the invitation email
 
     // Check if user already exists in users table
     const { data: existingUser } = await supabaseService.client

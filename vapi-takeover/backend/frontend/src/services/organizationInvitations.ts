@@ -146,9 +146,10 @@ export async function inviteUserToOrganization(data: InviteUserToOrganizationDat
  * Calls the backend API to assign user to organization
  * @param token - Invitation token from URL
  * @param userId - New user's auth ID (from Supabase Auth)
+ * @param email - Optional email to validate matches invitation
  * @returns Promise with processing result
  */
-export async function processInvitation(token: string, userId: string): Promise<InvitationResult> {
+export async function processInvitation(token: string, userId: string, email?: string): Promise<InvitationResult> {
   try {
     const response = await fetch(`${getApiBaseUrl()}/api/invitations/process`, {
       method: 'POST',
@@ -157,7 +158,8 @@ export async function processInvitation(token: string, userId: string): Promise<
       },
       body: JSON.stringify({
         token,
-        userId
+        userId,
+        email
       })
     });
 
