@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Plus, Search, Settings, Users, AlertCircle, Bot, ArrowRightCircle, FileText, Building2, UserCog, Mail, DollarSign, Flag, Send } from "lucide-react";
+import { Plus, Search, Settings, Users, AlertCircle, Bot, ArrowRightCircle, FileText, Building2, UserCog, Mail, DollarSign, Flag, Send, Trash2 } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -26,7 +26,7 @@ import {
 import { AddOrganizationModal } from "@/components/dashboard/AddOrganizationModal";
 import OrganizationRubricModal from "@/components/dashboard/OrganizationRubricModal";
 import { SendMonthlyReportModal } from "@/components/dashboard/SendMonthlyReportModal";
-import { getAllOrganizations, getOrganizationStats, Organization } from "@/services/organizationService";
+import { getAllOrganizations, getOrganizationStats, Organization, deleteOrganization } from "@/services/organizationService";
 import { updateOrganizationRubric } from "@/services/rubricService";
 import { useUser } from "@/context/UserContext";
 import { supabase } from "@/supabaseClient";
@@ -364,6 +364,28 @@ export default function Organizations() {
                                 <DropdownMenuItem>
                                   <DollarSign className="mr-2 h-4 w-4" />
                                   Manage Usage and Cost
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  className="text-destructive focus:text-destructive"
+                                  onClick={async () => {
+                                    if (!confirm(`Delete "${org.name}"? This will permanently delete all assistants, users, conversations, and data associated with this organization. This cannot be undone.`)) return;
+                                    try {
+                                      const res = await deleteOrganization(org.id);
+                                      if (res.success) {
+                                        refetchOrganizations();
+                                        toast({ title: "Deleted", description: `Organization "${org.name}" has been deleted` });
+                                      } else {
+                                        console.error("Delete organization error:", res.error);
+                                        toast({ title: "Error", description: res.error || "Failed to delete organization", variant: "destructive" });
+                                      }
+                                    } catch (e: any) {
+                                      console.error("Delete organization exception:", e);
+                                      toast({ title: "Error", description: e?.message || "Failed to delete organization", variant: "destructive" });
+                                    }
+                                  }}
+                                >
+                                  <Trash2 className="mr-2 h-4 w-4" />
+                                  Delete Organization
                                 </DropdownMenuItem>
                               </>
                             )}

@@ -415,6 +415,43 @@ export async function updateOrganization(id: string, updates: Partial<{
 }
 
 /**
+ * Delete an organization and all related data
+ * Note: CASCADE delete will automatically remove related assistants, users, conversations, etc.
+ */
+export async function deleteOrganization(id: string): Promise<{
+  success: boolean;
+  data?: Organization;
+  error?: string;
+}> {
+  try {
+    // Get org name before deleting for confirmation
+    const { data: orgData } = await supabase
+      .from('organizations')
+      .select('name')
+      .eq('id', id)
+      .single();
+
+    const { data, error } = await supabase
+      .from('organizations')
+      .delete()
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error deleting organization:', error);
+      return { success: false, error: error.message };
+    }
+
+    console.log(`Organization "${orgData?.name}" (${id}) deleted successfully`);
+    return { success: true, data };
+  } catch (err) {
+    console.error('Unexpected error deleting organization:', err);
+    return { success: false, error: err instanceof Error ? err.message : 'Unknown error' };
+  }
+}
+
+/**
  * Update organization settings (stored in JSONB settings column)
  */
 export async function updateOrganizationApiSettings(id: string, apiSettings: Record<string, any>): Promise<{

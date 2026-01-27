@@ -403,17 +403,20 @@ export default function Assistants() {
                       size="sm"
                       className="text-destructive hover:text-destructive"
                       onClick={async () => {
-                        if (!confirm("Delete this assistant? This cannot be undone.")) return;
+                        if (!confirm("Delete this assistant? This cannot be undone. All conversations and data for this assistant will be permanently deleted.")) return;
                         try {
-                          const res = await deleteAssistant(assistant.id);
+                          const res = await deleteAssistant(assistant.id, user?.id);
                           if (res.success) {
                             setAssistants((prev) => prev.filter((a) => a.id !== assistant.id));
-                            toast({ title: "Deleted", description: "Assistant deleted" });
+                            toast({ title: "Deleted", description: "Assistant deleted successfully" });
                           } else {
-                            toast({ title: "Error", description: "Failed to delete", variant: "destructive" });
+                            const errorMsg = res.error?.message || res.error?.toString() || "Failed to delete assistant";
+                            console.error("Delete assistant error:", res.error);
+                            toast({ title: "Error", description: errorMsg, variant: "destructive" });
                           }
-                        } catch (e) {
-                          toast({ title: "Error", description: "Failed to delete", variant: "destructive" });
+                        } catch (e: any) {
+                          console.error("Delete assistant exception:", e);
+                          toast({ title: "Error", description: e?.message || "Failed to delete assistant", variant: "destructive" });
                         }
                       }}
                     >
