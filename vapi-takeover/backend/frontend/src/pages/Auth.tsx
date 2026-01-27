@@ -353,6 +353,17 @@ export default function Auth() {
       return;
     }
 
+    // Ensure email is set from invitation
+    if (!signupData.email) {
+      toast({
+        title: "Missing email",
+        description: "Could not retrieve email from invitation. Please refresh the page and try again.",
+        variant: "destructive",
+      });
+      setIsLoading(false);
+      return;
+    }
+
     try {
 
       await signupValidationSchema.validate(signupData, { abortEarly: false });
@@ -619,6 +630,20 @@ export default function Auth() {
                 {/* SIGNUP FORM - Only for invite flow */}
                 <TabsContent value="signup">
                   <form onSubmit={handleSignup} className="space-y-4">
+                    {/* Show email from invitation (read-only) */}
+                    <div className="space-y-2">
+                      <Label htmlFor="signup-email">Email</Label>
+                      <Input
+                        id="signup-email"
+                        type="email"
+                        value={signupData.email}
+                        disabled
+                        className="bg-muted"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        This email is from your invitation and cannot be changed.
+                      </p>
+                    </div>
                     <div className="space-y-2">
                       <Label htmlFor="signup-name">Full Name</Label>
                       <Input
@@ -640,17 +665,6 @@ export default function Auth() {
                         <p className="text-red-500 text-sm mt-1">{signupErrors.fullName}</p>
                       )}
                     </div>
-                    {/* <div className="space-y-2">
-                      <Label htmlFor="signup-email">Email</Label>
-                      <Input
-                        id="signup-email"
-                        type="email"
-                        placeholder="you@example.com"
-                        value={signupData.email}
-                        onChange={(e) => setSignupData({ ...signupData, email: e.target.value })}
-                        required
-                      />
-                    </div> */}
                     {/* <div className="space-y-2">
                       <Label htmlFor="signup-password">Password</Label>
                       <Input
@@ -703,11 +717,16 @@ export default function Auth() {
 
 
 
-                    <Button type="submit" className="w-full" disabled={isLoading}>
+                    <Button type="submit" className="w-full" disabled={isLoading || !signupData.email}>
                       {isLoading ? (
                         <>
                           <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                           Creating account...
+                        </>
+                      ) : !signupData.email ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Loading invitation...
                         </>
                       ) : (
                         "Create Account & Join Organization"
