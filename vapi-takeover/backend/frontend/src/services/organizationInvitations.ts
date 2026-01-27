@@ -3,12 +3,11 @@ import { supabase } from "@/supabaseClient";
 export interface CreateOrganizationData {
   organizationName: string;
   userEmail: string;
-  // Service Plan Information
-  servicePlanName: string;
-  monthlyServiceFee: number;
-  baselineHumanCostPerCall: number;
-  coverageHours: "12hr" | "24hr";
-  timeZone: string;
+  // Service Plan Information (optional)
+  servicePlanName?: string;
+  monthlyServiceFee?: number;
+  baselineHumanCostPerCall?: number;
+  timeZone?: string;
 }
 
 export interface InviteUserToOrganizationData {
@@ -40,17 +39,20 @@ const getApiBaseUrl = () => {
 export async function createOrganizationAndInvite(data: CreateOrganizationData): Promise<InvitationResult> {
   try {
     // First create the organization
+    const orgInsert: Record<string, unknown> = {
+      name: data.organizationName,
+      created_at: new Date().toISOString()
+    };
+
+    // Add optional fields if provided
+    if (data.servicePlanName) orgInsert.plan_name = data.servicePlanName;
+    if (data.monthlyServiceFee) orgInsert.flat_rate_fee = data.monthlyServiceFee;
+    if (data.baselineHumanCostPerCall) orgInsert.price_per_interaction = data.baselineHumanCostPerCall;
+    if (data.timeZone) orgInsert.timezone = data.timeZone;
+
     const { data: orgData, error: orgError } = await supabase
       .from('organizations')
-      .insert({
-        name: data.organizationName,
-        plan_name: data.servicePlanName,
-        flat_rate_fee: data.monthlyServiceFee,
-        price_per_interaction: data.baselineHumanCostPerCall,
-        timezone: data.timeZone,
-        coverage_hours: data.coverageHours,
-        created_at: new Date().toISOString()
-      })
+      .insert(orgInsert)
       .select()
       .single();
 
