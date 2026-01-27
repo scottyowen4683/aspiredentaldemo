@@ -389,56 +389,37 @@ class SupabaseService {
       similarityThreshold
     });
 
-    // Skip RPC - it has outdated schema (expects 'heading' column that doesn't exist)
-    // Go directly to fallback query which we control
-    logger.info('Using direct KB query (bypassing RPC)');
+    // Use the working RPC function with p_ prefix parameters
+    // This returns: id, tenant_id, source, section, content, priority, similarity
+    // Fetch more results so we can filter by threshold client-side
+    const { data, error } = await supabase.rpc('match_knowledge_chunks', {
+      p_tenant_id: tenantIdStr,
+      p_query_embedding: queryEmbedding,
+      p_match_count: matchCount * 2 // Fetch extra to filter by threshold
+    });
 
-    // Direct query - select only columns that exist in the actual table
-    // Note: 'heading' is stored inside metadata.heading, not as a column
-    const fallbackResult = await supabase
-      .from('knowledge_chunks')
-      .select('id, content, source, section, metadata, embedding')
-      .eq('tenant_id', tenantIdStr)
-      .eq('active', true)
-      .limit(matchCount * 3); // Get more and filter by similarity client-side
-
-    if (fallbackResult.error) {
-      logger.error('KB query failed:', fallbackResult.error);
+    if (error) {
+      logger.error('RPC search failed:', error);
       return [];
     }
 
-    // Simple cosine similarity calculation
-    const cosineSimilarity = (a, b) => {
-      if (!a || !b || a.length !== b.length) return 0;
-      let dotProduct = 0;
-      let normA = 0;
-      let normB = 0;
-      for (let i = 0; i < a.length; i++) {
-        dotProduct += a[i] * b[i];
-        normA += a[i] * a[i];
-        normB += b[i] * b[i];
-      }
-      return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
-    };
-
-    // Score and sort results
-    const scored = (fallbackResult.data || [])
+    // Filter by similarity threshold client-side (RPC doesn't have threshold param)
+    // Also add heading from section for compatibility with formatKBContext
+    const results = (data || [])
+      .filter(chunk => chunk.similarity >= similarityThreshold)
+      .slice(0, matchCount)
       .map(chunk => ({
         ...chunk,
-        // Extract heading from metadata for compatibility
-        heading: chunk.metadata?.heading || chunk.section || null,
-        similarity: chunk.embedding ? cosineSimilarity(queryEmbedding, chunk.embedding) : 0
-      }))
-      .filter(chunk => chunk.similarity >= similarityThreshold)
-      .sort((a, b) => b.similarity - a.similarity)
-      .slice(0, matchCount);
+        heading: chunk.section // Use section as heading for display
+      }));
 
     logger.info('KB search results:', {
-      count: scored.length,
-      topSimilarity: scored[0]?.similarity,
-      totalFetched: fallbackResult.data?.length || 0
+      count: results.length,
+      topSimilarity: results[0]?.similarity,
+      totalFromRPC: data?.length || 0
     });
-    return scored;
+
+    return results;
   }
 
   // ===========================================================================
