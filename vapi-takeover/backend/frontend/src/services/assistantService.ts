@@ -126,44 +126,61 @@ export async function createAssistant(input: CreateAssistantInput, userId?: stri
       kb_path = publicUrlData.publicUrl;
     }
 
-    const providerRaw = input.provider ?? 'aspire';
-
-    // Normalize provider to lowercase to match Postgres enum values (enums are case-sensitive)
-    const normalizedProvider = typeof providerRaw === "string" ? providerRaw.trim().toLowerCase() : providerRaw;
-
+    // Build insert object with only fields that exist in the database schema
+    // Core fields from initial schema (001/002)
     const insertObj: Record<string, unknown> = {
-      provider: normalizedProvider,
-      assistant_key: input.apiKey ?? null,
       org_id: orgId,
       friendly_name: friendlyName,
-      prompt: input.prompt ?? null,
-      kb_path: kb_path,
-      rubric: input.defaultRubric ?? null,
-      transcript_source: input.transcriptSource ?? null,
-      auto_score: autoScore,
-      active: true, // Ensure assistant is active for voice routing
-      // Support additional fields from AddAssistantModal
       bot_type: botType,
+      active: true, // Ensure assistant is active for voice routing
       phone_number: phoneNumber,
       elevenlabs_voice_id: input.elevenlabs_voice_id ?? null,
+      prompt: input.prompt ?? null,
       model: input.model ?? null,
       temperature: input.temperature ?? null,
       max_tokens: input.max_tokens ?? null,
-      first_message: input.first_message ?? null,
       kb_enabled: input.kb_enabled ?? false,
-      background_sound: input.background_sound ?? null,
-      background_volume: input.background_volume ?? null,
-      // Feature settings
-      use_default_prompt: input.use_default_prompt ?? true,
-      call_transfer_enabled: input.call_transfer_enabled ?? false,
-      call_transfer_number: input.call_transfer_number ?? null,
-      sms_enabled: input.sms_enabled ?? false,
-      sms_notification_number: input.sms_notification_number ?? null,
-      email_notifications_enabled: input.email_notifications_enabled ?? true,
-      email_notification_address: input.email_notification_address ?? null,
-      // Data retention policy (default 90 days)
-      data_retention_days: input.data_retention_days ?? 90,
+      auto_score: autoScore,
     };
+
+    // Fields from migration 006 (background sound, first message)
+    if (input.background_sound !== undefined) {
+      insertObj.background_sound = input.background_sound ?? null;
+    }
+    if (input.background_volume !== undefined) {
+      insertObj.background_volume = input.background_volume ?? null;
+    }
+    if (input.first_message !== undefined) {
+      insertObj.first_message = input.first_message ?? null;
+    }
+
+    // Fields from migration 008 (call transfer, SMS, email features)
+    if (input.use_default_prompt !== undefined) {
+      insertObj.use_default_prompt = input.use_default_prompt ?? true;
+    }
+    if (input.call_transfer_enabled !== undefined) {
+      insertObj.call_transfer_enabled = input.call_transfer_enabled ?? false;
+    }
+    if (input.call_transfer_number !== undefined) {
+      insertObj.call_transfer_number = input.call_transfer_number ?? null;
+    }
+    if (input.sms_enabled !== undefined) {
+      insertObj.sms_enabled = input.sms_enabled ?? false;
+    }
+    if (input.sms_notification_number !== undefined) {
+      insertObj.sms_notification_number = input.sms_notification_number ?? null;
+    }
+    if (input.email_notifications_enabled !== undefined) {
+      insertObj.email_notifications_enabled = input.email_notifications_enabled ?? true;
+    }
+    if (input.email_notification_address !== undefined) {
+      insertObj.email_notification_address = input.email_notification_address ?? null;
+    }
+
+    // Fields from migration 009 (data retention)
+    if (input.data_retention_days !== undefined) {
+      insertObj.data_retention_days = input.data_retention_days ?? 90;
+    }
 
     const { data, error } = await supabase.from("assistants").insert([insertObj]).select().single();
 
@@ -180,10 +197,9 @@ export async function createAssistant(input: CreateAssistantInput, userId?: stri
         action: AUDIT_ACTIONS.ASSISTANT_CREATED,
         details: {
           assistant_name: friendlyName || 'Unnamed Assistant',
-          provider: normalizedProvider,
+          bot_type: botType,
           kb_type: input.kbType,
           has_kb: !!kb_path,
-          has_custom_rubric: !!input.defaultRubric,
           auto_score_enabled: autoScore,
           transcript_source: input.transcriptSource,
           action_timestamp: new Date().toISOString()
@@ -286,7 +302,7 @@ export async function updateAssistant(id: string, input: CreateAssistantInput, u
     // Get original assistant data for audit comparison
     const { data: originalAssistant } = await supabase
       .from("assistants")
-      .select("friendly_name, provider, org_id, kb_path, auto_score, rubric, phone_number, bot_type")
+      .select("friendly_name, org_id, auto_score, phone_number, bot_type")
       .eq("id", id)
       .single();
 
@@ -355,42 +371,62 @@ export async function updateAssistant(id: string, input: CreateAssistantInput, u
       kb_path = publicUrlData.publicUrl;
     }
 
-    const providerRaw = input.provider ?? 'aspire';
-    const normalizedProvider = typeof providerRaw === "string" ? providerRaw.trim().toLowerCase() : providerRaw;
-
+    // Build update object with only fields that exist in the database schema
+    // Core fields from initial schema (001/002)
     const updateObj: Record<string, unknown> = {
-      provider: normalizedProvider,
-      assistant_key: input.apiKey ?? null,
       org_id: orgId,
       friendly_name: friendlyName,
-      prompt: input.prompt ?? null,
-      kb_path: kb_path,
-      rubric: input.defaultRubric ?? null,
-      transcript_source: input.transcriptSource ?? null,
-      auto_score: autoScore,
-      active: true, // Ensure assistant is active for voice routing
-      // Support additional fields from AddAssistantModal
       bot_type: botType,
+      active: true, // Ensure assistant is active for voice routing
       phone_number: phoneNumber,
       elevenlabs_voice_id: input.elevenlabs_voice_id ?? null,
+      prompt: input.prompt ?? null,
       model: input.model ?? null,
       temperature: input.temperature ?? null,
       max_tokens: input.max_tokens ?? null,
-      first_message: input.first_message ?? null,
       kb_enabled: input.kb_enabled ?? false,
-      background_sound: input.background_sound ?? null,
-      background_volume: input.background_volume ?? null,
-      // Feature toggles
-      use_default_prompt: input.use_default_prompt ?? true,
-      call_transfer_enabled: input.call_transfer_enabled ?? false,
-      call_transfer_number: input.call_transfer_number ?? null,
-      sms_enabled: input.sms_enabled ?? false,
-      sms_notification_number: input.sms_notification_number ?? null,
-      email_notifications_enabled: input.email_notifications_enabled ?? true,
-      email_notification_address: input.email_notification_address ?? null,
-      // Data retention policy
-      data_retention_days: input.data_retention_days ?? 90,
+      auto_score: autoScore,
     };
+
+    // Fields from migration 006 (background sound, first message)
+    if (input.background_sound !== undefined) {
+      updateObj.background_sound = input.background_sound ?? null;
+    }
+    if (input.background_volume !== undefined) {
+      updateObj.background_volume = input.background_volume ?? null;
+    }
+    if (input.first_message !== undefined) {
+      updateObj.first_message = input.first_message ?? null;
+    }
+
+    // Fields from migration 008 (call transfer, SMS, email features)
+    // These are optional - only include if explicitly set
+    if (input.use_default_prompt !== undefined) {
+      updateObj.use_default_prompt = input.use_default_prompt ?? true;
+    }
+    if (input.call_transfer_enabled !== undefined) {
+      updateObj.call_transfer_enabled = input.call_transfer_enabled ?? false;
+    }
+    if (input.call_transfer_number !== undefined) {
+      updateObj.call_transfer_number = input.call_transfer_number ?? null;
+    }
+    if (input.sms_enabled !== undefined) {
+      updateObj.sms_enabled = input.sms_enabled ?? false;
+    }
+    if (input.sms_notification_number !== undefined) {
+      updateObj.sms_notification_number = input.sms_notification_number ?? null;
+    }
+    if (input.email_notifications_enabled !== undefined) {
+      updateObj.email_notifications_enabled = input.email_notifications_enabled ?? true;
+    }
+    if (input.email_notification_address !== undefined) {
+      updateObj.email_notification_address = input.email_notification_address ?? null;
+    }
+
+    // Fields from migration 009 (data retention)
+    if (input.data_retention_days !== undefined) {
+      updateObj.data_retention_days = input.data_retention_days ?? 90;
+    }
 
     const { data, error } = await supabase.from("assistants").update(updateObj).eq("id", id).select().single();
     if (error) return { success: false, error };
@@ -402,14 +438,11 @@ export async function updateAssistant(id: string, input: CreateAssistantInput, u
       if (originalAssistant.friendly_name !== friendlyName) {
         changes.name = { from: originalAssistant.friendly_name, to: friendlyName };
       }
-      if (originalAssistant.provider !== normalizedProvider) {
-        changes.provider = { from: originalAssistant.provider, to: normalizedProvider };
+      if (originalAssistant.bot_type !== botType) {
+        changes.bot_type = { from: originalAssistant.bot_type, to: botType };
       }
       if (originalAssistant.auto_score !== autoScore) {
         changes.auto_score = { from: originalAssistant.auto_score, to: autoScore };
-      }
-      if (!!originalAssistant.kb_path !== !!kb_path) {
-        changes.kb_updated = { from: !!originalAssistant.kb_path, to: !!kb_path };
       }
 
       await logAuditEvent({
@@ -422,7 +455,7 @@ export async function updateAssistant(id: string, input: CreateAssistantInput, u
           changes,
           kb_type: input.kbType,
           has_kb: !!kb_path,
-          provider: normalizedProvider,
+          bot_type: botType,
           action_timestamp: new Date().toISOString()
         }
       });
