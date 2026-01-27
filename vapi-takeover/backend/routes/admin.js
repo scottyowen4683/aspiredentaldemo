@@ -453,15 +453,20 @@ router.post('/knowledge-base/text', async (req, res) => {
 // GET /api/admin/knowledge-base - List knowledge chunks (by org or assistant)
 router.get('/knowledge-base', async (req, res) => {
   try {
-    const { org_id, assistant_id } = req.query;
+    const { org_id, assistant_id, tenant_id } = req.query;
 
+    // Use correct column names matching kb-processor.js
     let query = supabaseService.client
       .from('knowledge_chunks')
-      .select('id, source, chunk_text, created_at')
-      .order('created_at', { ascending: false });
+      .select('id, source, content, tenant_id, org_id, assistant_id, created_at')
+      .order('created_at', { ascending: false })
+      .limit(100);
 
-    if (org_id) {
-      query = query.eq('org_id', org_id);
+    // Filter by tenant_id (primary), org_id, or assistant_id
+    if (tenant_id) {
+      query = query.eq('tenant_id', tenant_id);
+    } else if (org_id) {
+      query = query.eq('tenant_id', org_id); // tenant_id = org_id.toString()
     }
 
     if (assistant_id) {
@@ -470,18 +475,29 @@ router.get('/knowledge-base', async (req, res) => {
 
     const { data, error } = await query;
 
-    if (error) throw error;
+    if (error) {
+      logger.error('KB query error:', error);
+      throw error;
+    }
+
+    logger.info('KB list query result:', {
+      org_id,
+      assistant_id,
+      tenant_id,
+      chunksFound: data?.length || 0
+    });
 
     res.json({
       success: true,
-      chunks: data
+      chunks: data || [],
+      count: data?.length || 0
     });
 
   } catch (error) {
     logger.error('Knowledge base list error:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to fetch knowledge base'
+      error: error.message || 'Failed to fetch knowledge base'
     });
   }
 });
