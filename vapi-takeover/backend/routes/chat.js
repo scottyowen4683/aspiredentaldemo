@@ -170,10 +170,30 @@ router.post('/', async (req, res) => {
 
     if (assistant.kb_enabled) {
       try {
-        // Create embedding for the message
+        // Build context-enriched query for KB search
+        // Include recent conversation context so "Yes" or "What about that?" works
+        let kbQueryText = message;
+        if (history && history.length > 0) {
+          // Get last 2-3 exchanges for context (up to 500 chars)
+          const recentContext = history
+            .slice(-4) // Last 4 messages (2 exchanges)
+            .map(m => `${m.role}: ${m.content}`)
+            .join(' ')
+            .slice(-500);
+
+          // Combine recent context with current message for better KB matching
+          kbQueryText = `${recentContext} ${message}`.trim();
+
+          logger.info('KB query enriched with conversation context', {
+            originalQuery: message.substring(0, 50),
+            enrichedQueryLength: kbQueryText.length
+          });
+        }
+
+        // Create embedding with context-enriched query
         const embeddingResponse = await openai.embeddings.create({
           model: 'text-embedding-3-small',
-          input: message
+          input: kbQueryText
         });
 
         const embedding = embeddingResponse.data[0].embedding;
@@ -197,6 +217,16 @@ router.post('/', async (req, res) => {
           kbContext = '\n\nRelevant information from knowledge base:\n' +
             kbResults.map(r => `${r.heading ? r.heading + ':\n' : ''}${r.content}`).join('\n\n');
           logger.info('KB context added to prompt', { contextLength: kbContext.length });
+        } else {
+          // No KB results - tell GPT explicitly
+          kbContext = `
+
+---
+IMPORTANT: No relevant information found in knowledge base for this query.
+You should say "I don't have that specific information in my records" and offer to connect them with someone who can assist.
+DO NOT make up or guess information like names, contact details, or specific facts.
+---`;
+          logger.info('No KB results found for query', { query: message.substring(0, 50) });
         }
       } catch (kbError) {
         logger.error('KB search failed:', kbError);

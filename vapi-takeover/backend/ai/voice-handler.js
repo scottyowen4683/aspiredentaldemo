@@ -784,36 +784,52 @@ class VoiceHandler {
 
   async generateResponse(userMessage) {
     try {
-      // Run embedding and history fetch in parallel for speed
-      const [embeddingResult, history] = await Promise.all([
-        this.assistant.kb_enabled
-          ? openai.embeddings.create({
-              model: 'text-embedding-3-small',
-              input: userMessage
-            })
-          : Promise.resolve(null),
-        supabaseService.getConversationHistory(this.sessionId)
-      ]);
+      // Get conversation history first - we need it for context-aware KB search
+      const history = await supabaseService.getConversationHistory(this.sessionId);
+
+      // Build context-enriched query for KB search
+      // Include recent conversation context so "Yes" or "What about Griffin?" works
+      let kbQueryText = userMessage;
+      if (history && history.length > 0) {
+        // Get last 2-3 exchanges for context (up to 500 chars)
+        const recentContext = history
+          .slice(-4) // Last 4 messages (2 exchanges)
+          .map(m => `${m.role}: ${m.content}`)
+          .join(' ')
+          .slice(-500);
+
+        // Combine recent context with current message for better KB matching
+        kbQueryText = `${recentContext} ${userMessage}`.trim();
+
+        logger.info('KB query enriched with conversation context', {
+          originalQuery: userMessage.substring(0, 50),
+          enrichedQueryLength: kbQueryText.length
+        });
+      }
+
+      // Create embedding with context-enriched query
+      const embeddingResult = this.assistant.kb_enabled
+        ? await openai.embeddings.create({
+            model: 'text-embedding-3-small',
+            input: kbQueryText
+          })
+        : null;
 
       // Search knowledge base if enabled (RAG)
-      // For VOICE: use fewer matches and filter low-relevance to reduce GPT latency
       let kbContext = '';
       if (this.assistant.kb_enabled && embeddingResult) {
         try {
           const embedding = embeddingResult.data[0].embedding;
 
           // Search knowledge base - fetch 5 for voice with low threshold for better recall
-          // Lower threshold (0.2) captures more semantic matches, then filter client-side
           const kbResults = await supabaseService.searchKnowledgeBase(
             this.assistant.org_id,
             embedding,
             5, // Fetch more results
-            0.2 // Low similarity threshold - filter later if needed
+            0.2 // Low similarity threshold
           );
 
           if (kbResults && kbResults.length > 0) {
-            // Use all results that passed the 0.2 threshold in searchKnowledgeBase
-            // Don't double-filter - even 0.2 similarity can contain relevant info
             kbContext = formatKBContext(kbResults);
 
             logger.info('Knowledge base context added', {
@@ -822,7 +838,7 @@ class VoiceHandler {
               topSimilarity: kbResults[0]?.similarity
             });
           } else {
-            // No KB results at all - tell GPT explicitly
+            // No KB results - tell GPT explicitly
             kbContext = `
 
 ---
@@ -1078,16 +1094,36 @@ DO NOT make up or guess information like names, contact details, or specific fac
    */
   async generateResponseStreaming(userMessage, onSentence) {
     try {
-      // Run embedding and history fetch in parallel for speed
-      const [embeddingResult, history] = await Promise.all([
-        this.assistant.kb_enabled
-          ? openai.embeddings.create({
-              model: 'text-embedding-3-small',
-              input: userMessage
-            })
-          : Promise.resolve(null),
-        supabaseService.getConversationHistory(this.sessionId)
-      ]);
+      // Get conversation history first - we need it for context-aware KB search
+      const history = await supabaseService.getConversationHistory(this.sessionId);
+
+      // Build context-enriched query for KB search
+      // Include recent conversation context so "Yes" or "What about Griffin?" works
+      let kbQueryText = userMessage;
+      if (history && history.length > 0) {
+        // Get last 2-3 exchanges for context (up to 500 chars)
+        const recentContext = history
+          .slice(-4) // Last 4 messages (2 exchanges)
+          .map(m => `${m.role}: ${m.content}`)
+          .join(' ')
+          .slice(-500);
+
+        // Combine recent context with current message for better KB matching
+        kbQueryText = `${recentContext} ${userMessage}`.trim();
+
+        logger.info('KB query enriched with conversation context (streaming)', {
+          originalQuery: userMessage.substring(0, 50),
+          enrichedQueryLength: kbQueryText.length
+        });
+      }
+
+      // Create embedding with context-enriched query
+      const embeddingResult = this.assistant.kb_enabled
+        ? await openai.embeddings.create({
+            model: 'text-embedding-3-small',
+            input: kbQueryText
+          })
+        : null;
 
       // Search knowledge base if enabled (RAG)
       let kbContext = '';
@@ -1102,6 +1138,16 @@ DO NOT make up or guess information like names, contact details, or specific fac
           );
           if (kbResults && kbResults.length > 0) {
             kbContext = formatKBContext(kbResults);
+          } else {
+            // No KB results - tell GPT explicitly
+            kbContext = `
+
+---
+IMPORTANT: No relevant information found in knowledge base for this query.
+You MUST say "I don't have that specific information" and offer to connect them with someone who can help.
+DO NOT make up or guess information like names, contact details, or specific facts.
+---`;
+            logger.info('No KB results found for query (streaming)', { query: userMessage.substring(0, 50) });
           }
         } catch (kbError) {
           logger.error('Knowledge base search failed:', kbError);
