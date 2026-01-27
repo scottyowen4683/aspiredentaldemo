@@ -1683,12 +1683,12 @@ DO NOT make up or guess information like names, contact details, or specific fac
       // Get organization for rubric
       const organization = await supabaseService.client
         .from('organizations')
-        .select('name, default_rubric')
+        .select('name, settings')
         .eq('id', this.assistant.org_id)
         .single();
 
-      // Use assistant-specific rubric, or fallback to org default
-      const rubric = this.assistant.rubric || organization.data?.default_rubric || null;
+      // Use assistant-specific rubric, or fallback to org default (stored in settings.default_rubric)
+      const rubric = this.assistant.rubric || organization.data?.settings?.default_rubric || null;
 
       logger.info('Scoring voice conversation:', {
         conversationId: this.conversation.id,

@@ -443,12 +443,12 @@ async function scoreChatConversation(sessionId, conversationId, assistantId) {
     // Get organization for rubric
     const organization = await supabaseService.client
       .from('organizations')
-      .select('name, default_rubric')
+      .select('name, settings')
       .eq('id', assistant.org_id)
       .single();
 
-    // Use assistant-specific rubric, or fallback to org default
-    const rubric = assistant.rubric || organization.data?.default_rubric || null;
+    // Use assistant-specific rubric, or fallback to org default (stored in settings.default_rubric)
+    const rubric = assistant.rubric || organization.data?.settings?.default_rubric || null;
 
     logger.info('Scoring chat conversation:', {
       conversationId,

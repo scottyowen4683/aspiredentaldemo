@@ -426,25 +426,24 @@ export default function Organizations() {
 
           
           let parsedRubric = null;
-          
-          if (orgData.default_rubric) {
+
+          // Rubric is stored in settings.default_rubric (JSONB field)
+          const rubricFromSettings = orgData.settings?.default_rubric;
+
+          if (rubricFromSettings) {
             // If it's already an object, use it directly
-            if (typeof orgData.default_rubric === 'object') {
-              parsedRubric = orgData.default_rubric;
-
-            } 
+            if (typeof rubricFromSettings === 'object') {
+              parsedRubric = rubricFromSettings;
+            }
             // If it's a string, parse it
-            else if (typeof orgData.default_rubric === 'string') {
+            else if (typeof rubricFromSettings === 'string') {
               try {
-                parsedRubric = JSON.parse(orgData.default_rubric);
-
+                parsedRubric = JSON.parse(rubricFromSettings);
               } catch (error) {
-                console.error("❌ Error parsing rubric JSON:", error);
+                console.error("Error parsing rubric JSON:", error);
                 parsedRubric = null;
               }
             }
-          } else {
-
           }
           
           const result = {

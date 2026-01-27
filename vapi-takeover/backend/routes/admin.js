@@ -31,7 +31,7 @@ const upload = multer({
 // POST /api/admin/organizations - Create new organization
 router.post('/organizations', async (req, res) => {
   try {
-    const { name, slug, flat_rate_fee, included_interactions, overage_rate_per_1000, default_rubric } = req.body;
+    const { name, slug, flat_rate_fee, included_interactions, overage_rate_per_1000 } = req.body;
 
     // Validation
     if (!name || !slug) {
@@ -49,8 +49,7 @@ router.post('/organizations', async (req, res) => {
         slug,
         flat_rate_fee: flat_rate_fee || 500.00,
         included_interactions: included_interactions || 5000,
-        overage_rate_per_1000: overage_rate_per_1000 || 50.00,
-        default_rubric: default_rubric || null
+        overage_rate_per_1000: overage_rate_per_1000 || 50.00
       })
       .select()
       .single();

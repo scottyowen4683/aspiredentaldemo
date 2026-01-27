@@ -45,10 +45,10 @@ export async function createOrganizationAndInvite(data: CreateOrganizationData):
     };
 
     // Add optional fields if provided
-    if (data.servicePlanName) orgInsert.plan_name = data.servicePlanName;
+    if (data.servicePlanName) orgInsert.service_plan_name = data.servicePlanName;
     if (data.monthlyServiceFee) orgInsert.flat_rate_fee = data.monthlyServiceFee;
     if (data.baselineHumanCostPerCall) orgInsert.price_per_interaction = data.baselineHumanCostPerCall;
-    if (data.timeZone) orgInsert.timezone = data.timeZone;
+    if (data.timeZone) orgInsert.time_zone = data.timeZone;
 
     const { data: orgData, error: orgError } = await supabase
       .from('organizations')
