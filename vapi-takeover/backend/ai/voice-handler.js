@@ -936,7 +936,7 @@ DO NOT make up or guess information like names, contact details, or specific fac
                   assistantName: this.assistant.friendly_name || 'Voice Assistant',
                   conversationId: this.conversation?.id,
                   channel: 'voice',
-                  notificationEmail: this.assistant.notification_email
+                  notificationEmail: this.assistant.email_notification_address
                 });
                 referenceId = emailResult?.referenceId;
                 logger.info('Voice: Contact request email sent', { referenceId });
@@ -1269,7 +1269,7 @@ DO NOT make up or guess information like names, contact details, or specific fac
                   assistantName: this.assistant.friendly_name || 'Voice Assistant',
                   conversationId: this.conversation?.id,
                   channel: 'voice',
-                  notificationEmail: this.assistant.notification_email
+                  notificationEmail: this.assistant.email_notification_address
                 });
                 referenceId = emailResult?.referenceId;
                 logger.info('Voice streaming: Contact request email sent', { referenceId });

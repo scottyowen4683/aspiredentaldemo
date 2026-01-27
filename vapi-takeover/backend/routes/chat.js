@@ -338,7 +338,7 @@ After capturing, confirm what you've recorded and let them know someone will fol
                 assistantName: assistant.friendly_name || assistant.name,
                 conversationId: conversation.id,
                 channel: 'chat',
-                notificationEmail: assistant.notification_email
+                notificationEmail: assistant.email_notification_address
               });
               referenceId = emailResult?.referenceId;
               logger.info('Contact request email sent', { referenceId });
