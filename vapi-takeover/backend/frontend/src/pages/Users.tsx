@@ -24,6 +24,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useSearchParams } from "react-router-dom";
 import { getAllUsers, getUserStats, updateUser, deleteUser } from "@/services/userService";
 import { useUser } from "@/context/UserContext";
+import { inviteUserToOrganization } from "@/services/organizationInvitations";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 interface Organization {
@@ -131,7 +132,7 @@ export default function Users() {
     // Normalize role for DashboardLayout prop: default to org_admin for non-super users
     const currentRole: "super_admin" | "org_admin" = user?.role === "super_admin" ? "super_admin" : "org_admin";
 
-  // Handle invite user
+  // Handle invite user - uses backend API with Brevo email service
   const handleInviteUser = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inviteEmail || !inviteOrgId) {
@@ -141,62 +142,36 @@ export default function Users() {
 
     setIsSubmittingInvite(true);
     try {
-      // Create invite in database
-      const { data: inviteData, error: inviteError } = await supabase
-        .from("user_invites")
-        .insert({
-          email: inviteEmail,
-          full_name: inviteFullName || null,
-          role: inviteRole,
-          org_id: inviteOrgId,
-          invited_by: user?.id,
-          status: "pending",
-          created_at: new Date().toISOString(),
-        })
-        .select()
-        .single();
-
-      if (inviteError) {
-        // Check if it's a duplicate
-        if (inviteError.code === "23505") {
-          toast({ title: "Error", description: "An invite already exists for this email", variant: "destructive" });
-        } else {
-          throw inviteError;
-        }
-        return;
-      }
-
-      // Send invite email via Supabase auth
-      const redirectTo = `${window.location.origin}/auth?invite=${inviteData.id}`;
-      const { error: authError } = await supabase.auth.admin.inviteUserByEmail(inviteEmail, {
-        redirectTo,
-        data: {
-          full_name: inviteFullName,
-          role: inviteRole,
-          org_id: inviteOrgId,
-        },
+      // Use the backend API to create invitation and send email via Brevo
+      const result = await inviteUserToOrganization({
+        organizationId: inviteOrgId,
+        userEmail: inviteEmail,
+        role: inviteRole
       });
 
-      // If auth invite fails, just log it - the user can still sign up
-      if (authError) {
-        console.warn("Auth invite failed, but database invite created:", authError);
+      if (result.success) {
+        toast({
+          title: "Invite Sent",
+          description: result.message || `Invitation sent to ${inviteEmail}`,
+        });
+
+        setIsInviteOpen(false);
+        setInviteEmail("");
+        setInviteFullName("");
+        setInviteOrgId("");
+        refetchUsers();
+      } else {
+        toast({
+          title: "Error",
+          description: result.message || "Failed to send invitation",
+          variant: "destructive",
+        });
       }
-
-      toast({
-        title: "Invite Sent",
-        description: `Invitation sent to ${inviteEmail}`,
-      });
-
-      setIsInviteOpen(false);
-      setInviteEmail("");
-      setInviteFullName("");
-      setInviteOrgId("");
-      refetchUsers();
     } catch (error) {
       console.error("Error inviting user:", error);
       toast({
         title: "Error",
-        description: "Failed to send invitation. The user may already exist.",
+        description: "Failed to send invitation. Please try again.",
         variant: "destructive",
       });
     } finally {

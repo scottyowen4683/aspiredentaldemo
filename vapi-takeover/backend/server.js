@@ -20,6 +20,7 @@ import chatRouter from './routes/chat.js';
 import voiceRouter from './routes/voice.js';
 import adminRouter from './routes/admin.js';
 import campaignsRouter from './routes/campaigns.js';
+import invitationsRouter from './routes/invitations.js';
 
 dotenv.config();
 
@@ -74,6 +75,7 @@ app.use('/api/chat', chatRouter);
 app.use('/api/voice', voiceRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/campaigns', campaignsRouter);
+app.use('/api/invitations', invitationsRouter);
 
 // SPA catch-all: serve index.html for all non-API routes (React Router handles client-side routing)
 app.get('*', (req, res, next) => {

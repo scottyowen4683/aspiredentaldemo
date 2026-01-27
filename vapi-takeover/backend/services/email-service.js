@@ -211,7 +211,154 @@ function escapeHtml(text) {
     .replace(/'/g, '&#039;');
 }
 
+/**
+ * Send organization invitation email
+ * @param {string} email - Recipient email
+ * @param {string} organizationName - Name of the organization
+ * @param {string} invitationLink - Full invitation URL
+ * @param {string} token - Invitation token (for reference)
+ */
+export async function sendInvitationEmail(email, organizationName, invitationLink, token) {
+  if (!BREVO_API_KEY) {
+    logger.warn('BREVO_API_KEY not configured, skipping invitation email');
+    return { skipped: true, reason: 'no_api_key' };
+  }
+
+  const html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; background-color: #f4f4f4; margin: 0; padding: 0; }
+        .container { max-width: 600px; margin: 0 auto; padding: 40px 20px; }
+        .card { background: white; border-radius: 12px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); overflow: hidden; }
+        .header { background: linear-gradient(135deg, #8B5CF6, #6366F1); padding: 32px 24px; text-align: center; }
+        .header h1 { color: white; margin: 0; font-size: 24px; font-weight: 600; }
+        .header p { color: rgba(255,255,255,0.9); margin: 8px 0 0 0; font-size: 14px; }
+        .content { padding: 32px 24px; }
+        .content h2 { color: #1f2937; margin: 0 0 16px 0; font-size: 20px; }
+        .content p { color: #4b5563; margin: 0 0 16px 0; }
+        .org-name { background: #f3f4f6; padding: 12px 16px; border-radius: 8px; margin: 16px 0; }
+        .org-name span { font-weight: 600; color: #1f2937; font-size: 18px; }
+        .button { display: inline-block; background: linear-gradient(135deg, #8B5CF6, #6366F1); color: white !important; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: 600; font-size: 16px; margin: 24px 0; }
+        .button:hover { opacity: 0.9; }
+        .features { margin: 24px 0; padding: 0; }
+        .features li { color: #4b5563; margin: 8px 0; padding-left: 24px; position: relative; list-style: none; }
+        .features li:before { content: "✓"; color: #10b981; position: absolute; left: 0; font-weight: bold; }
+        .footer { background: #f9fafb; padding: 24px; text-align: center; border-top: 1px solid #e5e7eb; }
+        .footer p { color: #6b7280; font-size: 12px; margin: 0; }
+        .footer a { color: #8B5CF6; text-decoration: none; }
+        .expiry { background: #fef3c7; color: #92400e; padding: 12px 16px; border-radius: 8px; margin: 16px 0; font-size: 14px; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <div class="card">
+          <div class="header">
+            <h1>You're Invited!</h1>
+            <p>Join your organization on Aspire AI</p>
+          </div>
+          <div class="content">
+            <h2>Hello!</h2>
+            <p>You've been invited to join an organization on Aspire AI, the intelligent voice and chat assistant platform.</p>
+
+            <div class="org-name">
+              <span>${escapeHtml(organizationName)}</span>
+            </div>
+
+            <p>As a member, you'll be able to:</p>
+            <ul class="features">
+              <li>Access the organization's AI assistants dashboard</li>
+              <li>View conversation analytics and insights</li>
+              <li>Manage knowledge base and settings</li>
+              <li>Review and monitor call quality</li>
+            </ul>
+
+            <div style="text-align: center;">
+              <a href="${invitationLink}" class="button">Accept Invitation</a>
+            </div>
+
+            <div class="expiry">
+              <strong>Note:</strong> This invitation will expire in 7 days. After that, you'll need to request a new invitation.
+            </div>
+
+            <p style="font-size: 14px; color: #6b7280;">
+              If the button doesn't work, copy and paste this link into your browser:<br>
+              <a href="${invitationLink}" style="color: #8B5CF6; word-break: break-all;">${invitationLink}</a>
+            </p>
+          </div>
+          <div class="footer">
+            <p>
+              This email was sent by <a href="https://aspireexecutive.ai">Aspire AI</a>.<br>
+              If you didn't expect this invitation, you can safely ignore this email.
+            </p>
+          </div>
+        </div>
+      </div>
+    </body>
+    </html>
+  `;
+
+  const textContent = `
+You're Invited to ${organizationName}!
+
+You've been invited to join ${organizationName} on Aspire AI, the intelligent voice and chat assistant platform.
+
+As a member, you'll be able to:
+- Access the organization's AI assistants dashboard
+- View conversation analytics and insights
+- Manage knowledge base and settings
+- Review and monitor call quality
+
+Accept your invitation by visiting:
+${invitationLink}
+
+Note: This invitation will expire in 7 days.
+
+If you didn't expect this invitation, you can safely ignore this email.
+
+---
+Aspire AI
+https://aspireexecutive.ai
+  `.trim();
+
+  try {
+    const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+      method: 'POST',
+      headers: {
+        'api-key': BREVO_API_KEY,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify({
+        sender: {
+          email: SENDER_EMAIL,
+          name: SENDER_NAME
+        },
+        to: [{ email }],
+        subject: `You're invited to join ${organizationName} on Aspire AI`,
+        htmlContent: html,
+        textContent: textContent
+      })
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.message || `Brevo API error: ${response.status}`);
+    }
+
+    logger.info('Invitation email sent via Brevo', { to: email, organization: organizationName, messageId: data.messageId });
+    return { success: true, messageId: data.messageId };
+
+  } catch (error) {
+    logger.error('Failed to send invitation email:', error);
+    throw error;
+  }
+}
+
 export default {
   sendEmail,
-  sendContactRequestNotification
+  sendContactRequestNotification,
+  sendInvitationEmail
 };
