@@ -484,8 +484,12 @@ export async function updateAssistant(id: string, input: CreateAssistantInput, u
       updateObj.pilot_config = input.pilot_config ?? {};
     }
 
+    console.log('Updating assistant with:', JSON.stringify(updateObj, null, 2));
     const { data, error } = await supabase.from("assistants").update(updateObj).eq("id", id).select().single();
-    if (error) return { success: false, error };
+    if (error) {
+      console.error('Assistant update failed:', error.message, error.details, error.hint, error.code);
+      return { success: false, error };
+    }
 
     // Log audit event for assistant update
     if (userId && originalAssistant) {
