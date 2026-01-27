@@ -271,7 +271,7 @@ class VoiceHandler {
     this.streamingTranscriber = createStreamingTranscriber({
       language: 'en-AU',
       model: 'nova-2',
-      silenceTimeout: 800, // Trigger speech end after 800ms silence
+      silenceTimeout: 1500, // 1.5s silence for speech end (allow pauses when dictating numbers)
 
       onTranscript: (segment, accumulated) => {
         logger.debug('Streaming transcript segment', { segment, accumulated: accumulated.substring(0, 50) });

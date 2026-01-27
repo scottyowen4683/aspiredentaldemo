@@ -57,8 +57,8 @@ export class DeepgramStreamingTranscriber {
         channels: '1',           // Mono
         punctuate: 'true',
         interim_results: 'true', // Get results while speaking
-        endpointing: '300',      // Detect speech end after 300ms silence
-        utterance_end_ms: '1000', // Finalize utterance after 1s silence
+        endpointing: '500',      // Detect speech end after 500ms silence (was 300)
+        utterance_end_ms: '1500', // Finalize utterance after 1.5s silence (was 1s)
         vad_events: 'true'       // Voice activity detection events
       });
 
