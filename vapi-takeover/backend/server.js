@@ -297,18 +297,28 @@ wss.on('connection', async (ws, req) => {
 
                     setTimeout(async () => {
                       try {
-                        // End the call gracefully via Twilio
+                        // End the call gracefully via Twilio REST API
                         await twilioClient.calls(callSid).update({ status: 'completed' });
-                        logger.info('Call ended successfully', { callSid });
-
-                        // Clean up
-                        if (voiceHandler) {
-                          await voiceHandler.endCall('completed');
-                          voiceHandler = null;
-                        }
-                        ws.close();
+                        logger.info('Call ended successfully via Twilio API', { callSid });
                       } catch (hangupError) {
-                        logger.error('Error hanging up call:', hangupError);
+                        // Twilio REST API may fail for Media Stream calls - that's OK
+                        // Closing the WebSocket will end the stream and call
+                        logger.warn('Twilio API hangup failed (expected for Media Streams), closing WebSocket', {
+                          error: hangupError.message,
+                          callSid
+                        });
+                      }
+
+                      // Clean up voice handler
+                      if (voiceHandler) {
+                        await voiceHandler.endCall('completed');
+                        voiceHandler = null;
+                      }
+
+                      // Close WebSocket to end the media stream (this will end the call)
+                      if (ws.readyState === ws.OPEN) {
+                        ws.close(1000, 'Call ended gracefully');
+                        logger.info('WebSocket closed to end call', { callSid });
                       }
                     }, audioPlaybackMs);
                   }
