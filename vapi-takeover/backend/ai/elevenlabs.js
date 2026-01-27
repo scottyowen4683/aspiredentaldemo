@@ -165,8 +165,10 @@ function mixAudioWithBackground(ttsAudio, backgroundAudio, backgroundVolume = 0.
  * @returns {Promise<void>}
  */
 export async function streamElevenLabsTTS(text, voiceId, onChunk, options = {}) {
-  const { backgroundSound = 'office', backgroundVolume = 0.40 } = options; // Default to office, higher volume
-  const bgAudio = backgroundSound !== 'none' ? loadBackgroundAudio(backgroundSound) : null;
+  // DISABLED: Synthetic background noise causes crackling on phone audio
+  // TODO: Replace with high-quality pre-recorded ambient audio files
+  const { backgroundSound = 'none', backgroundVolume = 0.40 } = options;
+  const bgAudio = null; // Disabled - synthetic noise sounds bad
   let bgOffset = 0; // Track position in background audio loop
   try {
     if (!ELEVENLABS_API_KEY) {
@@ -283,7 +285,8 @@ export async function streamElevenLabsTTS(text, voiceId, onChunk, options = {}) 
  * @returns {Promise<Buffer>} Audio buffer (μ-law, 8kHz for Twilio Media Streams)
  */
 export async function streamElevenLabsAudio(text, voiceId, options = {}) {
-  const { backgroundSound = 'office', backgroundVolume = 0.40 } = options; // Default office, higher volume
+  // DISABLED: Synthetic background noise causes crackling on phone audio
+  const { backgroundSound = 'none', backgroundVolume = 0.40 } = options;
   try {
     if (!ELEVENLABS_API_KEY) {
       throw new Error('ELEVENLABS_API_KEY not configured');
@@ -398,8 +401,8 @@ export async function getSubscriptionInfo() {
  * @returns {Promise<void>}
  */
 export async function preGenerateFillerPhrases(voiceId, options = {}) {
-  // Use 0.40 minimum for audible background on phone
-  const { backgroundSound = 'office', backgroundVolume = 0.40 } = options;
+  // Background sound disabled - synthetic noise causes crackling
+  const { backgroundSound = 'none', backgroundVolume = 0.40 } = options;
 
   if (!ELEVENLABS_API_KEY) {
     logger.warn('Cannot pre-generate fillers: ELEVENLABS_API_KEY not set');
