@@ -437,7 +437,7 @@ export async function preGenerateFillerPhrases(voiceId, options = {}) {
  * @param {string} backgroundSound - Background sound type used during generation
  * @returns {Buffer|null} Pre-generated audio or null if not available
  */
-export function getInstantFillerAudio(voiceId, backgroundSound = 'office') {
+export function getInstantFillerAudio(voiceId, backgroundSound = 'none') {
   const cacheKey = `${voiceId}-${backgroundSound}`;
   const cached = fillerAudioCache[cacheKey];
 
@@ -453,7 +453,7 @@ export function getInstantFillerAudio(voiceId, backgroundSound = 'office') {
 /**
  * Check if filler phrases are ready for a voice
  */
-export function hasFillerPhrasesReady(voiceId, backgroundSound = 'office') {
+export function hasFillerPhrasesReady(voiceId, backgroundSound = 'none') {
   const cacheKey = `${voiceId}-${backgroundSound}`;
   return fillerAudioCache[cacheKey]?.length > 0;
 }

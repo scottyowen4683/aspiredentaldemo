@@ -235,7 +235,7 @@ class VoiceHandler {
 
       // Pre-generate filler phrases in background (don't block initialization)
       const voiceId = this.assistant.elevenlabs_voice_id || process.env.ELEVENLABS_VOICE_DEFAULT;
-      const backgroundSound = this.assistant.background_sound || 'office';
+      const backgroundSound = this.assistant.background_sound || 'none';
       // Enforce minimum 0.40 volume - lower values are inaudible on phone
       const backgroundVolume = Math.max(this.assistant.background_volume || 0.40, 0.40);
 
@@ -345,7 +345,7 @@ class VoiceHandler {
 
       // INSTANT FEEDBACK: Send pre-generated filler audio IMMEDIATELY
       const voiceId = this.assistant.elevenlabs_voice_id || process.env.ELEVENLABS_VOICE_DEFAULT;
-      const backgroundSound = this.assistant.background_sound || 'office';
+      const backgroundSound = this.assistant.background_sound || 'none';
       const backgroundVolume = Math.max(this.assistant.background_volume || 0.40, 0.40);
       const fillerAudio = getInstantFillerAudio(voiceId, backgroundSound);
 
@@ -704,12 +704,28 @@ class VoiceHandler {
                 topSimilarity: relevantResults[0]?.similarity
               });
             } else {
+              // No relevant KB matches - tell GPT explicitly to not make things up
+              kbContext = `
+
+---
+IMPORTANT: No relevant information found in knowledge base for this query.
+You MUST say "I don't have that specific information" and offer to connect them with someone who can help.
+DO NOT make up or guess information like names, contact details, or specific facts.
+---`;
               logger.info('KB matches filtered out (low similarity)', {
                 originalCount: kbResults.length,
                 topSimilarity: kbResults[0]?.similarity
               });
             }
           } else {
+            // No KB results at all - tell GPT explicitly
+            kbContext = `
+
+---
+IMPORTANT: No relevant information found in knowledge base for this query.
+You MUST say "I don't have that specific information" and offer to connect them with someone who can help.
+DO NOT make up or guess information like names, contact details, or specific facts.
+---`;
             logger.info('No KB results found for query', { query: userMessage.substring(0, 50) });
           }
         } catch (kbError) {
@@ -840,7 +856,7 @@ class VoiceHandler {
 
       // Get background sound setting from assistant config (default: office for natural sound)
       // Enforce minimum 0.40 volume - lower values are inaudible on phone
-      const backgroundSound = this.assistant.background_sound || 'office';
+      const backgroundSound = this.assistant.background_sound || 'none';
       const backgroundVolume = Math.max(this.assistant.background_volume || 0.40, 0.40);
 
       // Get audio from ElevenLabs (non-streaming for backward compatibility)
@@ -1063,7 +1079,7 @@ class VoiceHandler {
       }
 
       // Get background sound setting from assistant config
-      const backgroundSound = this.assistant.background_sound || 'office';
+      const backgroundSound = this.assistant.background_sound || 'none';
       const backgroundVolume = this.assistant.background_volume || 0.20;
 
       // Stream audio from ElevenLabs - chunks go directly to callback
@@ -1115,7 +1131,7 @@ class VoiceHandler {
       // INSTANT FEEDBACK: Send pre-generated filler audio IMMEDIATELY
       // This plays while transcription and GPT process (eliminates perceived silence)
       const voiceId = this.assistant.elevenlabs_voice_id || process.env.ELEVENLABS_VOICE_DEFAULT;
-      const backgroundSound = this.assistant.background_sound || 'office';
+      const backgroundSound = this.assistant.background_sound || 'none';
       // Enforce minimum 0.40 volume - lower values are inaudible on phone
       const backgroundVolume = Math.max(this.assistant.background_volume || 0.40, 0.40);
       const fillerAudio = getInstantFillerAudio(voiceId, backgroundSound);
