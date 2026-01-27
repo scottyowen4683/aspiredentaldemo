@@ -668,4 +668,21 @@ export async function uploadPilotLogo(file: File, assistantId: string): Promise<
     return { success: false, error: String(err) };
   }
 }
+
+// Update just the pilot logo URL without overwriting other fields
+export async function updatePilotLogoUrl(assistantId: string, logoUrl: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const { error } = await supabase
+      .from("assistants")
+      .update({ pilot_logo_url: logoUrl })
+      .eq("id", assistantId);
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: String(err) };
+  }
+}
 // Build trigger: 1769402337

@@ -16,7 +16,7 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
-import { createAssistant, updateAssistant, AssistantRow, generatePilotSlug, uploadPilotLogo, PilotConfig } from "@/services/assistantService";
+import { createAssistant, updateAssistant, AssistantRow, generatePilotSlug, uploadPilotLogo, PilotConfig, updatePilotLogoUrl } from "@/services/assistantService";
 import { useUser } from "@/context/UserContext";
 import { fetchOrganizations } from "@/services/organizationService";
 import { cn } from "@/lib/utils";
@@ -494,8 +494,11 @@ export function AddAssistantModal({ open, onOpenChange, initialData, onSuccess }
           try {
             const logoResult = await uploadPilotLogo(formData.pilotLogoFile, assistantId);
             if (logoResult.success && logoResult.url) {
-              // Update assistant with logo URL
-              await updateAssistant(assistantId, { pilot_logo_url: logoResult.url }, user?.id);
+              // Update assistant with logo URL (use dedicated function to avoid overwriting other fields)
+              const updateResult = await updatePilotLogoUrl(assistantId, logoResult.url);
+              if (!updateResult.success) {
+                console.error('Failed to save logo URL:', updateResult.error);
+              }
             } else {
               console.error('Pilot logo upload failed:', logoResult.error);
               toast({ title: "Warning", description: "Assistant created but logo upload failed", variant: "destructive" });
