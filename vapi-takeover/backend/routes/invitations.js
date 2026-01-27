@@ -267,8 +267,164 @@ router.post('/send', async (req, res) => {
 });
 
 /**
+ * POST /api/invitations/signup
+ * Create user account and process invitation in one step
+ * Uses admin API to create user with email already confirmed
+ *
+ * Body: { token, email, password, fullName }
+ */
+router.post('/signup', async (req, res) => {
+  try {
+    const { token, email, password, fullName } = req.body;
+
+    if (!token || !email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required fields: token, email, and password'
+      });
+    }
+
+    // Find and validate the invitation
+    const { data: invitation, error: inviteError } = await supabaseService.client
+      .from('invites')
+      .select('*, organizations(name)')
+      .eq('token', token)
+      .single();
+
+    if (inviteError || !invitation) {
+      return res.status(404).json({
+        success: false,
+        message: 'Invitation not found or invalid'
+      });
+    }
+
+    if (invitation.accepted) {
+      return res.status(400).json({
+        success: false,
+        message: 'This invitation has already been used'
+      });
+    }
+
+    if (new Date(invitation.expires_at) < new Date()) {
+      return res.status(400).json({
+        success: false,
+        message: 'This invitation has expired. Please request a new one.'
+      });
+    }
+
+    // Validate email matches invitation
+    if (invitation.email.toLowerCase() !== email.toLowerCase()) {
+      return res.status(400).json({
+        success: false,
+        message: `This invitation was sent to ${invitation.email}. Please use that email address.`
+      });
+    }
+
+    // Create user via admin API (email auto-confirmed, no verification email sent)
+    const { data: authData, error: authError } = await supabaseService.client.auth.admin.createUser({
+      email: email,
+      password: password,
+      email_confirm: true, // Skip email verification
+      user_metadata: {
+        full_name: fullName || ''
+      }
+    });
+
+    if (authError) {
+      logger.error('Failed to create user:', authError);
+
+      // Check for duplicate user
+      if (authError.message?.includes('already been registered') || authError.message?.includes('already exists')) {
+        return res.status(409).json({
+          success: false,
+          message: 'An account with this email already exists. Please sign in instead.'
+        });
+      }
+
+      return res.status(500).json({
+        success: false,
+        message: authError.message || 'Failed to create account'
+      });
+    }
+
+    const userId = authData.user.id;
+    logger.info('User created via admin API', { userId, email });
+
+    // Create user record in users table
+    const { error: userError } = await supabaseService.client
+      .from('users')
+      .insert({
+        auth_id: userId,
+        email: email,
+        full_name: fullName || '',
+        role: invitation.role || 'org_admin',
+        org_id: invitation.org_id,
+        mfa_enabled: false,
+        created_at: new Date().toISOString()
+      });
+
+    if (userError) {
+      logger.error('Failed to create user record:', userError);
+      // Try to clean up auth user
+      try {
+        await supabaseService.client.auth.admin.deleteUser(userId);
+      } catch (e) {
+        logger.error('Failed to cleanup auth user:', e);
+      }
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to create user profile'
+      });
+    }
+
+    // Mark invitation as accepted
+    await supabaseService.client
+      .from('invites')
+      .update({ accepted: true })
+      .eq('token', token);
+
+    // Log to audit
+    try {
+      await supabaseService.client.from('audit_logs').insert({
+        org_id: invitation.org_id,
+        action: 'user_signup_via_invitation',
+        details: JSON.stringify({
+          email: email,
+          auth_id: userId,
+          role: invitation.role
+        }),
+        created_at: new Date().toISOString()
+      });
+    } catch (auditError) {
+      logger.warn('Failed to create audit log:', auditError.message);
+    }
+
+    logger.info('User signup via invitation complete', {
+      email,
+      orgId: invitation.org_id,
+      orgName: invitation.organizations?.name
+    });
+
+    return res.json({
+      success: true,
+      message: `Welcome to ${invitation.organizations?.name || 'the organization'}!`,
+      userId: userId,
+      organizationId: invitation.org_id,
+      organizationName: invitation.organizations?.name
+    });
+
+  } catch (error) {
+    logger.error('Invitation signup error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+});
+
+/**
  * POST /api/invitations/process
- * Process invitation when user signs up
+ * Process invitation when user signs up (legacy - for existing auth users)
  *
  * Body: { token, userId, email? }
  */

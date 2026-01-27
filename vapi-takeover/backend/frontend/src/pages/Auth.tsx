@@ -358,68 +358,98 @@ export default function Auth() {
     }
 
     try {
-
       await signupValidationSchema.validate(signupData, { abortEarly: false });
       setSignupErrors({});
 
-      const { data, error } = await supabase.auth.signUp({
-        email: signupData.email,
-        password: signupData.password,
-        options: {
-          data: { full_name: signupData.fullName },
+      // Use backend signup endpoint (creates user with email already confirmed)
+      const apiBaseUrl = import.meta.env.VITE_API_URL || '';
+      const response = await fetch(`${apiBaseUrl}/api/invitations/signup`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
         },
+        body: JSON.stringify({
+          token: inviteToken,
+          email: signupData.email,
+          password: signupData.password,
+          fullName: signupData.fullName
+        })
       });
 
-      if (error) {
+      const result = await response.json();
+
+      if (!response.ok) {
         toast({
           title: "Signup failed",
-          description: error.message,
+          description: result.message || "Failed to create account",
           variant: "destructive",
         });
         return;
       }
 
-      if (data.user) {
-        console.log('User signed up successfully with invitation:', data.user.id);
-        console.log('Signup with invitation token:', inviteToken);
+      if (result.success) {
+        console.log('User created via backend API:', result.userId);
 
         toast({
           title: "Account created!",
-          description: "Processing your invitation...",
+          description: "Signing you in...",
         });
 
-        // Process invitation immediately after signup
-        try {
-          const result = await processInvitation(inviteToken, data.user.id, signupData.email);
+        // Sign in with the credentials just created
+        const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+          email: signupData.email,
+          password: signupData.password,
+        });
 
-          if (result.success) {
-            // Force refresh user data to get the updated org_id
-            await refreshUser();
-
-            toast({
-              title: "Welcome!",
-              description: result.message,
-            });
-
-            // Redirect to dashboard after successful invitation processing
-            navigate("/dashboard", { replace: true });
-          } else {
-            toast({
-              title: "Invitation Error",
-              description: result.message,
-              variant: "destructive",
-            });
-          }
-        } catch (inviteError) {
-          console.error('Error processing invitation:', inviteError);
+        if (signInError) {
+          console.error('Sign in after signup failed:', signInError);
           toast({
-            title: "Invitation Error",
-            description: "There was an issue processing your invitation. Please contact support.",
+            title: "Sign-in Error",
+            description: "Account created but couldn't sign in automatically. Please use the login page.",
             variant: "destructive",
           });
+          // Navigate to login instead
+          navigate("/auth", { replace: true });
+          return;
+        }
+
+        if (signInData.session) {
+          // Force refresh user data
+          await refreshUser();
+
+          toast({
+            title: "Welcome!",
+            description: result.message,
+          });
+
+          // Check MFA status and redirect appropriately
+          const { data: aalData, error: aalError } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+
+          if (aalError) {
+            console.error('MFA check error:', aalError);
+            // Default to MFA enrollment for new users
+            window.location.href = "/emf";
+            return;
+          }
+
+          if (aalData.currentLevel === 'aal1' && aalData.nextLevel === 'aal2') {
+            // User has enrolled MFA but not verified yet
+            window.location.href = "/vmf";
+          } else if (aalData.currentLevel === 'aal1' && aalData.nextLevel === 'aal1') {
+            // User has not enrolled MFA yet - this is expected for new users
+            window.location.href = "/emf";
+          } else {
+            // User has already verified MFA (unlikely for new signup)
+            window.location.href = "/dashboard";
+          }
         }
       }
     } catch (error) {
+      if (error.inner) {
+        const formErrors = {};
+        error.inner.forEach((e) => (formErrors[e.path] = e.message));
+        setSignupErrors(formErrors);
+      }
       console.error('Signup error:', error);
       toast({
         title: "Signup failed",
