@@ -86,6 +86,18 @@ function shouldEndCall(text, isUserText = false) {
   return phrases.some(phrase => lower.includes(phrase));
 }
 
+// CRITICAL VOICE RULES - ALWAYS appended to ALL voice assistants, no exceptions
+// These ensure consistent behavior regardless of custom prompts
+const VOICE_RULES = `
+
+CRITICAL VOICE CALL RULES (ALWAYS FOLLOW THESE):
+1. Keep responses brief - under 50 words. You're on a phone call, not writing an essay.
+2. Start responses with brief acknowledgments like "Sure," "Of course," "Let me check."
+3. Use ONLY knowledge base information. If it's not in the KB, say "I don't have that specific information."
+4. NEVER make up or hallucinate information - names, phone numbers, addresses, facts - if you don't have it, don't invent it.
+5. Use natural conversational language appropriate for voice.
+6. When user says goodbye/thanks/that's all, say a brief goodbye including the word "goodbye" to end the call.`;
+
 // Function calling instructions appended to voice prompts
 const FUNCTION_INSTRUCTIONS = `
 
@@ -346,8 +358,9 @@ class VoiceHandler {
 
       // INSTANT FEEDBACK: Send pre-generated filler audio IMMEDIATELY
       const voiceId = this.assistant.elevenlabs_voice_id || process.env.ELEVENLABS_VOICE_DEFAULT;
-      const backgroundSound = this.assistant.background_sound || 'none';
-      const backgroundVolume = Math.max(this.assistant.background_volume || 0.40, 0.40);
+      // HARDCODED: Synthetic noise disabled for ALL assistants (causes crackling on phone)
+      const backgroundSound = 'none';
+      const backgroundVolume = 0.40;
       const fillerAudio = getInstantFillerAudio(voiceId, backgroundSound);
 
       if (fillerAudio) {
@@ -741,7 +754,7 @@ DO NOT make up or guess information like names, contact details, or specific fac
         : DEFAULT_SYSTEM_PROMPT;
 
       // Always append function calling instructions
-      const systemPrompt = basePrompt + FUNCTION_INSTRUCTIONS + kbContext;
+      const systemPrompt = basePrompt + VOICE_RULES + FUNCTION_INSTRUCTIONS + kbContext;
 
       // Build messages with knowledge base context
       const messages = [
@@ -918,7 +931,7 @@ DO NOT make up or guess information like names, contact details, or specific fac
         : DEFAULT_SYSTEM_PROMPT;
 
       // Add function calling instructions for contact capture
-      const systemPrompt = basePrompt + FUNCTION_INSTRUCTIONS + kbContext;
+      const systemPrompt = basePrompt + VOICE_RULES + FUNCTION_INSTRUCTIONS + kbContext;
 
       const messages = [
         { role: 'system', content: systemPrompt },
@@ -1079,9 +1092,9 @@ DO NOT make up or guess information like names, contact details, or specific fac
         throw new Error('No ElevenLabs voice configured');
       }
 
-      // Get background sound setting from assistant config
-      const backgroundSound = this.assistant.background_sound || 'none';
-      const backgroundVolume = this.assistant.background_volume || 0.20;
+      // HARDCODED: Synthetic noise disabled for ALL assistants (causes crackling on phone)
+      const backgroundSound = 'none';
+      const backgroundVolume = 0.40;
 
       // Stream audio from ElevenLabs - chunks go directly to callback
       await streamElevenLabsTTS(text, voiceId, onAudioChunk, {
