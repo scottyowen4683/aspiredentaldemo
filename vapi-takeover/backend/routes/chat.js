@@ -5,6 +5,7 @@ import { v4 as uuidv4 } from 'uuid';
 import supabaseService from '../services/supabase-service.js';
 import logger from '../services/logger.js';
 import { scoreConversation } from '../ai/rubric-scorer.js';
+import { sendContactRequestNotification } from '../services/email-service.js';
 
 const router = express.Router();
 
@@ -284,6 +285,15 @@ After capturing, confirm what you've recorded and let them know someone will fol
             logger.info('Contact request stored in database', {
               conversationId: conversation.id,
               requestType: args.request_type
+            });
+
+            // Send email notification (async, don't wait)
+            sendContactRequestNotification(args, {
+              assistantName: assistant.friendly_name || assistant.name,
+              conversationId: conversation.id,
+              channel: 'chat'
+            }).catch(err => {
+              logger.error('Failed to send contact request email:', err);
             });
 
             // If no text response, generate a confirmation
