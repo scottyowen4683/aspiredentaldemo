@@ -227,20 +227,22 @@ wss.on('connection', async (ws, req) => {
               // Continue anyway - conversation can still work
             }
 
-            // Set speech end callback for ongoing conversation
-            // Buffer all audio first, then send as large chunks for SMOOTH playback
-            voiceHandler.audioBuffer.onSpeechEnd(async () => {
+            // Helper function to process speech and send audio
+            const processSpeechAndRespond = async (useStreamingTranscript = false) => {
               try {
-                logger.info('Speech end detected, starting streaming response');
+                logger.info('Speech end detected, starting response', { useStreamingTranscript });
 
                 // Buffer all audio chunks, then send as smooth large chunks
-                // This eliminates the "chunky" sound from variable-size streaming
                 const audioChunks = [];
 
-                const result = await voiceHandler.onSpeechEndStreaming((audioChunk) => {
-                  // Collect all chunks first
-                  audioChunks.push(audioChunk);
-                });
+                // Use streaming transcription if available (MUCH faster!)
+                const result = useStreamingTranscript && voiceHandler.streamingTranscriber
+                  ? await voiceHandler.onSpeechEndWithStreaming((audioChunk) => {
+                      audioChunks.push(audioChunk);
+                    })
+                  : await voiceHandler.onSpeechEndStreaming((audioChunk) => {
+                      audioChunks.push(audioChunk);
+                    });
 
                 // Now send buffered audio as large smooth chunks (like greeting)
                 if (audioChunks.length > 0 && ws.readyState === 1) {
@@ -312,9 +314,36 @@ wss.on('connection', async (ws, req) => {
               } catch (error) {
                 logger.error('Error processing speech:', error);
               }
-            });
+            };
 
-            logger.info('Voice handler initialized with ElevenLabs');
+            // Set up speech end callbacks
+            // Priority: Streaming transcriber (fastest) > VAD buffer (fallback)
+
+            if (voiceHandler.streamingTranscriber) {
+              // Use Deepgram streaming - transcription is ready instantly when speech ends!
+              voiceHandler.onStreamingSpeechEnd = async (transcript) => {
+                logger.info('🚀 Using STREAMING transcription (fast path)', { transcript: transcript.substring(0, 30) });
+                await processSpeechAndRespond(true);
+              };
+
+              // Also set VAD callback as backup (in case streaming misses something)
+              voiceHandler.audioBuffer.onSpeechEnd(async () => {
+                // Only process if not already processing and no pending streaming transcript
+                if (!voiceHandler.isProcessing && !voiceHandler.pendingTranscript) {
+                  logger.info('VAD fallback triggered');
+                  await processSpeechAndRespond(false);
+                }
+              });
+            } else {
+              // No streaming transcriber - use VAD only
+              voiceHandler.audioBuffer.onSpeechEnd(async () => {
+                await processSpeechAndRespond(false);
+              });
+            }
+
+            logger.info('Voice handler initialized with ElevenLabs', {
+              streamingTranscriber: !!voiceHandler.streamingTranscriber
+            });
           } catch (error) {
             logger.error('Failed to initialize voice handler:', error);
             ws.close();

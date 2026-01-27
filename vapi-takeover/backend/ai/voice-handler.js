@@ -9,6 +9,7 @@ import { streamElevenLabsAudio, streamElevenLabsTTS, preGenerateFillerPhrases, g
 import { BufferManager, ulawToWav } from '../audio/buffer-manager.js';
 import { scoreConversation } from './rubric-scorer.js';
 import { sendContactRequestNotification } from '../services/email-service.js';
+import { createStreamingTranscriber } from '../services/deepgram-streaming.js';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
@@ -174,6 +175,11 @@ class VoiceHandler {
       twilio: 0,
       total: 0
     };
+
+    // Streaming transcription (Deepgram WebSocket)
+    this.streamingTranscriber = null;
+    this.pendingTranscript = null; // Stores transcript ready for processing
+    this.onStreamingSpeechEnd = null; // Callback when streaming transcription ready
   }
 
   async initialize() {
@@ -239,6 +245,15 @@ class VoiceHandler {
           .catch(e => logger.warn('Filler pre-generation failed:', e.message));
       }
 
+      // Initialize streaming transcriber if Deepgram API key is set
+      if (process.env.DEEPGRAM_API_KEY) {
+        try {
+          await this.initStreamingTranscriber();
+        } catch (e) {
+          logger.warn('Streaming transcriber failed to initialize (will use fallback):', e.message);
+        }
+      }
+
       return true;
     } catch (error) {
       logger.error('Voice handler initialization failed:', error);
@@ -246,9 +261,201 @@ class VoiceHandler {
     }
   }
 
+  /**
+   * Initialize Deepgram streaming transcriber for real-time STT
+   * Transcribes audio AS it arrives, so transcription is ready when user stops speaking
+   */
+  async initStreamingTranscriber() {
+    this.streamingTranscriber = createStreamingTranscriber({
+      language: 'en-AU',
+      model: 'nova-2',
+      silenceTimeout: 800, // Trigger speech end after 800ms silence
+
+      onTranscript: (segment, accumulated) => {
+        logger.debug('Streaming transcript segment', { segment, accumulated: accumulated.substring(0, 50) });
+      },
+
+      onSpeechEnd: (transcript) => {
+        logger.info('🎤 Streaming speech end detected', {
+          transcript,
+          length: transcript.length
+        });
+
+        // Store transcript for processing
+        this.pendingTranscript = transcript;
+
+        // Trigger callback if set
+        if (this.onStreamingSpeechEnd) {
+          this.onStreamingSpeechEnd(transcript);
+        }
+      }
+    });
+
+    await this.streamingTranscriber.connect();
+    logger.info('Deepgram streaming transcriber connected');
+  }
+
+  /**
+   * Process audio chunk - sends to both VAD buffer AND streaming transcriber
+   */
   async processAudioChunk(audioBase64) {
-    // Add to buffer
+    // Add to VAD buffer for filler timing and fallback
     this.audioBuffer.add(audioBase64);
+
+    // Also send to streaming transcriber for real-time transcription
+    if (this.streamingTranscriber) {
+      this.streamingTranscriber.sendAudioBase64(audioBase64);
+    }
+  }
+
+  /**
+   * Process with streaming transcription - uses real-time transcript
+   * Much faster than waiting for audio to accumulate then transcribe!
+   */
+  async onSpeechEndWithStreaming(onAudioChunk) {
+    if (this.isProcessing) {
+      logger.debug('Already processing, ignoring speech end');
+      return null;
+    }
+
+    // Check if we have a pending transcript from streaming
+    const transcript = this.pendingTranscript ||
+      (this.streamingTranscriber ? this.streamingTranscriber.flushTranscript() : null);
+
+    if (!transcript || transcript.trim().length === 0) {
+      // No streaming transcript - fall back to regular processing
+      logger.debug('No streaming transcript, using fallback');
+      return this.onSpeechEndStreaming(onAudioChunk);
+    }
+
+    this.isProcessing = true;
+    this.pendingTranscript = null;
+    const turnStartTime = Date.now();
+
+    // Clear the VAD buffer since we're using streaming transcript
+    this.audioBuffer.clear();
+
+    try {
+      logger.info('Processing with streaming transcript (FAST PATH)', {
+        callSid: this.callSid,
+        transcriptLength: transcript.length,
+        transcript: transcript.substring(0, 50)
+      });
+
+      // INSTANT FEEDBACK: Send pre-generated filler audio IMMEDIATELY
+      const voiceId = this.assistant.elevenlabs_voice_id || process.env.ELEVENLABS_VOICE_DEFAULT;
+      const backgroundSound = this.assistant.background_sound || 'office';
+      const backgroundVolume = Math.max(this.assistant.background_volume || 0.40, 0.40);
+      const fillerAudio = getInstantFillerAudio(voiceId, backgroundSound);
+
+      if (fillerAudio) {
+        logger.info('Sending instant filler audio', {
+          bytes: fillerAudio.length,
+          durationMs: Math.round(fillerAudio.length / 8)
+        });
+        onAudioChunk(fillerAudio);
+      }
+
+      // Transcription already done! Log time saved
+      const transcriptionLatency = 0; // Already had it from streaming!
+      logger.info('🚀 Transcription INSTANT (streaming)', { transcript });
+
+      // Save user message (don't await)
+      if (this.conversation?.id) {
+        supabaseService.addMessage({
+          conversationId: this.conversation.id,
+          role: 'user',
+          content: transcript,
+          latencyMs: transcriptionLatency
+        }).catch(e => logger.warn('Failed to save user message:', e.message));
+      }
+
+      // Step 2: Get full GPT response
+      const gptStart = Date.now();
+      const gptResponse = await this.generateResponse(transcript);
+      const gptLatency = Date.now() - gptStart;
+
+      logger.info('GPT response ready', {
+        text: gptResponse.text.substring(0, 50) + '...',
+        latencyMs: gptLatency
+      });
+
+      // Step 3: Stream TTS for FULL response
+      const ttsStart = Date.now();
+      let firstChunkSent = false;
+      let totalAudioBytes = 0;
+
+      await streamElevenLabsTTS(gptResponse.text, voiceId, (chunk) => {
+        if (!firstChunkSent) {
+          firstChunkSent = true;
+          logger.info('🚀 First TTS chunk!', {
+            timeFromGptMs: Date.now() - ttsStart,
+            totalLatencyMs: Date.now() - turnStartTime,
+            chunkSize: chunk.length
+          });
+        }
+        totalAudioBytes += chunk.length;
+        onAudioChunk(chunk);
+      }, {
+        backgroundSound,
+        backgroundVolume
+      });
+
+      const ttsLatency = Date.now() - ttsStart;
+      const totalLatency = Date.now() - turnStartTime;
+      this.turnCount++;
+
+      // Save assistant message (don't await)
+      if (this.conversation?.id) {
+        supabaseService.addMessage({
+          conversationId: this.conversation.id,
+          role: 'assistant',
+          content: gptResponse.text,
+          latencyMs: gptLatency
+        }).catch(e => logger.warn('Failed to save assistant message:', e.message));
+      }
+
+      // Update costs
+      this.costs.gpt += gptResponse.cost;
+      this.costs.total += gptResponse.cost;
+      const elevenLabsCost = gptResponse.text.length * 0.00003;
+      this.costs.elevenlabs += elevenLabsCost;
+      this.costs.total += elevenLabsCost;
+
+      // Check if we should end the call
+      const userWantsToEnd = shouldEndCall(transcript, true);
+      const aiSaidGoodbye = shouldEndCall(gptResponse.text, false);
+      const endCallRequested = userWantsToEnd || aiSaidGoodbye;
+
+      logger.info('🏎️ STREAMING turn complete (FAST!)', {
+        turnNumber: this.turnCount,
+        transcriptionMs: transcriptionLatency,
+        gptMs: gptLatency,
+        ttsMs: ttsLatency,
+        totalMs: totalLatency,
+        audioBytes: totalAudioBytes,
+        endCallRequested
+      });
+
+      this.isProcessing = false;
+
+      return {
+        transcription: transcript,
+        responseText: gptResponse.text,
+        shouldEndCall: endCallRequested,
+        latency: {
+          transcription: transcriptionLatency,
+          gpt: gptLatency,
+          tts: ttsLatency,
+          total: totalLatency
+        }
+      };
+
+    } catch (error) {
+      logger.error('Error processing speech (streaming path):', error);
+      this.isProcessing = false;
+      throw error;
+    }
   }
 
   async onSpeechEnd() {
@@ -1044,6 +1251,12 @@ class VoiceHandler {
 
   async endCall(endReason = 'completed') {
     try {
+      // Close streaming transcriber if active
+      if (this.streamingTranscriber) {
+        await this.streamingTranscriber.close().catch(() => {});
+        this.streamingTranscriber = null;
+      }
+
       const duration = Math.floor((Date.now() - this.startTime) / 1000);
 
       // Calculate Twilio costs (approximate: $0.0085/min for voice)
