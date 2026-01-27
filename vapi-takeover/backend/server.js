@@ -155,8 +155,9 @@ wss.on('connection', async (ws, req) => {
 
             try {
               // Get background sound setting from assistant (default: office for natural sound)
+              // Enforce minimum volume of 0.40 - lower values are inaudible on phone
               const backgroundSound = voiceHandler.assistant.background_sound || 'office';
-              const backgroundVolume = voiceHandler.assistant.background_volume || 0.20;
+              const backgroundVolume = Math.max(voiceHandler.assistant.background_volume || 0.40, 0.40);
 
               // Debug logging for background sound
               logger.info('Background sound settings', {
@@ -226,26 +227,50 @@ wss.on('connection', async (ws, req) => {
               // Continue anyway - conversation can still work
             }
 
-            // Set speech end callback for ongoing conversation - STREAMING for low latency!
+            // Set speech end callback for ongoing conversation
+            // Buffer all audio first, then send as large chunks for SMOOTH playback
             voiceHandler.audioBuffer.onSpeechEnd(async () => {
               try {
                 logger.info('Speech end detected, starting streaming response');
 
-                // Use streaming method - sends audio chunks to Twilio IMMEDIATELY
+                // Buffer all audio chunks, then send as smooth large chunks
+                // This eliminates the "chunky" sound from variable-size streaming
+                const audioChunks = [];
+
                 const result = await voiceHandler.onSpeechEndStreaming((audioChunk) => {
-                  // This callback fires for each chunk from ElevenLabs
-                  // Send directly to Twilio for lowest latency
-                  if (ws.readyState === 1) {
-                    const chunkBase64 = audioChunk.toString('base64');
-                    ws.send(JSON.stringify({
-                      event: 'media',
-                      streamSid: streamSid,
-                      media: {
-                        payload: chunkBase64
-                      }
-                    }));
-                  }
+                  // Collect all chunks first
+                  audioChunks.push(audioChunk);
                 });
+
+                // Now send buffered audio as large smooth chunks (like greeting)
+                if (audioChunks.length > 0 && ws.readyState === 1) {
+                  const fullAudio = Buffer.concat(audioChunks);
+                  const MAX_CHUNK_SIZE = 16000; // 16KB = 2 seconds of smooth audio
+
+                  logger.info('Sending buffered audio', {
+                    totalBytes: fullAudio.length,
+                    chunks: Math.ceil(fullAudio.length / MAX_CHUNK_SIZE)
+                  });
+
+                  for (let offset = 0; offset < fullAudio.length; offset += MAX_CHUNK_SIZE) {
+                    const chunk = fullAudio.slice(offset, Math.min(offset + MAX_CHUNK_SIZE, fullAudio.length));
+
+                    if (ws.readyState === 1) {
+                      ws.send(JSON.stringify({
+                        event: 'media',
+                        streamSid: streamSid,
+                        media: {
+                          payload: chunk.toString('base64')
+                        }
+                      }));
+
+                      // Small delay between chunks to prevent buffer issues
+                      if (offset + MAX_CHUNK_SIZE < fullAudio.length) {
+                        await new Promise(resolve => setTimeout(resolve, 20));
+                      }
+                    }
+                  }
+                }
 
                 if (result) {
                   logger.info('Streaming response complete', {

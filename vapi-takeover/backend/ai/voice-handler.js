@@ -468,27 +468,39 @@ class VoiceHandler {
       ]);
 
       // Search knowledge base if enabled (RAG)
+      // For VOICE: use fewer matches and filter low-relevance to reduce GPT latency
       let kbContext = '';
       if (this.assistant.kb_enabled && embeddingResult) {
         try {
           const embedding = embeddingResult.data[0].embedding;
 
-          // Search knowledge base using tenant_id (org_id as string)
+          // Search knowledge base - fetch 3 for voice (less context = faster GPT)
           const kbResults = await supabaseService.searchKnowledgeBase(
             this.assistant.org_id,
             embedding,
-            this.assistant.kb_match_count || 5 // Match moretonbaypilot default
+            3 // Voice uses fewer matches for speed
           );
 
           if (kbResults && kbResults.length > 0) {
-            // Format KB context like moretonbaypilot
-            kbContext = formatKBContext(kbResults);
+            // Filter out low-relevance matches (similarity < 0.3) for voice
+            // This prevents irrelevant context from slowing GPT
+            const relevantResults = kbResults.filter(r => r.similarity >= 0.3);
 
-            logger.info('Knowledge base context added', {
-              matchCount: kbResults.length,
-              contextLength: kbContext.length,
-              topSimilarity: kbResults[0]?.similarity
-            });
+            if (relevantResults.length > 0) {
+              kbContext = formatKBContext(relevantResults);
+
+              logger.info('Knowledge base context added', {
+                matchCount: relevantResults.length,
+                filteredOut: kbResults.length - relevantResults.length,
+                contextLength: kbContext.length,
+                topSimilarity: relevantResults[0]?.similarity
+              });
+            } else {
+              logger.info('KB matches filtered out (low similarity)', {
+                originalCount: kbResults.length,
+                topSimilarity: kbResults[0]?.similarity
+              });
+            }
           } else {
             logger.info('No KB results found for query', { query: userMessage.substring(0, 50) });
           }
@@ -619,8 +631,9 @@ class VoiceHandler {
       }
 
       // Get background sound setting from assistant config (default: office for natural sound)
+      // Enforce minimum 0.40 volume - lower values are inaudible on phone
       const backgroundSound = this.assistant.background_sound || 'office';
-      const backgroundVolume = this.assistant.background_volume || 0.20;
+      const backgroundVolume = Math.max(this.assistant.background_volume || 0.40, 0.40);
 
       // Get audio from ElevenLabs (non-streaming for backward compatibility)
       const audioStream = await streamElevenLabsAudio(text, voiceId, {
@@ -895,7 +908,8 @@ class VoiceHandler {
       // This plays while transcription and GPT process (eliminates perceived silence)
       const voiceId = this.assistant.elevenlabs_voice_id || process.env.ELEVENLABS_VOICE_DEFAULT;
       const backgroundSound = this.assistant.background_sound || 'office';
-      const backgroundVolume = this.assistant.background_volume || 0.40;
+      // Enforce minimum 0.40 volume - lower values are inaudible on phone
+      const backgroundVolume = Math.max(this.assistant.background_volume || 0.40, 0.40);
       const fillerAudio = getInstantFillerAudio(voiceId, backgroundSound);
 
       if (fillerAudio) {
