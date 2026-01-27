@@ -14,7 +14,7 @@ export class BufferManager {
     this.silenceThreshold = 5; // Lower threshold - μ-law silence is very low energy
     this.speechStarted = false;
     this.silentChunksCount = 0;
-    this.silentChunksRequired = 40; // ~800ms of silence (Twilio sends ~20ms chunks)
+    this.silentChunksRequired = 25; // ~500ms of silence (was 800ms - saves 300ms latency)
     this.minSpeechChunks = 5; // Minimum chunks to consider valid speech (~100ms)
     this.speechChunksCount = 0;
     this.totalChunksReceived = 0;

@@ -15,12 +15,13 @@ const openai = new OpenAI({
 });
 
 // Filler phrases to use while processing (reduces perceived latency)
+// KEEP THESE SHORT - they play during transcription/GPT processing
 const FILLER_PHRASES = [
-  "Sure, let me check that for you.",
-  "One moment, I'll look into that.",
-  "Let me find that information for you.",
-  "Just a second while I check.",
-  "Sure, let me look that up."
+  "Sure.",
+  "One moment.",
+  "Let me check.",
+  "Okay.",
+  "Mm-hmm."
 ];
 
 // Function definitions for voice - same as chat
@@ -862,9 +863,9 @@ class VoiceHandler {
   }
 
   /**
-   * Process speech end with FULL PIPELINE STREAMING - VAPI-like latency!
-   * GPT streams tokens → buffer by sentence → stream to ElevenLabs → Twilio
-   * Audio starts playing while GPT is still generating!
+   * Process speech end with STREAMING TTS - smooth audio without sentence gaps!
+   * Gets full GPT response then streams TTS as one continuous audio flow.
+   * This avoids the audio gaps/clicks between per-sentence TTS calls.
    * @param {function} onAudioChunk - Callback for each audio chunk: (chunk: Buffer) => void
    * @returns {Promise<{transcription, responseText, latency}>}
    */
@@ -885,7 +886,7 @@ class VoiceHandler {
         return null;
       }
 
-      logger.info('Processing speech (pipelined streaming)', {
+      logger.info('Processing speech (streaming TTS)', {
         callSid: this.callSid,
         audioSizeKB: (audioBuffer.length / 1024).toFixed(2)
       });
@@ -894,6 +895,7 @@ class VoiceHandler {
       // This plays while transcription and GPT process (eliminates perceived silence)
       const voiceId = this.assistant.elevenlabs_voice_id || process.env.ELEVENLABS_VOICE_DEFAULT;
       const backgroundSound = this.assistant.background_sound || 'office';
+      const backgroundVolume = this.assistant.background_volume || 0.40;
       const fillerAudio = getInstantFillerAudio(voiceId, backgroundSound);
 
       if (fillerAudio) {
@@ -904,13 +906,12 @@ class VoiceHandler {
           backgroundSound
         });
         // Send as one chunk - Twilio handles buffering
-        // Don't manually chunk as it can cause audio discontinuities
         onAudioChunk(fillerAudio);
       } else {
         logger.warn('No filler audio available', { voiceId, backgroundSound });
       }
 
-      // Step 1: Transcribe with Whisper (filler audio plays during this)
+      // Step 1: Transcribe (filler audio plays during this)
       const transcriptionStart = Date.now();
       const transcription = await this.transcribeAudio(audioBuffer);
       const transcriptionLatency = Date.now() - transcriptionStart;
@@ -936,74 +937,38 @@ class VoiceHandler {
         }).catch(e => logger.warn('Failed to save user message:', e.message));
       }
 
-      // Step 2 + 3: TRUE STREAMING - TTS starts on FIRST sentence while GPT continues
-      // This gives VAPI-like low latency
+      // Step 2: Get full GPT response (faster overall than streaming + per-sentence TTS)
       const gptStart = Date.now();
-      let firstAudioSent = false;
-      let totalAudioBytes = 0;
-      let sentenceCount = 0;
+      const gptResponse = await this.generateResponse(transcription);
+      const gptLatency = Date.now() - gptStart;
 
-      // TTS queue - process sentences in order as they arrive from GPT
-      const ttsQueue = [];
-      let ttsRunning = false;
-      let allSentencesReceived = false;
-
-      const processTTSQueue = async () => {
-        if (ttsRunning) return;
-        ttsRunning = true;
-
-        while (ttsQueue.length > 0 || !allSentencesReceived) {
-          if (ttsQueue.length === 0) {
-            // Wait briefly for more sentences
-            await new Promise(r => setTimeout(r, 20));
-            continue;
-          }
-
-          const sentence = ttsQueue.shift();
-          try {
-            // Use NON-streaming TTS per sentence (complete audio buffer, no chunks)
-            // This sounds better than streaming chunks
-            const audioBuffer = await streamElevenLabsAudio(sentence, voiceId, {
-              backgroundSound,
-              backgroundVolume: this.assistant.background_volume || 0.40
-            });
-
-            if (!firstAudioSent) {
-              firstAudioSent = true;
-              logger.info('🚀 First audio!', {
-                timeToFirstAudioMs: Date.now() - gptStart,
-                totalLatencyMs: Date.now() - turnStartTime,
-                sentence: sentence.substring(0, 30)
-              });
-            }
-
-            totalAudioBytes += audioBuffer.length;
-            onAudioChunk(audioBuffer);
-
-          } catch (ttsError) {
-            logger.error('TTS error:', ttsError.message);
-          }
-        }
-
-        ttsRunning = false;
-      };
-
-      // Start TTS processing immediately (runs in parallel with GPT)
-      const ttsPromise = processTTSQueue();
-
-      // Stream GPT - each sentence goes to TTS queue immediately
-      const gptResponse = await this.generateResponseStreaming(transcription, (sentence) => {
-        sentenceCount++;
-        logger.debug('Sentence to TTS:', { sentenceCount, len: sentence.length });
-        ttsQueue.push(sentence);
+      logger.info('GPT response ready', {
+        text: gptResponse.text.substring(0, 50) + '...',
+        latencyMs: gptLatency
       });
 
-      allSentencesReceived = true;
+      // Step 3: Stream TTS for FULL response - continuous audio, no sentence gaps!
+      const ttsStart = Date.now();
+      let firstChunkSent = false;
+      let totalAudioBytes = 0;
 
-      // Wait for all TTS to complete
-      await ttsPromise;
+      await streamElevenLabsTTS(gptResponse.text, voiceId, (chunk) => {
+        if (!firstChunkSent) {
+          firstChunkSent = true;
+          logger.info('🚀 First TTS chunk!', {
+            timeFromGptMs: Date.now() - ttsStart,
+            totalLatencyMs: Date.now() - turnStartTime,
+            chunkSize: chunk.length
+          });
+        }
+        totalAudioBytes += chunk.length;
+        onAudioChunk(chunk);
+      }, {
+        backgroundSound,
+        backgroundVolume
+      });
 
-      const gptLatency = Date.now() - gptStart;
+      const ttsLatency = Date.now() - ttsStart;
       const totalLatency = Date.now() - turnStartTime;
       this.turnCount++;
 
@@ -1020,18 +985,22 @@ class VoiceHandler {
       // Update costs
       this.costs.gpt += gptResponse.cost;
       this.costs.total += gptResponse.cost;
+      // TTS cost
+      const elevenLabsCost = gptResponse.text.length * 0.00003;
+      this.costs.elevenlabs += elevenLabsCost;
+      this.costs.total += elevenLabsCost;
 
       // Check if we should end the call based on user input or AI response
       const userWantsToEnd = shouldEndCall(transcription, true);
       const aiSaidGoodbye = shouldEndCall(gptResponse.text, false);
       const endCallRequested = userWantsToEnd || aiSaidGoodbye;
 
-      logger.info('Pipelined turn complete', {
+      logger.info('Streaming turn complete', {
         turnNumber: this.turnCount,
         transcriptionMs: transcriptionLatency,
-        gptPlusTtsMs: gptLatency,
+        gptMs: gptLatency,
+        ttsMs: ttsLatency,
         totalMs: totalLatency,
-        sentences: sentenceCount,
         audioBytes: totalAudioBytes,
         userWantsToEnd,
         aiSaidGoodbye,
@@ -1047,7 +1016,7 @@ class VoiceHandler {
         latency: {
           transcription: transcriptionLatency,
           gpt: gptLatency,
-          tts: 0, // Pipelined with GPT
+          tts: ttsLatency,
           total: totalLatency
         }
       };
