@@ -194,6 +194,9 @@ export interface AssistantRow {
   first_message?: string | null;
   kb_enabled?: boolean | null;
   kb_match_count?: number | null;
+  kb_path?: string | null;
+  last_kb_upload_at?: string | null;
+  kb_chunks_count?: number | null;
   total_interactions?: number | null;
   avg_interaction_time?: number | null;
   performance_rank?: number | null;
@@ -210,7 +213,7 @@ export async function fetchAssistants(): Promise<AssistantRow[]> {
   const { data, error } = await supabase
     .from("assistants")
     .select(
-      `id, org_id, friendly_name, bot_type, active, phone_number, elevenlabs_voice_id, widget_config, prompt, model, temperature, max_tokens, first_message, kb_enabled, kb_match_count, total_interactions, avg_interaction_time, performance_rank, auto_score, background_sound, background_volume, created_at, updated_at`
+      `id, org_id, friendly_name, bot_type, active, phone_number, elevenlabs_voice_id, widget_config, prompt, model, temperature, max_tokens, first_message, kb_enabled, kb_match_count, kb_path, last_kb_upload_at, kb_chunks_count, total_interactions, avg_interaction_time, performance_rank, auto_score, background_sound, background_volume, created_at, updated_at`
     )
     .order("created_at", { ascending: false });
 

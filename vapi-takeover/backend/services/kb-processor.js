@@ -398,17 +398,27 @@ export async function processKnowledgeBase(options) {
 
     // Step 3: DELETE ALL existing chunks for this tenant BEFORE inserting new ones
     // This ensures old data is completely replaced, not accumulated
-    logger.info(`Deleting ALL existing chunks for tenant_id=${tenant_id}`);
-    const { error: deleteError, count: deletedCount } = await supabaseService.client
+    logger.info(`KB UPLOAD: Deleting ALL existing chunks for tenant_id=${tenant_id} (org_id=${org_id})`);
+
+    // First, count how many chunks exist for this tenant
+    const { count: existingCount } = await supabaseService.client
+      .from('knowledge_chunks')
+      .select('*', { count: 'exact', head: true })
+      .eq('tenant_id', tenant_id);
+
+    logger.info(`KB UPLOAD: Found ${existingCount || 0} existing chunks to delete for tenant_id=${tenant_id}`);
+
+    // Now delete them
+    const { error: deleteError } = await supabaseService.client
       .from('knowledge_chunks')
       .delete()
       .eq('tenant_id', tenant_id);
 
     if (deleteError) {
-      logger.error('Failed to delete old chunks:', deleteError);
+      logger.error('KB UPLOAD: Failed to delete old chunks:', deleteError);
       // Continue anyway - better to have duplicates than fail completely
     } else {
-      logger.info(`Deleted ${deletedCount || 0} old chunks`);
+      logger.info(`KB UPLOAD: Successfully deleted ${existingCount || 0} old chunks for tenant_id=${tenant_id}`);
     }
 
     // Step 4: Batch embed and insert new chunks
@@ -459,6 +469,24 @@ export async function processKnowledgeBase(options) {
       processingTimeMs: processingTime,
       totalCost: totalEmbeddingCost.toFixed(6)
     });
+
+    // Update assistant with last KB upload timestamp if assistant_id provided
+    if (assistant_id) {
+      const { error: updateError } = await supabaseService.client
+        .from('assistants')
+        .update({
+          last_kb_upload_at: new Date().toISOString(),
+          kb_chunks_count: savedCount,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', assistant_id);
+
+      if (updateError) {
+        logger.warn('Failed to update assistant with KB upload info:', updateError);
+      } else {
+        logger.info(`Updated assistant ${assistant_id} with last_kb_upload_at`);
+      }
+    }
 
     return {
       success: true,

@@ -2,7 +2,7 @@ import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Pause, Play, Trash2, Edit, Filter, Search, Bot, Phone, MessageSquare, Code } from "lucide-react";
+import { Plus, Pause, Play, Trash2, Edit, Filter, Search, Bot, Phone, MessageSquare, Code, FileText, Clock } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import AddAssistantModal from "@/components/dashboard/AddAssistantModal";
@@ -300,6 +300,24 @@ export default function Assistants() {
                     <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg text-sm">
                       <Phone className="h-4 w-4 text-blue-500" />
                       <span className="text-muted-foreground">{assistant.phoneNumber}</span>
+                    </div>
+                  )}
+
+                  {/* Knowledge Base Status */}
+                  {assistant.raw?.kb_enabled && (
+                    <div className="flex items-center justify-between p-2 bg-purple-50 dark:bg-purple-950/30 rounded-lg text-sm">
+                      <div className="flex items-center gap-2">
+                        <FileText className="h-4 w-4 text-purple-500" />
+                        <span className="text-purple-700 dark:text-purple-300 font-medium">
+                          KB: {assistant.raw?.kb_chunks_count || 0} chunks
+                        </span>
+                      </div>
+                      {assistant.raw?.last_kb_upload_at && (
+                        <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                          <Clock className="h-3 w-3" />
+                          {new Date(assistant.raw.last_kb_upload_at).toLocaleDateString()}
+                        </div>
+                      )}
                     </div>
                   )}
 
