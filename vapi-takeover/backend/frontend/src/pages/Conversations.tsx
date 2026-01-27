@@ -7,6 +7,7 @@ import { useUser } from "@/context/UserContext";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, } from "@/components/ui/select";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, } from "@/components/ui/dropdown-menu";
 import { Search, Filter, Download, RefreshCw, Loader2, Eye, Play, FileText, Calendar, AlertCircle } from "lucide-react";
+import { analyzeConversationSentiment } from "@/services/analyticsService";
 import {
   Table,
   TableBody,
@@ -102,11 +103,24 @@ export default function Conversations() {
   };
 
   const getSentiment = (conversation: any) => {
-    // Use the new sentiment column from conversations table
-    if (conversation.sentiment) return conversation.sentiment;
-    // Fallback to transcript sentiment for old data
-    if (conversation.transcript?.sentiment) return conversation.transcript.sentiment;
-    return "Unknown";
+    // Use smart sentiment analysis based on conversation data
+    // This matches the logic in Analytics page for consistent sentiment display
+    try {
+      const sentiment = analyzeConversationSentiment({
+        success: conversation.success_evaluation ?? conversation.success,
+        overall_score: conversation.overall_score ?? conversation.confidence_score,
+        end_reason: conversation.end_reason,
+        transcript: conversation.transcript,
+        duration_seconds: conversation.duration_seconds ?? conversation.call_duration
+      });
+      // Capitalize first letter for display
+      return sentiment.charAt(0).toUpperCase() + sentiment.slice(1);
+    } catch {
+      // Fallback to stored sentiment if analysis fails
+      if (conversation.sentiment) return conversation.sentiment;
+      if (conversation.transcript?.sentiment) return conversation.transcript.sentiment;
+      return "Neutral"; // Default to neutral, not unknown
+    }
   };
 
   const getSentimentVariant = (sentiment: string) => {

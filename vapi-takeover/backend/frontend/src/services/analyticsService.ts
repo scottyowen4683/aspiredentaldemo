@@ -473,8 +473,10 @@ export async function getSentimentData(
 /**
  * Analyze a single conversation to determine customer sentiment
  * Returns: "positive" | "neutral" | "negative"
+ *
+ * Exported for use in Conversations page to show consistent sentiment
  */
-function analyzeConversationSentiment(conv: {
+export function analyzeConversationSentiment(conv: {
   success?: boolean | null;
   overall_score?: number | null;
   end_reason?: string | null;
