@@ -27,7 +27,7 @@ const FILLER_PHRASES = [
 /**
  * Generate synthetic background noise (μ-law 8kHz format)
  * Creates 10 seconds of loopable ambient noise
- * μ-law encoding requires significant deviation from 127 to be audible
+ * μ-law encoding requires LARGE deviation from 127 to be audible on phone
  * @param {string} type - Type: 'office' (soft murmur), 'cafe' (busier), 'white'
  * @returns {Buffer}
  */
@@ -37,48 +37,51 @@ function generateBackgroundNoise(type) {
   const samples = sampleRate * duration;
   const buffer = Buffer.alloc(samples);
 
-  // μ-law requires large amplitude to be audible (127 ± 30-50 minimum)
+  // μ-law needs BIG amplitude to be audible on phone (60-80 range)
   let amplitude, smoothing;
 
   switch (type) {
     case 'office':
-      amplitude = 35; // Clearly audible office ambience
-      smoothing = 0.995; // Very smooth = low frequency hum
+      amplitude = 65; // Very audible office ambience
+      smoothing = 0.997; // Smooth brown noise
       break;
     case 'cafe':
-      amplitude = 45; // More noticeable ambient noise
-      smoothing = 0.99;
+      amplitude = 75; // Clearly noticeable ambient noise
+      smoothing = 0.995;
       break;
     case 'white':
     default:
-      amplitude = 25;
-      smoothing = 0.997;
+      amplitude = 50;
+      smoothing = 0.998;
   }
 
-  // Generate brown noise with proper amplitude for μ-law
+  // Generate brown noise with high amplitude for phone audio
   let value = 0;
   for (let i = 0; i < samples; i++) {
     // White noise input
     const white = (Math.random() * 2 - 1);
 
-    // Integrate for brown noise (creates low frequency rumble)
+    // Integrate for brown noise (low frequency rumble)
     value = value * smoothing + white * (1 - smoothing);
 
-    // Normalize to prevent runaway and scale to audible amplitude
-    // Brown noise can accumulate, so we need soft limiting
-    const normalized = Math.tanh(value * 3) * amplitude;
+    // Soft limiting to prevent clipping, scale to large amplitude
+    const normalized = Math.tanh(value * 5) * amplitude;
 
     // μ-law: 127 is silence center point
     const sample = 127 + Math.round(normalized);
     buffer[i] = Math.max(0, Math.min(255, sample));
   }
 
+  // Verify we actually have audible signal
+  const minVal = Math.min(...buffer);
+  const maxVal = Math.max(...buffer);
   logger.info(`Generated ${type} background noise`, {
     samples,
     duration: `${duration}s`,
     amplitude,
     smoothing,
-    sampleRange: `${Math.min(...buffer)}-${Math.max(...buffer)}`
+    sampleRange: `${minVal}-${maxVal}`,
+    deviation: `±${Math.max(maxVal - 127, 127 - minVal)}`
   });
   return buffer;
 }
@@ -161,7 +164,7 @@ function mixAudioWithBackground(ttsAudio, backgroundAudio, backgroundVolume = 0.
  * @returns {Promise<void>}
  */
 export async function streamElevenLabsTTS(text, voiceId, onChunk, options = {}) {
-  const { backgroundSound = 'none', backgroundVolume = 0.15 } = options;
+  const { backgroundSound = 'office', backgroundVolume = 0.40 } = options; // Default to office, higher volume
   const bgAudio = backgroundSound !== 'none' ? loadBackgroundAudio(backgroundSound) : null;
   let bgOffset = 0; // Track position in background audio loop
   try {
@@ -175,7 +178,11 @@ export async function streamElevenLabsTTS(text, voiceId, onChunk, options = {}) 
 
     logger.info('Starting ElevenLabs streaming TTS', {
       voiceId,
-      textLength: text.length
+      textLength: text.length,
+      backgroundSound,
+      backgroundVolume,
+      hasBgAudio: !!bgAudio,
+      bgAudioSize: bgAudio?.length || 0
     });
 
     // Use streaming endpoint for low latency
@@ -275,7 +282,7 @@ export async function streamElevenLabsTTS(text, voiceId, onChunk, options = {}) 
  * @returns {Promise<Buffer>} Audio buffer (μ-law, 8kHz for Twilio Media Streams)
  */
 export async function streamElevenLabsAudio(text, voiceId, options = {}) {
-  const { backgroundSound = 'none', backgroundVolume = 0.15 } = options;
+  const { backgroundSound = 'office', backgroundVolume = 0.40 } = options; // Default office, higher volume
   try {
     if (!ELEVENLABS_API_KEY) {
       throw new Error('ELEVENLABS_API_KEY not configured');

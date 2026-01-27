@@ -897,13 +897,17 @@ class VoiceHandler {
       const fillerAudio = getInstantFillerAudio(voiceId, backgroundSound);
 
       if (fillerAudio) {
-        logger.info('Sending instant filler audio', { bytes: fillerAudio.length });
-        // Send filler in chunks to Twilio (smooth playback)
-        const CHUNK_SIZE = 640; // 80ms at 8kHz
-        for (let i = 0; i < fillerAudio.length; i += CHUNK_SIZE) {
-          const chunk = fillerAudio.slice(i, Math.min(i + CHUNK_SIZE, fillerAudio.length));
-          onAudioChunk(chunk);
-        }
+        logger.info('Sending instant filler audio', {
+          bytes: fillerAudio.length,
+          durationMs: Math.round(fillerAudio.length / 8), // 8 bytes per ms at 8kHz
+          voiceId,
+          backgroundSound
+        });
+        // Send as one chunk - Twilio handles buffering
+        // Don't manually chunk as it can cause audio discontinuities
+        onAudioChunk(fillerAudio);
+      } else {
+        logger.warn('No filler audio available', { voiceId, backgroundSound });
       }
 
       // Step 1: Transcribe with Whisper (filler audio plays during this)
