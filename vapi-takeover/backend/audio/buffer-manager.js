@@ -136,6 +136,11 @@ export class BufferManager {
       estimatedDurationMs: this.chunks.length * 20 // ~20ms per chunk
     });
 
+    // IMPORTANT: Mark as not started BEFORE callback to prevent re-triggering
+    // The callback will call flush() which does full reset, but we need to
+    // prevent new silence chunks from triggering detectSpeechEnd again
+    this.speechStarted = false;
+
     // Trigger callback if set
     if (this.onSpeechEndCallback) {
       this.onSpeechEndCallback();
