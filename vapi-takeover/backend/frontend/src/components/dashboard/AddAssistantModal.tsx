@@ -56,6 +56,8 @@ interface FormData {
   smsNotificationNumber: string;
   emailNotificationsEnabled: boolean;
   emailNotificationAddress: string;
+  // Data retention policy
+  dataRetentionDays: number;
 }
 
 const DEFAULT_VOICES = [
@@ -112,6 +114,8 @@ export function AddAssistantModal({ open, onOpenChange, initialData, onSuccess }
     smsNotificationNumber: "",
     emailNotificationsEnabled: true,
     emailNotificationAddress: "",
+    // Data retention policy (default 90 days)
+    dataRetentionDays: 90,
   });
 
   // Fetch organizations for super_admin
@@ -218,6 +222,8 @@ export function AddAssistantModal({ open, onOpenChange, initialData, onSuccess }
           smsNotificationNumber: initialData.sms_notification_number ?? "",
           emailNotificationsEnabled: initialData.email_notifications_enabled ?? true,
           emailNotificationAddress: initialData.email_notification_address ?? "",
+          // Data retention policy
+          dataRetentionDays: initialData.data_retention_days ?? 90,
         });
       } else {
         // Reset to defaults for new assistant
@@ -248,6 +254,7 @@ export function AddAssistantModal({ open, onOpenChange, initialData, onSuccess }
           smsNotificationNumber: "",
           emailNotificationsEnabled: true,
           emailNotificationAddress: "",
+          dataRetentionDays: 90,
         });
       }
     }
@@ -344,6 +351,8 @@ export function AddAssistantModal({ open, onOpenChange, initialData, onSuccess }
         sms_notification_number: formData.smsEnabled ? formData.smsNotificationNumber : null,
         email_notifications_enabled: formData.emailNotificationsEnabled,
         email_notification_address: formData.emailNotificationsEnabled ? formData.emailNotificationAddress : null,
+        // Data retention policy
+        data_retention_days: formData.dataRetentionDays,
       };
 
       let result;
@@ -897,6 +906,68 @@ export function AddAssistantModal({ open, onOpenChange, initialData, onSuccess }
               <p className="text-xs text-muted-foreground">Automatically score conversations using governance rubric</p>
             </div>
             <Switch id="autoScore" checked={formData.autoScore} onCheckedChange={(v) => handleChange("autoScore", !!v)} />
+          </div>
+
+          {/* Data Retention Policy */}
+          <div className="space-y-3 p-4 bg-slate-50/50 dark:bg-slate-950/20 rounded-xl border border-slate-200 dark:border-slate-800">
+            <div className="flex items-center gap-2">
+              <Label htmlFor="dataRetentionDays">Data Retention Policy</Label>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button type="button" className="inline-flex"><HelpCircle className="h-4 w-4 text-muted-foreground" /></button>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-80">
+                  <p>How long to retain conversation data for this assistant. Set to 0 for indefinite retention.</p>
+                </TooltipContent>
+              </Tooltip>
+            </div>
+            <div className="flex items-center gap-3">
+              <Input
+                id="dataRetentionDays"
+                type="number"
+                min="0"
+                max="365"
+                step="1"
+                value={formData.dataRetentionDays}
+                onChange={(e) => handleChange("dataRetentionDays", parseInt(e.target.value) || 0)}
+                className="w-24"
+              />
+              <span className="text-sm text-muted-foreground">days</span>
+              <div className="flex gap-2 ml-auto">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleChange("dataRetentionDays", 30)}
+                  className={formData.dataRetentionDays === 30 ? "border-primary" : ""}
+                >
+                  30 days
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleChange("dataRetentionDays", 90)}
+                  className={formData.dataRetentionDays === 90 ? "border-primary" : ""}
+                >
+                  90 days
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleChange("dataRetentionDays", 0)}
+                  className={formData.dataRetentionDays === 0 ? "border-primary" : ""}
+                >
+                  Forever
+                </Button>
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {formData.dataRetentionDays === 0
+                ? "Conversation data will be retained indefinitely"
+                : `Conversation data older than ${formData.dataRetentionDays} days will be automatically deleted`}
+            </p>
           </div>
 
           <DialogFooter className="gap-2">
