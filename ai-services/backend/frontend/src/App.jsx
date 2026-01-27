@@ -4,21 +4,19 @@ import { Routes, Route, Navigate } from "react-router-dom";
 import SiteLayout from "./components/SiteLayout.jsx";
 
 import Home from "./pages/Home.jsx";
-import Government from "./pages/government.jsx";
-import Business from "./pages/business.jsx";
-import Admin from "./pages/admin.jsx";
-import Framework from "./pages/framework.jsx";
+import Government from "./pages/Government.jsx";
+import Business from "./pages/Business.jsx";
+import Framework from "./pages/Framework.jsx";
 
 // Agents
-import Agents from "./pages/agents.jsx";
-import AgentsVoice from "./pages/agents-voice.jsx";
-import AgentsChat from "./pages/agents-chat.jsx";
-import AgentsOutbound from "./pages/agents-outbound.jsx";
+import Agents from "./pages/Agents.jsx";
+import AgentsVoice from "./pages/AgentsVoice.jsx";
+import AgentsChat from "./pages/AgentsChat.jsx";
+import AgentsOutbound from "./pages/AgentsOutbound.jsx";
 
 export default function App() {
   return (
     <Routes>
-      {/* ✅ Layout ALWAYS wraps */}
       <Route path="/" element={<SiteLayout />}>
         <Route index element={<Home />} />
 
@@ -35,9 +33,6 @@ export default function App() {
 
         {/* Old demo path -> business */}
         <Route path="ai-receptionist" element={<Navigate to="/business" replace />} />
-
-        {/* Admin */}
-        <Route path="admin" element={<Admin />} />
 
         {/* Fallback */}
         <Route path="*" element={<Home />} />
