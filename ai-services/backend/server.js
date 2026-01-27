@@ -157,7 +157,7 @@ app.post('/api/outbound-call', async (req, res) => {
 
     const fromNumber = process.env.TWILIO_OUTBOUND_NUMBER || '+61731322220';
     const voiceWebhookUrl = process.env.VOICE_WEBHOOK_URL ||
-      `${process.env.BASE_URL || 'https://aspire-ai-platform.fly.dev'}/api/voice/outbound`;
+      `${process.env.BASE_URL || 'https://aspireexecutive.ai'}/api/voice/outbound`;
 
     console.log('Initiating outbound call:', {
       to,
@@ -172,7 +172,7 @@ app.post('/api/outbound-call', async (req, res) => {
       from: fromNumber,
       url: voiceWebhookUrl,
       method: 'POST',
-      statusCallback: `${process.env.BASE_URL || 'https://aspire-ai-platform.fly.dev'}/api/voice/status`,
+      statusCallback: `${process.env.BASE_URL || 'https://aspireexecutive.ai'}/api/voice/status`,
       statusCallbackMethod: 'POST',
       statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
       record: true,
@@ -203,7 +203,7 @@ app.post('/api/voice/outbound', (req, res) => {
   const VoiceResponse = twilio.twiml.VoiceResponse;
   const response = new VoiceResponse();
 
-  const baseUrl = process.env.BASE_URL || 'https://aspire-ai-platform.fly.dev';
+  const baseUrl = process.env.BASE_URL || 'https://aspireexecutive.ai';
 
   // Initial greeting using ElevenLabs cloned voice
   const greetingText = "Hi! This is Scott from Aspire. I'm calling to demonstrate our voice AI capabilities. How can I help you today?";
@@ -237,7 +237,7 @@ app.post('/api/voice/respond', (req, res) => {
   const VoiceResponse = twilio.twiml.VoiceResponse;
   const response = new VoiceResponse();
 
-  const baseUrl = process.env.BASE_URL || 'https://aspire-ai-platform.fly.dev';
+  const baseUrl = process.env.BASE_URL || 'https://aspireexecutive.ai';
   const speechResult = req.body.SpeechResult;
   console.log('Speech received:', speechResult);
 

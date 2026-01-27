@@ -18,7 +18,7 @@ primary_region = "syd"  # Sydney, Australia
 [env]
   PORT = "8080"
   NODE_ENV = "production"
-  BASE_URL = "https://aspire-ai-platform.fly.dev"
+  BASE_URL = "https://aspireexecutive.ai"
 
 # HTTP service configuration
 [http_service]

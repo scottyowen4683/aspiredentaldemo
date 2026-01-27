@@ -2,8 +2,8 @@ import React, { useEffect, useState } from "react";
 import { Outlet, Link, NavLink, useLocation } from "react-router-dom";
 import { LogIn } from "lucide-react";
 
-// AI Platform Portal URL (from fix-flyio-deployment branch)
-const AI_PLATFORM_URL = "https://aspire-ai-platform.fly.dev";
+// AI Platform Portal URL (using custom domain)
+const AI_PLATFORM_URL = "https://aspireexecutive.ai";
 
 function NavItem({ to, children }) {
   return (
