@@ -52,6 +52,7 @@ export interface PilotConfig {
   primaryColor?: string;
   greeting?: string;
   title?: string;
+  description?: string;
   scope?: string[];
   testQuestions?: string[];
   supportContact?: {
@@ -61,6 +62,7 @@ export interface PilotConfig {
   };
   showReviewerNotes?: boolean;
   constraints?: string[];
+  reviewerNotes?: string[];
 }
 
 export async function createAssistant(input: CreateAssistantInput, userId?: string) {
