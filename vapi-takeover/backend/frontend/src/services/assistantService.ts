@@ -156,7 +156,7 @@ export async function createAssistant(input: CreateAssistantInput, userId?: stri
       active: true, // Ensure assistant is active for voice routing
       phone_number: phoneNumber,
       elevenlabs_voice_id: input.elevenlabs_voice_id ?? null,
-      prompt: input.prompt ?? null,
+      prompt: input.prompt || "[Uses Default Prompt]",
       model: input.model ?? null,
       temperature: input.temperature ?? null,
       max_tokens: input.max_tokens ?? null,
@@ -420,7 +420,7 @@ export async function updateAssistant(id: string, input: CreateAssistantInput, u
       active: true, // Ensure assistant is active for voice routing
       phone_number: phoneNumber,
       elevenlabs_voice_id: input.elevenlabs_voice_id ?? null,
-      prompt: input.prompt ?? null,
+      prompt: input.prompt || "[Uses Default Prompt]",
       model: input.model ?? null,
       temperature: input.temperature ?? null,
       max_tokens: input.max_tokens ?? null,
