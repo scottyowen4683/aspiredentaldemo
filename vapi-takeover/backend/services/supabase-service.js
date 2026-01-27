@@ -389,67 +389,56 @@ class SupabaseService {
       similarityThreshold
     });
 
-    // Use correct RPC parameter names as per migration schema
-    let { data, error } = await supabase.rpc('match_knowledge_chunks', {
-      query_embedding: queryEmbedding,
-      match_tenant_id: tenantIdStr,
-      match_count: matchCount,
-      similarity_threshold: similarityThreshold
-    });
+    // Skip RPC - it has outdated schema (expects 'heading' column that doesn't exist)
+    // Go directly to fallback query which we control
+    logger.info('Using direct KB query (bypassing RPC)');
 
-    if (error) {
-      logger.error('RPC search failed:', error);
+    // Direct query - select only columns that exist in the actual table
+    // Note: 'heading' is stored inside metadata.heading, not as a column
+    const fallbackResult = await supabase
+      .from('knowledge_chunks')
+      .select('id, content, source, section, metadata, embedding')
+      .eq('tenant_id', tenantIdStr)
+      .eq('active', true)
+      .limit(matchCount * 3); // Get more and filter by similarity client-side
 
-      // Fallback: direct query with cosine similarity if RPC doesn't exist
-      logger.info('Trying fallback direct query...');
-      const fallbackResult = await supabase
-        .from('knowledge_chunks')
-        .select('id, content, source, section, heading, metadata, embedding')
-        .eq('tenant_id', tenantIdStr)
-        .eq('active', true)
-        .limit(matchCount * 3); // Get more and filter by similarity client-side
-
-      if (fallbackResult.error) {
-        logger.error('Fallback query also failed:', fallbackResult.error);
-        return [];
-      }
-
-      // Simple cosine similarity calculation
-      const cosineSimilarity = (a, b) => {
-        if (!a || !b || a.length !== b.length) return 0;
-        let dotProduct = 0;
-        let normA = 0;
-        let normB = 0;
-        for (let i = 0; i < a.length; i++) {
-          dotProduct += a[i] * b[i];
-          normA += a[i] * a[i];
-          normB += b[i] * b[i];
-        }
-        return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
-      };
-
-      // Score and sort results
-      const scored = (fallbackResult.data || [])
-        .map(chunk => ({
-          ...chunk,
-          similarity: chunk.embedding ? cosineSimilarity(queryEmbedding, chunk.embedding) : 0
-        }))
-        .filter(chunk => chunk.similarity >= similarityThreshold)
-        .sort((a, b) => b.similarity - a.similarity)
-        .slice(0, matchCount);
-
-      logger.info('Fallback KB search results:', {
-        count: scored.length,
-        topSimilarity: scored[0]?.similarity
-      });
-      return scored;
+    if (fallbackResult.error) {
+      logger.error('KB query failed:', fallbackResult.error);
+      return [];
     }
 
+    // Simple cosine similarity calculation
+    const cosineSimilarity = (a, b) => {
+      if (!a || !b || a.length !== b.length) return 0;
+      let dotProduct = 0;
+      let normA = 0;
+      let normB = 0;
+      for (let i = 0; i < a.length; i++) {
+        dotProduct += a[i] * b[i];
+        normA += a[i] * a[i];
+        normB += b[i] * b[i];
+      }
+      return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+    };
+
+    // Score and sort results
+    const scored = (fallbackResult.data || [])
+      .map(chunk => ({
+        ...chunk,
+        // Extract heading from metadata for compatibility
+        heading: chunk.metadata?.heading || chunk.section || null,
+        similarity: chunk.embedding ? cosineSimilarity(queryEmbedding, chunk.embedding) : 0
+      }))
+      .filter(chunk => chunk.similarity >= similarityThreshold)
+      .sort((a, b) => b.similarity - a.similarity)
+      .slice(0, matchCount);
+
     logger.info('KB search results:', {
-      count: data?.length || 0,
-      topSimilarity: data?.[0]?.similarity
+      count: scored.length,
+      topSimilarity: scored[0]?.similarity,
+      totalFetched: fallbackResult.data?.length || 0
     });
-    return data || [];
+    return scored;
   }
 
   // ===========================================================================
