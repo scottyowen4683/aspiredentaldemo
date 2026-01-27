@@ -25,7 +25,4 @@ COMMENT ON COLUMN assistants.sms_notification_number IS 'Phone number to send SM
 COMMENT ON COLUMN assistants.email_notifications_enabled IS 'Enable email notifications for contact requests';
 COMMENT ON COLUMN assistants.email_notification_address IS 'Email address for notifications (overrides org default)';
 
--- Ensure system_settings has a default row for universal prompt
-INSERT INTO system_settings (id, universal_system_prompt, updated_at)
-VALUES (1, 'You are a helpful, professional AI assistant. Always be courteous, accurate, and helpful. Use only the information provided in your knowledge base to answer questions. If you don''t have the information, say so honestly and offer to help connect the caller with someone who can assist.', NOW())
-ON CONFLICT (id) DO NOTHING;
+-- Note: system_settings row will be created automatically when settings are first saved in the portal

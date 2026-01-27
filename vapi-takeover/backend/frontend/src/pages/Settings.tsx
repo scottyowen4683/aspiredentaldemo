@@ -97,11 +97,11 @@ export default function Settings() {
     try {
       setLoading(true);
 
-      // Try to fetch from system_settings table (id=1 is the main settings row)
+      // Try to fetch from system_settings table (get the first/only row)
       const { data, error } = await supabase
         .from("system_settings")
         .select("*")
-        .eq("id", 1)
+        .limit(1)
         .single();
 
       if (error && error.code !== "PGRST116") {
@@ -162,15 +162,25 @@ export default function Settings() {
         updated_by: user?.id,
       };
 
-      // Always upsert to id=1 (the main settings row created by migration)
-      const { data, error } = await supabase
-        .from("system_settings")
-        .upsert({ id: 1, ...settingsData })
-        .select()
-        .single();
+      if (settings.id) {
+        // Update existing row
+        const { error } = await supabase
+          .from("system_settings")
+          .update(settingsData)
+          .eq("id", settings.id);
 
-      if (error) throw error;
-      setSettings({ ...settings, id: data.id });
+        if (error) throw error;
+      } else {
+        // Insert new row (Supabase will generate UUID)
+        const { data, error } = await supabase
+          .from("system_settings")
+          .insert([settingsData])
+          .select()
+          .single();
+
+        if (error) throw error;
+        setSettings({ ...settings, id: data.id });
+      }
 
       toast({
         title: "Settings Saved",

@@ -550,11 +550,14 @@ class SupabaseService {
       const { data, error } = await supabase
         .from('system_settings')
         .select('universal_system_prompt')
-        .eq('id', 1)
+        .limit(1)
         .single();
 
       if (error) {
-        logger.warn('Error fetching universal prompt:', error.message);
+        // PGRST116 means no rows - that's fine, just return null
+        if (error.code !== 'PGRST116') {
+          logger.warn('Error fetching universal prompt:', error.message);
+        }
         return null;
       }
 
@@ -571,23 +574,44 @@ class SupabaseService {
    */
   async updateUniversalPrompt(prompt) {
     try {
-      const { data, error } = await supabase
+      // First check if a row exists
+      const { data: existing } = await supabase
         .from('system_settings')
-        .upsert({
-          id: 1,
-          universal_system_prompt: prompt,
-          updated_at: new Date().toISOString()
-        })
-        .select()
+        .select('id')
+        .limit(1)
         .single();
 
-      if (error) {
-        logger.error('Error updating universal prompt:', error);
-        throw error;
+      let result;
+      if (existing?.id) {
+        // Update existing row
+        result = await supabase
+          .from('system_settings')
+          .update({
+            universal_system_prompt: prompt,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', existing.id)
+          .select()
+          .single();
+      } else {
+        // Insert new row
+        result = await supabase
+          .from('system_settings')
+          .insert({
+            universal_system_prompt: prompt,
+            updated_at: new Date().toISOString()
+          })
+          .select()
+          .single();
+      }
+
+      if (result.error) {
+        logger.error('Error updating universal prompt:', result.error);
+        throw result.error;
       }
 
       logger.info('Universal prompt updated');
-      return data;
+      return result.data;
     } catch (err) {
       logger.error('Failed to update universal prompt:', err);
       throw err;
