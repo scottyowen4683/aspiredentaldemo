@@ -142,41 +142,34 @@ export async function updateUser(id: string, updates: Partial<{ full_name: strin
 }
 
 /**
- * Delete a user using the Supabase Functions endpoint which runs with service role.
- * The function will remove the user from Supabase Auth and delete the users table record.
+ * Delete a user using the backend API which runs with service role.
+ * The API will remove the user from Supabase Auth and delete the users table record.
  */
 export async function deleteUser(authId: string, userId: string): Promise<{ success: boolean; error?: string; warning?: string }>{
   try {
-    // Use Supabase Functions invoke if available
-    // Fallback to fetch to /functions/v1/delete-user
-  const supabaseWithFunctions = supabase as unknown as { functions?: { invoke?: (name: string, opts?: unknown) => Promise<unknown> } };
-    if (supabaseWithFunctions.functions && typeof supabaseWithFunctions.functions.invoke === 'function') {
-      const resp = await supabaseWithFunctions.functions.invoke('delete-user', {
-        body: { authId, userId }
-      });
-      if (!resp) return { success: false, error: 'No response from function' };
-      // resp may be a Fetch API Response-like object (supabase-js returns parsed json)
-  const respObj = resp as unknown as Record<string, unknown>;
-  const result = (respObj.data ?? respObj) as Record<string, unknown> | undefined;
-  if (result && result.success === true) return { success: true };
-  return { success: false, error: (result && (result.message as string)) || 'Failed to delete user' };
-    }
-
-    // fallback fetch
-    const base = (import.meta.env.VITE_SUPABASE_URL || '').replace(/\/$/, '') + '/functions/v1/delete-user';
-    const r = await fetch(base, {
-      method: 'POST',
+    const apiBaseUrl = import.meta.env.VITE_API_URL || '';
+    const response = await fetch(`${apiBaseUrl}/api/users/${userId}?authId=${encodeURIComponent(authId)}`, {
+      method: 'DELETE',
       headers: {
         'Content-Type': 'application/json',
-        apikey: import.meta.env.VITE_SUPABASE_ANON_KEY || ''
-      },
-      body: JSON.stringify({ authId, userId })
+      }
     });
-    const j = await r.json();
-    if (j?.success) return { success: true };
-    return { success: false, error: j?.message || 'Failed to delete user' };
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      return {
+        success: false,
+        error: result.message || `Failed to delete user: HTTP ${response.status}`
+      };
+    }
+
+    return {
+      success: result.success,
+      warning: result.warning
+    };
   } catch (err) {
-    console.error('Error invoking delete-user function:', err);
+    console.error('Error deleting user:', err);
     return { success: false, error: err instanceof Error ? err.message : String(err) };
   }
 }
