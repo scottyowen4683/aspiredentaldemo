@@ -34,6 +34,7 @@ import Campaigns from "./pages/Campaigns";
 import KnowledgeBase from "./pages/KnowledgeBase";
 import Settings from "./pages/Settings";
 import Billing from "./pages/Billing";
+import Pilot from "./pages/Pilot";
 
 // Debug flag - set to true to use minimal app for testing
 const DEBUG_MINIMAL_APP = false;
@@ -107,6 +108,9 @@ const App = () => {
 
               {/* AFA Routes */}
               <Route path="/vmf" element={<AuthMFA />} />
+
+              {/* Public Pilot Pages */}
+              <Route path="/pilot/:slug" element={<Pilot />} />
 
               {/* Protected routes */}
               <Route

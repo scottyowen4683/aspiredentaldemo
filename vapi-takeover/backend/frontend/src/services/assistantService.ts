@@ -40,6 +40,27 @@ export interface CreateAssistantInput {
   email_notification_address?: string | null;
   // Data retention policy (days)
   data_retention_days?: number | null;
+  // Pilot mode fields
+  pilot_enabled?: boolean | null;
+  pilot_slug?: string | null;
+  pilot_logo_url?: string | null;
+  pilot_config?: PilotConfig | null;
+}
+
+export interface PilotConfig {
+  companyName?: string;
+  primaryColor?: string;
+  greeting?: string;
+  title?: string;
+  scope?: string[];
+  testQuestions?: string[];
+  supportContact?: {
+    name?: string;
+    phone?: string;
+    email?: string;
+  };
+  showReviewerNotes?: boolean;
+  constraints?: string[];
 }
 
 export async function createAssistant(input: CreateAssistantInput, userId?: string) {
@@ -182,6 +203,20 @@ export async function createAssistant(input: CreateAssistantInput, userId?: stri
       insertObj.data_retention_days = input.data_retention_days ?? 90;
     }
 
+    // Fields from migration 010 (pilot mode)
+    if (input.pilot_enabled !== undefined) {
+      insertObj.pilot_enabled = input.pilot_enabled ?? false;
+    }
+    if (input.pilot_slug !== undefined) {
+      insertObj.pilot_slug = input.pilot_slug ?? null;
+    }
+    if (input.pilot_logo_url !== undefined) {
+      insertObj.pilot_logo_url = input.pilot_logo_url ?? null;
+    }
+    if (input.pilot_config !== undefined) {
+      insertObj.pilot_config = input.pilot_config ?? {};
+    }
+
     const { data, error } = await supabase.from("assistants").insert([insertObj]).select().single();
 
     if (error) {
@@ -249,6 +284,11 @@ export interface AssistantRow {
   email_notification_address?: string | null;
   // Data retention policy
   data_retention_days?: number | null;
+  // Pilot mode fields
+  pilot_enabled?: boolean | null;
+  pilot_slug?: string | null;
+  pilot_logo_url?: string | null;
+  pilot_config?: PilotConfig | null;
   created_at?: string | null;
   updated_at?: string | null;
   // Computed fields
@@ -259,7 +299,7 @@ export async function fetchAssistants(): Promise<AssistantRow[]> {
   const { data, error } = await supabase
     .from("assistants")
     .select(
-      `id, org_id, friendly_name, bot_type, active, phone_number, elevenlabs_voice_id, widget_config, prompt, model, temperature, max_tokens, first_message, kb_enabled, kb_match_count, kb_path, last_kb_upload_at, kb_chunks_count, total_interactions, avg_interaction_time, performance_rank, auto_score, background_sound, background_volume, use_default_prompt, call_transfer_enabled, call_transfer_number, sms_enabled, sms_notification_number, email_notifications_enabled, email_notification_address, data_retention_days, created_at, updated_at`
+      `id, org_id, friendly_name, bot_type, active, phone_number, elevenlabs_voice_id, widget_config, prompt, model, temperature, max_tokens, first_message, kb_enabled, kb_match_count, kb_path, last_kb_upload_at, kb_chunks_count, total_interactions, avg_interaction_time, performance_rank, auto_score, background_sound, background_volume, use_default_prompt, call_transfer_enabled, call_transfer_number, sms_enabled, sms_notification_number, email_notifications_enabled, email_notification_address, data_retention_days, pilot_enabled, pilot_slug, pilot_logo_url, pilot_config, created_at, updated_at`
     )
     .order("created_at", { ascending: false });
 
@@ -428,6 +468,20 @@ export async function updateAssistant(id: string, input: CreateAssistantInput, u
       updateObj.data_retention_days = input.data_retention_days ?? 90;
     }
 
+    // Fields from migration 010 (pilot mode)
+    if (input.pilot_enabled !== undefined) {
+      updateObj.pilot_enabled = input.pilot_enabled ?? false;
+    }
+    if (input.pilot_slug !== undefined) {
+      updateObj.pilot_slug = input.pilot_slug ?? null;
+    }
+    if (input.pilot_logo_url !== undefined) {
+      updateObj.pilot_logo_url = input.pilot_logo_url ?? null;
+    }
+    if (input.pilot_config !== undefined) {
+      updateObj.pilot_config = input.pilot_config ?? {};
+    }
+
     const { data, error } = await supabase.from("assistants").update(updateObj).eq("id", id).select().single();
     if (error) return { success: false, error };
 
@@ -532,6 +586,84 @@ export async function patchAssistant(id: string, patch: Record<string, unknown>,
     return { success: true, data };
   } catch (err) {
     return { success: false, error: err };
+  }
+}
+
+// Fetch assistant by pilot slug (for public pilot pages)
+export async function fetchAssistantByPilotSlug(slug: string): Promise<AssistantRow | null> {
+  const { data, error } = await supabase
+    .from("assistants")
+    .select(
+      `id, org_id, friendly_name, bot_type, active, phone_number, elevenlabs_voice_id, widget_config, prompt, model, temperature, max_tokens, first_message, kb_enabled, pilot_enabled, pilot_slug, pilot_logo_url, pilot_config, created_at`
+    )
+    .eq("pilot_slug", slug)
+    .eq("pilot_enabled", true)
+    .eq("active", true)
+    .single();
+
+  if (error) {
+    console.error("Error fetching pilot assistant:", error);
+    return null;
+  }
+  return data as AssistantRow;
+}
+
+// Generate a unique pilot slug from company name
+export async function generatePilotSlug(companyName: string): Promise<string> {
+  // Generate base slug from company name
+  let baseSlug = companyName
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
+
+  // If empty, use random string
+  if (!baseSlug) {
+    baseSlug = 'pilot-' + Math.random().toString(36).substring(2, 10);
+  }
+
+  let finalSlug = baseSlug;
+  let counter = 0;
+
+  // Check for uniqueness
+  while (true) {
+    const { data } = await supabase
+      .from("assistants")
+      .select("id")
+      .eq("pilot_slug", finalSlug)
+      .single();
+
+    if (!data) break; // Slug is unique
+    counter++;
+    finalSlug = `${baseSlug}-${counter}`;
+  }
+
+  return finalSlug;
+}
+
+// Upload pilot logo to storage
+export async function uploadPilotLogo(file: File, assistantId: string): Promise<{ success: boolean; url?: string; error?: string }> {
+  try {
+    const bucket = "pilot-logos";
+    const ext = file.name.split('.').pop()?.toLowerCase() || 'png';
+    const fileName = `${assistantId}/logo.${ext}`;
+
+    // Upload to storage
+    const { error: uploadError } = await supabase.storage
+      .from(bucket)
+      .upload(fileName, file, {
+        cacheControl: "3600",
+        upsert: true,
+      });
+
+    if (uploadError) {
+      return { success: false, error: uploadError.message };
+    }
+
+    // Get public URL
+    const { data: urlData } = supabase.storage.from(bucket).getPublicUrl(fileName);
+    return { success: true, url: urlData.publicUrl };
+  } catch (err) {
+    return { success: false, error: String(err) };
   }
 }
 // Build trigger: 1769402337

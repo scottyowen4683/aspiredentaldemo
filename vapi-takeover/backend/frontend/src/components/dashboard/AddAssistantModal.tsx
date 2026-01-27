@@ -11,12 +11,12 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { HelpCircle, Phone, MessageSquare, Mic, Upload, FileText, X, Loader2, Plus, Building2 } from "lucide-react";
+import { HelpCircle, Phone, MessageSquare, Mic, Upload, FileText, X, Loader2, Plus, Building2, Globe, Link2, Copy, ExternalLink, Image } from "lucide-react";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
-import { createAssistant, updateAssistant, AssistantRow } from "@/services/assistantService";
+import { createAssistant, updateAssistant, AssistantRow, generatePilotSlug, uploadPilotLogo, PilotConfig } from "@/services/assistantService";
 import { useUser } from "@/context/UserContext";
 import { fetchOrganizations } from "@/services/organizationService";
 import { cn } from "@/lib/utils";
@@ -58,6 +58,14 @@ interface FormData {
   emailNotificationAddress: string;
   // Data retention policy
   dataRetentionDays: number;
+  // Pilot mode fields
+  pilotEnabled: boolean;
+  pilotCompanyName: string;
+  pilotGreeting: string;
+  pilotLogoFile: File | null;
+  pilotLogoUrl: string;
+  pilotTestQuestions: string;
+  pilotScope: string;
 }
 
 const DEFAULT_VOICES = [
@@ -81,6 +89,7 @@ export function AddAssistantModal({ open, onOpenChange, initialData, onSuccess }
   const { user } = useUser();
   const [organizations, setOrganizations] = useState<{ id: string; name?: string | null }[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const logoInputRef = useRef<HTMLInputElement>(null);
 
   // Inline org creation state
   const [showNewOrgForm, setShowNewOrgForm] = useState(false);
@@ -116,6 +125,14 @@ export function AddAssistantModal({ open, onOpenChange, initialData, onSuccess }
     emailNotificationAddress: "",
     // Data retention policy (default 90 days)
     dataRetentionDays: 90,
+    // Pilot mode defaults
+    pilotEnabled: false,
+    pilotCompanyName: "",
+    pilotGreeting: "",
+    pilotLogoFile: null,
+    pilotLogoUrl: "",
+    pilotTestQuestions: "",
+    pilotScope: "",
   });
 
   // Fetch organizations for super_admin
@@ -224,6 +241,14 @@ export function AddAssistantModal({ open, onOpenChange, initialData, onSuccess }
           emailNotificationAddress: initialData.email_notification_address ?? "",
           // Data retention policy
           dataRetentionDays: initialData.data_retention_days ?? 90,
+          // Pilot mode fields
+          pilotEnabled: initialData.pilot_enabled ?? false,
+          pilotCompanyName: (initialData.pilot_config as PilotConfig)?.companyName ?? "",
+          pilotGreeting: (initialData.pilot_config as PilotConfig)?.greeting ?? "",
+          pilotLogoFile: null,
+          pilotLogoUrl: initialData.pilot_logo_url ?? "",
+          pilotTestQuestions: (initialData.pilot_config as PilotConfig)?.testQuestions?.join("\n") ?? "",
+          pilotScope: (initialData.pilot_config as PilotConfig)?.scope?.join("\n") ?? "",
         });
       } else {
         // Reset to defaults for new assistant
@@ -255,6 +280,14 @@ export function AddAssistantModal({ open, onOpenChange, initialData, onSuccess }
           emailNotificationsEnabled: true,
           emailNotificationAddress: "",
           dataRetentionDays: 90,
+          // Pilot mode defaults
+          pilotEnabled: false,
+          pilotCompanyName: "",
+          pilotGreeting: "",
+          pilotLogoFile: null,
+          pilotLogoUrl: "",
+          pilotTestQuestions: "",
+          pilotScope: "",
         });
       }
     }
@@ -286,6 +319,33 @@ export function AddAssistantModal({ open, onOpenChange, initialData, onSuccess }
     handleChange("kbFile", null);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
+    }
+  };
+
+  const handleLogoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 5 * 1024 * 1024) { // 5MB limit for logos
+        toast({ title: "Error", description: "Logo file must be less than 5MB", variant: "destructive" });
+        return;
+      }
+      const allowedTypes = ['image/png', 'image/jpeg', 'image/svg+xml', 'image/webp'];
+      if (!allowedTypes.includes(file.type)) {
+        toast({ title: "Error", description: "Only PNG, JPEG, SVG, and WebP images are supported", variant: "destructive" });
+        return;
+      }
+      handleChange("pilotLogoFile", file);
+      // Create preview URL
+      const previewUrl = URL.createObjectURL(file);
+      handleChange("pilotLogoUrl", previewUrl);
+    }
+  };
+
+  const removeLogo = () => {
+    handleChange("pilotLogoFile", null);
+    handleChange("pilotLogoUrl", "");
+    if (logoInputRef.current) {
+      logoInputRef.current.value = "";
     }
   };
 
@@ -353,6 +413,20 @@ export function AddAssistantModal({ open, onOpenChange, initialData, onSuccess }
         email_notification_address: formData.emailNotificationsEnabled ? formData.emailNotificationAddress : null,
         // Data retention policy
         data_retention_days: formData.dataRetentionDays,
+        // Pilot mode (only for chat bots)
+        pilot_enabled: formData.assistantType === "chat" ? formData.pilotEnabled : false,
+        pilot_slug: formData.assistantType === "chat" && formData.pilotEnabled
+          ? (initialData?.pilot_slug || await generatePilotSlug(formData.pilotCompanyName || formData.friendlyName))
+          : null,
+        pilot_config: formData.assistantType === "chat" && formData.pilotEnabled
+          ? {
+              companyName: formData.pilotCompanyName || formData.friendlyName,
+              greeting: formData.pilotGreeting || formData.firstMessage,
+              title: `${formData.pilotCompanyName || formData.friendlyName} AI Chat Pilot`,
+              testQuestions: formData.pilotTestQuestions.split("\n").filter(q => q.trim()),
+              scope: formData.pilotScope.split("\n").filter(s => s.trim()),
+            }
+          : null,
       };
 
       let result;
@@ -415,9 +489,25 @@ export function AddAssistantModal({ open, onOpenChange, initialData, onSuccess }
           }
         }
 
+        // If pilot logo is selected, upload it
+        if (formData.pilotLogoFile && assistantId && formData.pilotEnabled) {
+          try {
+            const logoResult = await uploadPilotLogo(formData.pilotLogoFile, assistantId);
+            if (logoResult.success && logoResult.url) {
+              // Update assistant with logo URL
+              await updateAssistant(assistantId, { pilot_logo_url: logoResult.url }, user?.id);
+            } else {
+              console.error('Pilot logo upload failed:', logoResult.error);
+              toast({ title: "Warning", description: "Assistant created but logo upload failed", variant: "destructive" });
+            }
+          } catch (logoError) {
+            console.error('Pilot logo upload error:', logoError);
+          }
+        }
+
         toast({
           title: initialData?.id ? "Assistant Updated" : "Assistant Created",
-          description: `${formData.friendlyName} has been ${initialData?.id ? "updated" : "created"} successfully.`
+          description: `${formData.friendlyName} has been ${initialData?.id ? "updated" : "created"} successfully.${formData.pilotEnabled ? ` Pilot page URL: /pilot/${payload.pilot_slug}` : ''}`
         });
         onOpenChange(false);
         onSuccess?.();
@@ -969,6 +1059,147 @@ export function AddAssistantModal({ open, onOpenChange, initialData, onSuccess }
                 : `Conversation data older than ${formData.dataRetentionDays} days will be automatically deleted`}
             </p>
           </div>
+
+          {/* Pilot Mode - Chat bots only */}
+          {formData.assistantType === "chat" && (
+            <div className="space-y-4 p-4 bg-gradient-to-br from-indigo-50/50 to-purple-50/50 dark:from-indigo-950/20 dark:to-purple-950/20 rounded-xl border border-indigo-200 dark:border-indigo-900">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Globe className="h-4 w-4 text-indigo-500" />
+                  <h4 className="font-medium text-indigo-700 dark:text-indigo-300">Pilot Demo Mode</h4>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button type="button" className="inline-flex"><HelpCircle className="h-4 w-4 text-muted-foreground" /></button>
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-80">
+                      <p>Creates a standalone demo page for this chatbot with your client's branding. Perfect for pilot deployments.</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
+                <Switch
+                  checked={formData.pilotEnabled}
+                  onCheckedChange={(v) => handleChange("pilotEnabled", !!v)}
+                />
+              </div>
+
+              {formData.pilotEnabled && (
+                <div className="space-y-4 pt-2">
+                  {/* Company Name */}
+                  <div className="space-y-2">
+                    <Label htmlFor="pilotCompanyName">Client Company Name</Label>
+                    <Input
+                      id="pilotCompanyName"
+                      placeholder="e.g. Moreton Bay Council"
+                      value={formData.pilotCompanyName}
+                      onChange={(e) => handleChange("pilotCompanyName", e.target.value)}
+                    />
+                    <p className="text-xs text-muted-foreground">Used in the pilot page header alongside Aspire logo</p>
+                  </div>
+
+                  {/* Client Logo Upload */}
+                  <div className="space-y-2">
+                    <Label>Client Logo (PNG recommended)</Label>
+                    <div className="flex items-center gap-3">
+                      <input
+                        ref={logoInputRef}
+                        type="file"
+                        accept="image/png,image/jpeg,image/svg+xml,image/webp"
+                        onChange={handleLogoSelect}
+                        className="hidden"
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => logoInputRef.current?.click()}
+                        className="flex-1"
+                      >
+                        <Image className="h-4 w-4 mr-2" />
+                        {formData.pilotLogoUrl ? "Change Logo" : "Upload Logo"}
+                      </Button>
+                      {formData.pilotLogoUrl && (
+                        <div className="flex items-center gap-2 px-3 py-2 bg-indigo-100 dark:bg-indigo-900/30 rounded-lg">
+                          <img
+                            src={formData.pilotLogoUrl}
+                            alt="Client logo preview"
+                            className="h-8 max-w-[120px] object-contain"
+                          />
+                          <button type="button" onClick={removeLogo} className="text-indigo-500 hover:text-indigo-700">
+                            <X className="h-4 w-4" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground">Aspire logo always appears alongside client logo</p>
+                  </div>
+
+                  {/* Pilot Greeting */}
+                  <div className="space-y-2">
+                    <Label htmlFor="pilotGreeting">Pilot Greeting Message</Label>
+                    <Textarea
+                      id="pilotGreeting"
+                      placeholder="Hi — I'm the AI assistant for [Company Name]..."
+                      value={formData.pilotGreeting}
+                      onChange={(e) => handleChange("pilotGreeting", e.target.value)}
+                      className="min-h-[80px]"
+                    />
+                    <p className="text-xs text-muted-foreground">Defaults to the first message if left empty</p>
+                  </div>
+
+                  {/* Test Questions */}
+                  <div className="space-y-2">
+                    <Label htmlFor="pilotTestQuestions">Sample Test Questions (one per line)</Label>
+                    <Textarea
+                      id="pilotTestQuestions"
+                      placeholder="What are your opening hours?&#10;How do I contact support?&#10;Tell me about your services"
+                      value={formData.pilotTestQuestions}
+                      onChange={(e) => handleChange("pilotTestQuestions", e.target.value)}
+                      className="min-h-[100px] font-mono text-sm"
+                    />
+                    <p className="text-xs text-muted-foreground">Displayed on the pilot page for testers to try</p>
+                  </div>
+
+                  {/* Scope */}
+                  <div className="space-y-2">
+                    <Label htmlFor="pilotScope">Pilot Scope / Features (one per line)</Label>
+                    <Textarea
+                      id="pilotScope"
+                      placeholder="Informational enquiries&#10;FAQ responses&#10;Contact information"
+                      value={formData.pilotScope}
+                      onChange={(e) => handleChange("pilotScope", e.target.value)}
+                      className="min-h-[80px] font-mono text-sm"
+                    />
+                    <p className="text-xs text-muted-foreground">Lists what this pilot can do</p>
+                  </div>
+
+                  {/* Pilot URL Preview */}
+                  {(initialData?.pilot_slug || formData.pilotCompanyName) && (
+                    <div className="p-3 bg-white dark:bg-slate-900 rounded-lg border">
+                      <div className="flex items-center gap-2 text-sm">
+                        <Link2 className="h-4 w-4 text-indigo-500" />
+                        <span className="text-muted-foreground">Pilot URL:</span>
+                        <code className="px-2 py-0.5 bg-slate-100 dark:bg-slate-800 rounded text-indigo-600 dark:text-indigo-400">
+                          /pilot/{initialData?.pilot_slug || formData.pilotCompanyName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}
+                        </code>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="ml-auto h-7"
+                          onClick={() => {
+                            const slug = initialData?.pilot_slug || formData.pilotCompanyName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+                            navigator.clipboard.writeText(`${window.location.origin}/pilot/${slug}`);
+                            toast({ title: "Copied!", description: "Pilot URL copied to clipboard" });
+                          }}
+                        >
+                          <Copy className="h-3 w-3 mr-1" /> Copy
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           <DialogFooter className="gap-2">
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={isSubmitting || isUploadingKb}>

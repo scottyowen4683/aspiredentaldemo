@@ -42,6 +42,8 @@ export default function Assistants() {
     id: string;
     name: string;
     type: "voice" | "chat" | "both";
+    pilotEnabled?: boolean;
+    pilotSlug?: string | null;
   } | null>(null);
   const { toast } = useToast();
 
@@ -377,6 +379,8 @@ export default function Assistants() {
                           id: assistant.id,
                           name: assistant.name,
                           type: (assistant.assistantType as "voice" | "chat") || "chat",
+                          pilotEnabled: assistant.raw?.pilot_enabled ?? false,
+                          pilotSlug: assistant.raw?.pilot_slug ?? null,
                         });
                         setIsIntegrationModalOpen(true);
                       }}
@@ -433,6 +437,8 @@ export default function Assistants() {
         assistantId={assistantForIntegration?.id || ""}
         assistantName={assistantForIntegration?.name || ""}
         assistantType={assistantForIntegration?.type || "chat"}
+        pilotEnabled={assistantForIntegration?.pilotEnabled}
+        pilotSlug={assistantForIntegration?.pilotSlug}
       />
     </DashboardLayout>
   );
