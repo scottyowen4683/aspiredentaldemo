@@ -67,24 +67,23 @@ const TRANSFER_CALL_FUNCTION = {
   }
 };
 
-// SMS notification function - only added when sms_enabled is true
+// SMS to customer function - only added when sms_enabled is true
 const SEND_SMS_FUNCTION = {
-  name: 'send_sms_notification',
-  description: 'Send an SMS notification about an important request or urgent matter. Use this to notify staff about urgent issues or to confirm details with the caller.',
+  name: 'send_sms_to_customer',
+  description: 'Send an SMS message to the customer. Use this to send confirmations, information, links, or follow-up details. You must first ask the customer for their mobile phone number before using this function.',
   parameters: {
     type: 'object',
     properties: {
+      phone_number: {
+        type: 'string',
+        description: 'The customer\'s mobile phone number (must include country code, e.g., +61400000000)'
+      },
       message: {
         type: 'string',
         description: 'The SMS message content (keep brief, under 160 characters)'
-      },
-      urgency: {
-        type: 'string',
-        enum: ['normal', 'urgent'],
-        description: 'Urgency level of the notification'
       }
     },
-    required: ['message']
+    required: ['phone_number', 'message']
   }
 };
 
@@ -160,15 +159,16 @@ You have the ability to transfer this call to a human representative.
 - Before transferring, briefly explain you'll be connecting them to someone who can help
 - Example: "Let me transfer you to one of our team members who can assist you further."`;
 
-// SMS notification instructions - appended when sms_enabled
+// SMS to customer instructions - appended when sms_enabled
 const SMS_INSTRUCTIONS = `
 
-SMS NOTIFICATIONS:
-You have the ability to send SMS notifications for urgent matters.
-- Use the send_sms_notification function for urgent requests that need immediate attention
-- Use it to notify staff about important caller issues
+SMS TO CUSTOMER:
+You have the ability to send SMS messages directly to the customer.
+- First, ask the customer for their mobile phone number if they want to receive an SMS
+- Use the send_sms_to_customer function to send confirmations, information, or follow-up details
+- Always confirm the phone number with the customer before sending (e.g., "Just to confirm, that's 0400 123 456?")
 - Keep messages brief (under 160 characters)
-- Only use for genuinely urgent or important matters, not routine inquiries`;
+- Include relevant details like reference numbers, links, or key information they requested`;
 
 // Default system prompt - used when assistant has no custom prompt
 // This matches the moretonbaypilot chatbot behavior with email capture
@@ -269,8 +269,8 @@ class VoiceHandler {
       this.transferNumber = this.assistant.call_transfer_number;
     }
 
-    // Add SMS notification function if enabled
-    if (this.assistant?.sms_enabled && this.assistant?.sms_notification_number) {
+    // Add SMS to customer function if enabled
+    if (this.assistant?.sms_enabled) {
       functions.push(SEND_SMS_FUNCTION);
     }
 
@@ -287,7 +287,7 @@ class VoiceHandler {
       instructions += TRANSFER_INSTRUCTIONS;
     }
 
-    if (this.assistant?.sms_enabled && this.assistant?.sms_notification_number) {
+    if (this.assistant?.sms_enabled) {
       instructions += SMS_INSTRUCTIONS;
     }
 
@@ -1000,29 +1000,25 @@ DO NOT make up or guess information like names, contact details, or specific fac
             }
           }
 
-          // Handle SMS notification function
-          if (toolCall.function.name === 'send_sms_notification') {
+          // Handle SMS to customer function
+          if (toolCall.function.name === 'send_sms_to_customer') {
             try {
               const args = JSON.parse(toolCall.function.arguments);
-              const smsNumber = this.assistant.sms_notification_number;
+              const customerNumber = args.phone_number;
 
-              logger.info('Voice: SMS notification requested', {
+              logger.info('Voice: SMS to customer requested', {
                 message: args.message,
-                urgency: args.urgency,
-                smsNumber
+                customerNumber
               });
 
-              if (smsNumber) {
-                // Format the SMS message with context
-                const urgencyPrefix = args.urgency === 'urgent' ? '[URGENT] ' : '';
-                const smsMessage = `${urgencyPrefix}Voice AI Alert (${this.assistant.friendly_name || 'Assistant'}): ${args.message}`;
-
-                const smsResult = await sendSMS(smsNumber, smsMessage, {
+              if (customerNumber) {
+                // Send the message directly to the customer
+                const smsResult = await sendSMS(customerNumber, args.message, {
                   fromNumber: this.assistant.phone_number || process.env.TWILIO_PHONE_NUMBER
                 });
 
                 if (smsResult.success) {
-                  logger.info('Voice: SMS notification sent', { sid: smsResult.sid });
+                  logger.info('Voice: SMS sent to customer', { sid: smsResult.sid, to: customerNumber });
 
                   // Log SMS interaction for billing tracking
                   if (this.assistant?.org_id) {
@@ -1033,7 +1029,7 @@ DO NOT make up or guess information like names, contact details, or specific fac
                         interactionType: 'sms_outbound',
                         conversationId: this.conversation?.id || null,
                         sessionId: this.sessionId,
-                        contactNumber: smsNumber,
+                        contactNumber: customerNumber,
                         cost: 0 // SMS cost is typically flat rate
                       });
                     } catch (logError) {
@@ -1042,17 +1038,22 @@ DO NOT make up or guess information like names, contact details, or specific fac
                   }
 
                   if (!responseText) {
-                    responseText = "I've sent a notification to our team. They will be in touch shortly.";
+                    responseText = "I've sent that SMS to your phone. You should receive it shortly.";
                   }
                 } else {
-                  logger.error('Voice: SMS notification failed', smsResult);
-                  // Don't mention failure to caller, just log it
+                  logger.error('Voice: SMS to customer failed', smsResult);
+                  if (!responseText) {
+                    responseText = "I'm sorry, I wasn't able to send that SMS. Could you please double-check the phone number?";
+                  }
                 }
               } else {
-                logger.warn('Voice: SMS requested but no SMS number configured');
+                logger.warn('Voice: SMS requested but no phone number provided');
+                if (!responseText) {
+                  responseText = "I need your mobile phone number to send you an SMS. What's the best number to reach you?";
+                }
               }
             } catch (fnError) {
-              logger.error('Voice: Error processing SMS notification:', fnError);
+              logger.error('Voice: Error processing SMS to customer:', fnError);
             }
           }
         }
@@ -1354,28 +1355,25 @@ DO NOT make up or guess information like names, contact details, or specific fac
             }
           }
 
-          // Handle SMS notification function
-          if (toolCall.name === 'send_sms_notification') {
+          // Handle SMS to customer function
+          if (toolCall.name === 'send_sms_to_customer') {
             try {
               const args = JSON.parse(toolCall.arguments);
-              const smsNumber = this.assistant.sms_notification_number;
+              const customerNumber = args.phone_number;
 
-              logger.info('Voice streaming: SMS notification requested', {
+              logger.info('Voice streaming: SMS to customer requested', {
                 message: args.message,
-                urgency: args.urgency,
-                smsNumber
+                customerNumber
               });
 
-              if (smsNumber) {
-                const urgencyPrefix = args.urgency === 'urgent' ? '[URGENT] ' : '';
-                const smsMessage = `${urgencyPrefix}Voice AI Alert (${this.assistant.friendly_name || 'Assistant'}): ${args.message}`;
-
-                const smsResult = await sendSMS(smsNumber, smsMessage, {
+              if (customerNumber) {
+                // Send the message directly to the customer
+                const smsResult = await sendSMS(customerNumber, args.message, {
                   fromNumber: this.assistant.phone_number || process.env.TWILIO_PHONE_NUMBER
                 });
 
                 if (smsResult.success) {
-                  logger.info('Voice streaming: SMS notification sent', { sid: smsResult.sid });
+                  logger.info('Voice streaming: SMS sent to customer', { sid: smsResult.sid, to: customerNumber });
 
                   // Log SMS interaction for billing tracking
                   if (this.assistant?.org_id) {
@@ -1386,7 +1384,7 @@ DO NOT make up or guess information like names, contact details, or specific fac
                         interactionType: 'sms_outbound',
                         conversationId: this.conversation?.id || null,
                         sessionId: this.sessionId,
-                        contactNumber: smsNumber,
+                        contactNumber: customerNumber,
                         cost: 0 // SMS cost is typically flat rate
                       });
                     } catch (logError) {
@@ -1395,17 +1393,25 @@ DO NOT make up or guess information like names, contact details, or specific fac
                   }
 
                   if (!fullText.trim()) {
-                    fullText = "I've sent a notification to our team. They will be in touch shortly.";
+                    fullText = "I've sent that SMS to your phone. You should receive it shortly.";
                     onSentence(fullText);
                   }
                 } else {
-                  logger.error('Voice streaming: SMS notification failed', smsResult);
+                  logger.error('Voice streaming: SMS to customer failed', smsResult);
+                  if (!fullText.trim()) {
+                    fullText = "I'm sorry, I wasn't able to send that SMS. Could you please double-check the phone number?";
+                    onSentence(fullText);
+                  }
                 }
               } else {
-                logger.warn('Voice streaming: SMS requested but no SMS number configured');
+                logger.warn('Voice streaming: SMS requested but no phone number provided');
+                if (!fullText.trim()) {
+                  fullText = "I need your mobile phone number to send you an SMS. What's the best number to reach you?";
+                  onSentence(fullText);
+                }
               }
             } catch (fnError) {
-              logger.error('Voice streaming: Error processing SMS notification:', fnError);
+              logger.error('Voice streaming: Error processing SMS to customer:', fnError);
             }
           }
         }

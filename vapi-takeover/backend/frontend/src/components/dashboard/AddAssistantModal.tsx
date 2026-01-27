@@ -894,12 +894,12 @@ export function AddAssistantModal({ open, onOpenChange, initialData, onSuccess }
             </div>
           )}
 
-          {/* SMS Notifications */}
+          {/* SMS to Customer */}
           <div className="space-y-3 p-4 bg-cyan-50/50 dark:bg-cyan-950/20 rounded-xl border border-cyan-200 dark:border-cyan-900">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <MessageSquare className="h-4 w-4 text-cyan-500" />
-                <h4 className="font-medium text-cyan-700 dark:text-cyan-300">SMS Notifications</h4>
+                <h4 className="font-medium text-cyan-700 dark:text-cyan-300">SMS to Customer</h4>
               </div>
               <Switch
                 checked={formData.smsEnabled}
@@ -907,18 +907,9 @@ export function AddAssistantModal({ open, onOpenChange, initialData, onSuccess }
               />
             </div>
             {formData.smsEnabled && (
-              <div className="space-y-2">
-                <Label htmlFor="smsNotificationNumber">SMS Notification Number</Label>
-                <Input
-                  id="smsNotificationNumber"
-                  placeholder="+61400000000"
-                  value={formData.smsNotificationNumber}
-                  onChange={(e) => handleChange("smsNotificationNumber", e.target.value)}
-                />
-                <p className="text-xs text-muted-foreground">
-                  Send SMS notifications to this number for contact requests
-                </p>
-              </div>
+              <p className="text-xs text-muted-foreground">
+                When enabled, the assistant can request the customer's mobile number and send them SMS messages with information, confirmations, or follow-up details.
+              </p>
             )}
           </div>
 
