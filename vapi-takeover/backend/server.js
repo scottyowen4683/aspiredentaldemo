@@ -154,9 +154,9 @@ wss.on('connection', async (ws, req) => {
               'EXAVITQu4vr4xnSDxMaL'; // Default: "Sarah" voice
 
             try {
-              // Get background sound setting from assistant
-              const backgroundSound = voiceHandler.assistant.background_sound || 'none';
-              const backgroundVolume = voiceHandler.assistant.background_volume || 0.15;
+              // Get background sound setting from assistant (default: office for natural sound)
+              const backgroundSound = voiceHandler.assistant.background_sound || 'office';
+              const backgroundVolume = voiceHandler.assistant.background_volume || 0.20;
 
               // Debug logging for background sound
               logger.info('Background sound settings', {
@@ -251,8 +251,38 @@ wss.on('connection', async (ws, req) => {
                   logger.info('Streaming response complete', {
                     transcription: result.transcription,
                     responsePreview: result.responseText?.substring(0, 50) + '...',
-                    latencyMs: result.latency
+                    latencyMs: result.latency,
+                    shouldEndCall: result.shouldEndCall
                   });
+
+                  // If AI said goodbye or user ended conversation, hang up after audio plays
+                  if (result.shouldEndCall) {
+                    logger.info('End call detected, hanging up after audio completes', {
+                      callSid,
+                      transcription: result.transcription
+                    });
+
+                    // Wait for audio to finish playing (estimate based on response length)
+                    // ~150 chars per second at normal speaking pace
+                    const audioPlaybackMs = Math.max(2000, (result.responseText?.length || 0) * 7);
+
+                    setTimeout(async () => {
+                      try {
+                        // End the call gracefully via Twilio
+                        await twilioClient.calls(callSid).update({ status: 'completed' });
+                        logger.info('Call ended successfully', { callSid });
+
+                        // Clean up
+                        if (voiceHandler) {
+                          await voiceHandler.endCall('completed');
+                          voiceHandler = null;
+                        }
+                        ws.close();
+                      } catch (hangupError) {
+                        logger.error('Error hanging up call:', hangupError);
+                      }
+                    }, audioPlaybackMs);
+                  }
                 }
               } catch (error) {
                 logger.error('Error processing speech:', error);

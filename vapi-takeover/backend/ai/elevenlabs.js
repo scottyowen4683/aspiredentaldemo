@@ -20,6 +20,7 @@ backgroundAudioCache = {};
 /**
  * Generate synthetic background noise (μ-law 8kHz format)
  * Creates 10 seconds of loopable ambient noise
+ * Uses proper μ-law encoding with audible brown noise
  * @param {string} type - Type: 'office' (soft murmur), 'cafe' (busier), 'white'
  * @returns {Buffer}
  */
@@ -29,41 +30,48 @@ function generateBackgroundNoise(type) {
   const samples = sampleRate * duration;
   const buffer = Buffer.alloc(samples);
 
-  // Parameters based on type - INCREASED for audibility
-  let noiseLevel = 0.15; // Base noise level (was 0.03)
-  let lowPassFreq = 500;
+  // Brown noise parameters - much more audible
+  let amplitude, smoothing;
 
   switch (type) {
     case 'office':
-      noiseLevel = 0.12; // Noticeable office ambience (was 0.025)
-      lowPassFreq = 600;
+      amplitude = 8; // Audible office hum
+      smoothing = 0.98; // Smooth brown noise
       break;
     case 'cafe':
-      noiseLevel = 0.18; // Busier cafe sound (was 0.04)
-      lowPassFreq = 800;
+      amplitude = 12; // Busier ambient sound
+      smoothing = 0.95;
       break;
     case 'white':
     default:
-      noiseLevel = 0.10;
-      lowPassFreq = 400;
+      amplitude = 6;
+      smoothing = 0.99;
   }
 
-  // Generate pink-ish noise with low-pass filtering
-  let lastSample = 127; // μ-law silence
+  // Generate brown noise (integrated white noise - sounds more natural)
+  let value = 0;
   for (let i = 0; i < samples; i++) {
-    // Generate noise - stronger amplitude
-    const noise = (Math.random() - 0.5) * 2 * noiseLevel * 128;
+    // White noise input
+    const white = (Math.random() * 2 - 1);
 
-    // Simple low-pass filter (smoothing)
-    const alpha = lowPassFreq / (lowPassFreq + sampleRate);
-    const filtered = lastSample + alpha * (127 + noise - lastSample);
-    lastSample = filtered;
+    // Integrate for brown noise (low frequency rumble)
+    value = value * smoothing + white * (1 - smoothing);
 
-    // Convert to μ-law range (0-255, 127 = silence)
-    buffer[i] = Math.max(0, Math.min(255, Math.round(filtered)));
+    // Scale and convert to μ-law
+    // μ-law: 127 is silence, deviation creates sound
+    // Positive and negative deviations from 127 create the waveform
+    const scaled = value * amplitude;
+    const sample = 127 + Math.round(scaled);
+
+    buffer[i] = Math.max(0, Math.min(255, sample));
   }
 
-  logger.info(`Generated ${type} background noise`, { samples, duration: `${duration}s`, noiseLevel });
+  logger.info(`Generated ${type} background noise`, {
+    samples,
+    duration: `${duration}s`,
+    amplitude,
+    smoothing
+  });
   return buffer;
 }
 

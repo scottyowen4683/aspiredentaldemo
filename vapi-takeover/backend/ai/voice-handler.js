@@ -48,6 +48,42 @@ const VOICE_FUNCTIONS = [
   }
 ];
 
+// Phrases that indicate the call should end
+const END_CALL_PHRASES = [
+  'goodbye',
+  'bye bye',
+  'bye for now',
+  'have a great day',
+  'take care',
+  'thanks for calling',
+  'thank you for calling'
+];
+
+// User phrases that indicate they want to end the call
+const USER_END_PHRASES = [
+  'goodbye',
+  'bye',
+  'that\'s all',
+  'that is all',
+  'nothing else',
+  'no thanks',
+  'no thank you',
+  'i\'m done',
+  'i am done',
+  'that\'s everything',
+  'all good',
+  'thanks bye'
+];
+
+/**
+ * Check if text indicates call should end
+ */
+function shouldEndCall(text, isUserText = false) {
+  const lower = text.toLowerCase();
+  const phrases = isUserText ? USER_END_PHRASES : END_CALL_PHRASES;
+  return phrases.some(phrase => lower.includes(phrase));
+}
+
 // Function calling instructions appended to voice prompts
 const FUNCTION_INSTRUCTIONS = `
 
@@ -64,33 +100,30 @@ Always confirm the address related to the issue.`;
 
 // Default system prompt - used when assistant has no custom prompt
 // This matches the moretonbaypilot chatbot behavior with email capture
-const DEFAULT_SYSTEM_PROMPT = `You are a helpful, friendly AI assistant.
+const DEFAULT_SYSTEM_PROMPT = `You are a helpful, friendly AI assistant on a phone call.
+
+RESPONSE STYLE (CRITICAL):
+- ALWAYS start with a brief acknowledgment like "Sure," or "Of course," or "Let me check that." before answering
+- Keep responses brief (under 50 words for voice)
+- Use natural conversational language
+- Be warm, professional, and helpful
 
 CORE INSTRUCTIONS:
 1. Use ONLY the knowledge base information provided below to answer questions - this is your PRIMARY source of truth
-2. Be conversational and natural - this is a voice call, so keep responses concise (2-3 sentences max)
-3. If the knowledge base contains the answer, use it confidently and accurately
-4. If information is NOT in the knowledge base, say: "I don't have that specific information in my records. Would you like me to help connect you with someone who can assist?"
-5. NEVER make up or hallucinate information - accuracy is critical
-6. Be warm, professional, and helpful
+2. If the knowledge base contains the answer, use it confidently and accurately
+3. If information is NOT in the knowledge base, say: "I don't have that specific information in my records. Would you like me to help connect you with someone who can assist?"
+4. NEVER make up or hallucinate information - accuracy is critical
 
-RESPONSE STYLE:
-- Keep responses brief (under 50 words for voice)
-- Use natural conversational language
-- Confirm understanding before providing detailed answers
-- Offer to help with related questions
+ENDING CALLS:
+When the user says goodbye, thanks, that's all, nothing else, or similar:
+- Say a brief friendly goodbye like "Thanks for calling! Have a great day. Goodbye."
+- Include the word "goodbye" to signal call end
 
 EMAIL/CONTACT CAPTURE:
-If a user wants to receive information via email, lodge a request, or wants to be contacted:
-1. Ask for their name and email address clearly
-2. Confirm the details by repeating them back
-3. Ask what specific information or help they need
-4. Say: "I've noted your request for [topic]. Someone from our team will follow up with you at [email] shortly."
-
-IMPORTANT: When capturing contact details, structure your response to include:
-- Name: [their name]
-- Email: [their email]
-- Request: [what they need]
+If a user wants to lodge a request or complaint:
+1. Ask for their name and contact details
+2. Confirm the address related to the issue
+3. The system will automatically capture and email the request
 
 Remember: You're speaking on a phone call - be brief, clear, and helpful.`;
 
@@ -871,19 +904,9 @@ class VoiceHandler {
         }).catch(e => logger.warn('Failed to save user message:', e.message));
       }
 
-      // FILLER PHRASE: Speak immediately to reduce perceived latency
-      // This plays while GPT is generating the real response
-      const fillerPhrase = FILLER_PHRASES[Math.floor(Math.random() * FILLER_PHRASES.length)];
-      logger.info('Playing filler phrase', { phrase: fillerPhrase });
-
-      // Start filler TTS - this plays while GPT generates the response
-      // We await it to ensure filler completes before main response starts
-      try {
-        await this.generateSpeechStreaming(fillerPhrase, onAudioChunk);
-        logger.info('Filler phrase complete');
-      } catch (err) {
-        logger.warn('Filler phrase TTS failed:', err.message);
-      }
+      // NOTE: Filler phrases removed - they created audio discontinuity/fuzz
+      // Instead, the prompt instructs the AI to start with brief acknowledgment
+      // This keeps audio continuous without separate TTS calls
 
       // Step 2 + 3: PIPELINE GPT streaming → ElevenLabs streaming
       // Each sentence from GPT immediately goes to TTS
@@ -954,13 +977,21 @@ class VoiceHandler {
       this.costs.gpt += gptResponse.cost;
       this.costs.total += gptResponse.cost;
 
+      // Check if we should end the call based on user input or AI response
+      const userWantsToEnd = shouldEndCall(transcription, true);
+      const aiSaidGoodbye = shouldEndCall(gptResponse.text, false);
+      const endCallRequested = userWantsToEnd || aiSaidGoodbye;
+
       logger.info('Pipelined turn complete', {
         turnNumber: this.turnCount,
         transcriptionMs: transcriptionLatency,
         gptPlusTtsMs: gptLatency,
         totalMs: totalLatency,
         sentences: sentenceCount,
-        audioBytes: totalAudioBytes
+        audioBytes: totalAudioBytes,
+        userWantsToEnd,
+        aiSaidGoodbye,
+        endCallRequested
       });
 
       this.isProcessing = false;
@@ -968,6 +999,7 @@ class VoiceHandler {
       return {
         transcription,
         responseText: gptResponse.text,
+        shouldEndCall: endCallRequested,
         latency: {
           transcription: transcriptionLatency,
           gpt: gptLatency,
