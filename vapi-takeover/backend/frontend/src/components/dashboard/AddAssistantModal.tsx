@@ -308,9 +308,9 @@ export function AddAssistantModal({ open, onOpenChange, initialData, onSuccess }
 
       let result;
       if (initialData?.id) {
-        result = await updateAssistant(initialData.id, payload);
+        result = await updateAssistant(initialData.id, payload, user?.id);
       } else {
-        result = await createAssistant(payload);
+        result = await createAssistant(payload, user?.id);
       }
 
       if (result.success) {
