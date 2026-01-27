@@ -204,12 +204,33 @@ router.post('/', async (req, res) => {
       logger.info('KB not enabled for this assistant');
     }
 
-    // Build messages for OpenAI - use default prompt if assistant has none
-    const systemPrompt = assistant.prompt || DEFAULT_CHAT_PROMPT;
+    // Build system prompt - use assistant's prompt if set, otherwise use default
+    // ALWAYS append function calling instructions so requests get captured
+    const basePrompt = assistant.prompt || DEFAULT_CHAT_PROMPT;
+
+    // Function calling instructions - always included
+    const functionInstructions = `
+
+CAPTURING REQUESTS (IMPORTANT - ALWAYS DO THIS):
+When a user:
+- Wants to lodge a complaint (barking dog, noise, rubbish, etc.)
+- Wants to report an issue (with an address)
+- Wants to be contacted or receive follow-up
+- Provides details about a problem that needs action
+
+You MUST call the capture_contact_request function to log their request. Include:
+- Their name and contact info (if provided)
+- The address related to the issue (if applicable)
+- The type of request (complaint, enquiry, service_request, etc.)
+- Full details of what they need
+
+After capturing, confirm what you've recorded and let them know someone will follow up.`;
+
+    const systemPrompt = basePrompt + functionInstructions + kbContext;
     const messages = [
       {
         role: 'system',
-        content: systemPrompt + kbContext
+        content: systemPrompt
       },
       ...history
     ];
