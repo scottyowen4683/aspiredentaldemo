@@ -60,10 +60,10 @@ export const useClientCostMetrics = (orgId: string | null, conversationsThisMont
         setLoading(true);
         setError(null);
 
-        // Fetch organization service plan from database
+        // Fetch organization service plan from database using actual schema columns
         const { data: orgData, error: orgError } = await supabase
           .from('organizations')
-          .select('id, monthly_service_fee, baseline_human_cost_per_call, service_plan_name')
+          .select('id, flat_rate_fee, included_interactions, overage_rate_per_1000, settings')
           .eq('id', orgId)
           .single();
 
@@ -71,26 +71,21 @@ export const useClientCostMetrics = (orgId: string | null, conversationsThisMont
 
         if (orgError || !orgData) {
           // Use default plan if organization not found
-          console.log('Organization not found, using default plan values');
-          organizationPlan = DEFAULT_PLAN;
-        } else if (!orgData.monthly_service_fee || orgData.monthly_service_fee === undefined) {
-          // Use default plan if service plan fields don't exist or aren't configured
-          console.log('Service plan not configured or database columns missing, using default plan values');
           organizationPlan = DEFAULT_PLAN;
         } else {
-          // Calculate plan values from service plan configuration
-          const monthlyServiceFee = orgData.monthly_service_fee;
-          const baselineHumanCost = orgData.baseline_human_cost_per_call || DEFAULT_PLAN.baselineHumanCostPerCall;
-          
-          // Estimate included calls based on service fee (baseline: assume service fee covers reasonable volume)
-          // More realistic calculation: service fee typically covers 80% of baseline volume
-          const estimatedIncludedCalls = Math.floor((monthlyServiceFee / baselineHumanCost) * 0.8);
-          
+          // Get values from database or settings, fallback to defaults
+          const flatRateFee = orgData.flat_rate_fee || DEFAULT_PLAN.monthlyPlanCost;
+          const includedInteractions = orgData.included_interactions || DEFAULT_PLAN.includedCallsPerMonth;
+          const overageRatePer1000 = orgData.overage_rate_per_1000 || (DEFAULT_PLAN.overageRatePerCall * 1000);
+
+          // Check for baseline_human_cost_per_call in settings JSONB
+          const baselineHumanCost = orgData.settings?.baseline_human_cost_per_call || DEFAULT_PLAN.baselineHumanCostPerCall;
+
           organizationPlan = {
-            monthlyPlanCost: monthlyServiceFee,
+            monthlyPlanCost: flatRateFee,
             baselineHumanCostPerCall: baselineHumanCost,
-            includedCallsPerMonth: Math.max(estimatedIncludedCalls, 100), // Minimum 100 calls
-            overageRatePerCall: baselineHumanCost * 0.4 // Overage is typically 40% of human cost
+            includedCallsPerMonth: includedInteractions,
+            overageRatePerCall: overageRatePer1000 / 1000 // Convert per-1000 to per-call
           };
         }
 

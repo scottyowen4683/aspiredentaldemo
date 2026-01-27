@@ -87,46 +87,30 @@ export default function OrganizationRubricModal({
 
   useEffect(() => {
     const loadRubric = async () => {
-      console.log("🏢 OrganizationRubricModal - received organization:", organization);
-      
       if (!organization) {
-        console.log("❌ No organization provided, using default rubric");
         setRubric(DEFAULT_RUBRIC);
         return;
       }
 
-      console.log("📋 Organization default_rubric field:", organization?.default_rubric);
-      console.log("🔍 Type of default_rubric:", typeof organization?.default_rubric);
-      
       // First try the organization object (if it has the rubric data)
       if (organization?.default_rubric && typeof organization.default_rubric === 'object') {
-        console.log("✅ Using rubric from organization object:", organization.default_rubric);
-        
         // Validate that it has the expected structure
         if (organization.default_rubric.dimensions && Array.isArray(organization.default_rubric.dimensions)) {
           setRubric(organization.default_rubric);
-          console.log("✅ Rubric loaded successfully with", organization.default_rubric.dimensions.length, "dimensions");
           return;
-        } else {
-          console.log("⚠️ Rubric exists but has invalid structure, will fetch from service");
         }
       }
-      
+
       // Fallback: Fetch directly from rubric service
-      console.log("🔧 Fetching rubric directly from service for org ID:", organization.id);
       try {
         const result = await getOrganizationRubric(organization.id);
-        console.log("📥 Service fetch result:", result);
-        
         if (result.success && result.data) {
-          console.log("✅ Loaded rubric from service with", result.data.dimensions?.length || 0, "dimensions");
           setRubric(result.data);
         } else {
-          console.log("ℹ️ No rubric found in service, using defaults. Error:", result.error?.message);
           setRubric(DEFAULT_RUBRIC);
         }
       } catch (error) {
-        console.error("❌ Error fetching rubric from service:", error);
+        console.error("Error fetching rubric from service:", error);
         setRubric(DEFAULT_RUBRIC);
       }
     };

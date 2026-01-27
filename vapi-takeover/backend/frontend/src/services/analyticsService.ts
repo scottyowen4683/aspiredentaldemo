@@ -79,8 +79,6 @@ export async function getAnalyticsMetrics(
   period: string = "30d"
 ): Promise<AnalyticsMetrics> {
   try {
-    console.log("Analytics Metrics Calculation:", { orgId, period });
-
     const days = period === "7d" ? 7 : period === "90d" ? 90 : 30;
     const dateFrom = new Date();
     dateFrom.setDate(dateFrom.getDate() - days);

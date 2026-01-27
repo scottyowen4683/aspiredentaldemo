@@ -1054,8 +1054,8 @@ export function AddAssistantModal({ open, onOpenChange, initialData, onSuccess }
             </p>
           </div>
 
-          {/* Pilot Mode - Chat bots only */}
-          {formData.assistantType === "chat" && (
+          {/* Pilot Mode - Chat bots only - Super admin only */}
+          {formData.assistantType === "chat" && user?.role === "super_admin" && (
             <div className="space-y-4 p-4 bg-gradient-to-br from-indigo-50/50 to-purple-50/50 dark:from-indigo-950/20 dark:to-purple-950/20 rounded-xl border border-indigo-200 dark:border-indigo-900">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">

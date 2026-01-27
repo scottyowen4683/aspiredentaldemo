@@ -115,24 +115,6 @@ export default function Analytics() {
     refetchInterval: 60000,
   });
 
-  // Debug logging for score distribution
-  console.log("Score Distribution Debug:", {
-    scoreDistribution,
-    scoresLoading,
-    scoresError,
-    queryOrgId,
-    selectedPeriod
-  });
-
-  // Debug logging for key metrics
-  console.log("Key Metrics Debug:", {
-    keyMetrics,
-    metricsLoading,
-    metricsError,
-    queryOrgId,
-    selectedPeriod
-  });
-
   // Fetch call profile
   const { data: callProfile = [], isLoading: callProfileLoading } = useQuery({
     queryKey: ["call-profile", queryOrgId, selectedPeriod],

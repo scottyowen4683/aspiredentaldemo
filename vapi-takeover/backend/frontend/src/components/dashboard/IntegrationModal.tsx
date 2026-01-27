@@ -12,6 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useUser } from "@/context/UserContext";
 import {
   Copy,
   Code,
@@ -87,6 +88,7 @@ export default function IntegrationModal({
   pilotSlug,
 }: IntegrationModalProps) {
   const { toast } = useToast();
+  const { user } = useUser();
   const [loading, setLoading] = useState(false);
   const [embedData, setEmbedData] = useState<EmbedCodeData | null>(null);
   const [copiedField, setCopiedField] = useState<string | null>(null);
@@ -186,9 +188,13 @@ export default function IntegrationModal({
             <Skeleton className="h-48 w-full" />
           </div>
         ) : embedData ? (
-          <Tabs defaultValue={pilotEnabled && pilotSlug ? "pilot" : (assistantType === "voice" ? "voice" : "chat")} className="mt-4">
-            <TabsList className={`grid w-full ${pilotEnabled && pilotSlug ? 'grid-cols-3' : 'grid-cols-2'}`}>
-              {pilotEnabled && pilotSlug && (
+          // Only show pilot tab for super_admin users
+          (() => {
+            const showPilotTab = pilotEnabled && pilotSlug && user?.role === "super_admin";
+            return (
+          <Tabs defaultValue={showPilotTab ? "pilot" : (assistantType === "voice" ? "voice" : "chat")} className="mt-4">
+            <TabsList className={`grid w-full ${showPilotTab ? 'grid-cols-3' : 'grid-cols-2'}`}>
+              {showPilotTab && (
                 <TabsTrigger value="pilot" className="flex items-center gap-2">
                   <Globe className="h-4 w-4" />
                   Pilot Page
@@ -208,8 +214,8 @@ export default function IntegrationModal({
               )}
             </TabsList>
 
-            {/* Pilot Page Integration */}
-            {pilotEnabled && pilotSlug && (
+            {/* Pilot Page Integration - Super admin only */}
+            {showPilotTab && (
               <TabsContent value="pilot" className="space-y-6 mt-4">
                 <Card>
                   <CardHeader>
@@ -507,6 +513,8 @@ export default function IntegrationModal({
               </TabsContent>
             )}
           </Tabs>
+            );
+          })()
         ) : (
           <div className="py-8 text-center text-muted-foreground">
             <p>No integration data available</p>

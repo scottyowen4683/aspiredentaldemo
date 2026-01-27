@@ -5,6 +5,7 @@ import supabaseService from '../services/supabase-service.js';
 import { processKnowledgeBase } from '../services/kb-processor.js';
 import { validateTwilioNumber } from '../services/twilio-validator.js';
 import logger from '../services/logger.js';
+import emailService from '../services/email-service.js';
 
 const router = express.Router();
 
@@ -1003,5 +1004,193 @@ router.get('/stats', async (req, res) => {
     });
   }
 });
+
+// =============================================================================
+// SERVICE REQUESTS
+// =============================================================================
+
+// POST /api/admin/service-request - Submit a service request (for org users to contact Aspire)
+router.post('/service-request', async (req, res) => {
+  try {
+    const { subject, message, requestType, urgency, organizationId, organizationName, userName, userEmail } = req.body;
+
+    // Validation
+    if (!subject || !message) {
+      return res.status(400).json({
+        success: false,
+        error: 'Subject and message are required'
+      });
+    }
+
+    // Build email content
+    const urgencyColors = {
+      high: '#dc2626',
+      medium: '#f59e0b',
+      low: '#22c55e'
+    };
+
+    const requestTypeLabels = {
+      general: 'General Inquiry',
+      technical: 'Technical Support',
+      billing: 'Billing Question',
+      feature: 'Feature Request',
+      bug: 'Bug Report',
+      other: 'Other'
+    };
+
+    const urgencyColor = urgencyColors[urgency] || urgencyColors.medium;
+    const requestLabel = requestTypeLabels[requestType] || 'Service Request';
+    const referenceId = `SR-${Date.now().toString(36).toUpperCase()}`;
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <style>
+          body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; }
+          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+          .header { background: linear-gradient(135deg, #8B5CF6, #6366F1); padding: 20px; border-radius: 8px 8px 0 0; }
+          .header h1 { color: white; margin: 0; font-size: 20px; }
+          .content { background: #f9fafb; padding: 20px; border: 1px solid #e5e7eb; border-top: none; }
+          .field { margin-bottom: 12px; }
+          .label { font-weight: 600; color: #6b7280; font-size: 12px; text-transform: uppercase; }
+          .value { color: #111827; margin-top: 4px; }
+          .urgency { display: inline-block; padding: 4px 12px; border-radius: 999px; font-size: 12px; font-weight: 600; color: white; }
+          .details-box { background: white; padding: 16px; border-radius: 8px; border: 1px solid #e5e7eb; margin-top: 16px; }
+          .footer { padding: 16px 20px; background: #f3f4f6; border-radius: 0 0 8px 8px; font-size: 12px; color: #6b7280; border: 1px solid #e5e7eb; border-top: none; }
+          .reference { font-family: monospace; font-size: 14px; font-weight: 600; color: #8B5CF6; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1>Service Request - ${requestLabel}</h1>
+          </div>
+          <div class="content">
+            <div class="field">
+              <div class="label">Reference</div>
+              <div class="value reference">${referenceId}</div>
+            </div>
+
+            <div class="field">
+              <div class="label">Urgency</div>
+              <div class="value">
+                <span class="urgency" style="background-color: ${urgencyColor}">
+                  ${(urgency || 'medium').toUpperCase()}
+                </span>
+              </div>
+            </div>
+
+            <div class="field">
+              <div class="label">Subject</div>
+              <div class="value">${escapeHtml(subject)}</div>
+            </div>
+
+            ${organizationName ? `
+            <div class="field">
+              <div class="label">Organization</div>
+              <div class="value">${escapeHtml(organizationName)}</div>
+            </div>
+            ` : ''}
+
+            ${userName ? `
+            <div class="field">
+              <div class="label">Submitted By</div>
+              <div class="value">${escapeHtml(userName)}</div>
+            </div>
+            ` : ''}
+
+            ${userEmail ? `
+            <div class="field">
+              <div class="label">Contact Email</div>
+              <div class="value"><a href="mailto:${userEmail}">${escapeHtml(userEmail)}</a></div>
+            </div>
+            ` : ''}
+
+            <div class="details-box">
+              <div class="label">Message</div>
+              <div class="value" style="white-space: pre-wrap; margin-top: 8px;">${escapeHtml(message)}</div>
+            </div>
+          </div>
+          <div class="footer">
+            <p style="margin: 0;">
+              Organization ID: ${organizationId || 'N/A'}
+            </p>
+            <p style="margin: 8px 0 0 0;">
+              Submitted via <a href="https://portal.aspireexecutive.ai" style="color: #8B5CF6;">Aspire Portal</a>
+            </p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    // Send email to Aspire support
+    const aspireEmail = process.env.ASPIRE_SUPPORT_EMAIL || process.env.NOTIFICATION_EMAIL || 'support@aspireexecutive.ai';
+
+    const result = await emailService.sendEmail({
+      to: aspireEmail,
+      subject: `[${(urgency || 'MEDIUM').toUpperCase()}] Service Request: ${subject}`,
+      html
+    });
+
+    if (result.skipped) {
+      logger.warn('Service request email skipped:', result.reason);
+      return res.json({
+        success: true,
+        message: 'Service request received but email not sent (email service not configured)',
+        referenceId,
+        emailSkipped: true
+      });
+    }
+
+    // Log to audit
+    try {
+      if (organizationId) {
+        await supabaseService.client.from('audit_logs').insert({
+          org_id: organizationId,
+          action: 'service_request_submitted',
+          details: JSON.stringify({
+            referenceId,
+            subject,
+            requestType,
+            urgency,
+            userName,
+            userEmail
+          }),
+          created_at: new Date().toISOString()
+        });
+      }
+    } catch (auditError) {
+      logger.warn('Failed to create audit log:', auditError.message);
+    }
+
+    logger.info('Service request submitted', { referenceId, subject, organizationId });
+
+    return res.json({
+      success: true,
+      message: 'Service request submitted successfully. Our team will respond shortly.',
+      referenceId
+    });
+
+  } catch (error) {
+    logger.error('Service request error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to submit service request'
+    });
+  }
+});
+
+// Helper function to escape HTML
+function escapeHtml(text) {
+  if (!text) return '';
+  return String(text)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
 
 export default router;

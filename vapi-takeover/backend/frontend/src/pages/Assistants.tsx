@@ -130,12 +130,15 @@ export default function Assistants() {
               Create and manage your Aspire AI assistants for voice and chat interactions
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <Button onClick={() => setOpenAddAssistant(true)} className="flex-1 sm:flex-none bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700">
-              <Plus className="mr-2 h-4 w-4" />
-              Create Assistant
-            </Button>
-          </div>
+          {/* Only super_admin can create new assistants */}
+          {user?.role === "super_admin" && (
+            <div className="flex flex-wrap gap-2">
+              <Button onClick={() => setOpenAddAssistant(true)} className="flex-1 sm:flex-none bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700">
+                <Plus className="mr-2 h-4 w-4" />
+                Create Assistant
+              </Button>
+            </div>
+          )}
           <AddAssistantModal
             open={openAddAssistant}
             onOpenChange={(open) => {
