@@ -223,15 +223,179 @@ export async function getAnalyticsMetrics(
 }
 
 /**
- * Get top questions - placeholder since resident_questions table doesn't exist
+ * Get top questions from conversation transcripts
+ * Extracts user messages from transcript.conversation_flow JSONB
  */
 export async function getTopQuestions(
-  _orgId?: string,
-  _period: string = "30d",
-  _limit: number = 10
+  orgId?: string,
+  period: string = "30d",
+  limit: number = 10
 ): Promise<TopQuestion[]> {
-  // Table doesn't exist in current schema - return empty
-  return [];
+  try {
+    const days = period === "7d" ? 7 : period === "90d" ? 90 : 30;
+    const dateFrom = new Date();
+    dateFrom.setDate(dateFrom.getDate() - days);
+
+    // Query conversations with transcript data
+    let query = supabase
+      .from("conversations")
+      .select("transcript, started_at")
+      .not("transcript", "is", null)
+      .gte("started_at", dateFrom.toISOString());
+
+    if (orgId && orgId !== "all") {
+      query = query.eq("org_id", orgId);
+    }
+
+    const { data: conversations, error } = await query;
+
+    if (error) {
+      console.error("Error fetching conversations for questions:", error);
+      return [];
+    }
+
+    if (!conversations || conversations.length === 0) {
+      return [];
+    }
+
+    // Extract user questions from transcripts
+    const questionCounts: Record<string, { count: number; recentDate: Date }> = {};
+
+    for (const conv of conversations) {
+      const transcript = conv.transcript as { conversation_flow?: Array<{ role: string; message: string }> } | null;
+      const flow = transcript?.conversation_flow;
+
+      if (!flow || !Array.isArray(flow)) continue;
+
+      // Get user messages that look like questions
+      const userMessages = flow
+        .filter(msg => msg.role === "user" && msg.message)
+        .map(msg => msg.message.trim());
+
+      for (const message of userMessages) {
+        // Skip very short messages or non-questions
+        if (message.length < 10) continue;
+
+        // Normalize the question for grouping
+        const normalized = normalizeQuestion(message);
+        if (!normalized) continue;
+
+        if (questionCounts[normalized]) {
+          questionCounts[normalized].count++;
+          // Track most recent occurrence
+          const convDate = new Date(conv.started_at);
+          if (convDate > questionCounts[normalized].recentDate) {
+            questionCounts[normalized].recentDate = convDate;
+          }
+        } else {
+          questionCounts[normalized] = {
+            count: 1,
+            recentDate: new Date(conv.started_at)
+          };
+        }
+      }
+    }
+
+    // Sort by count and take top N
+    const sortedQuestions = Object.entries(questionCounts)
+      .sort((a, b) => b[1].count - a[1].count)
+      .slice(0, limit)
+      .map(([question, data]) => ({
+        question,
+        count: data.count,
+        trend: determineTrend(data.recentDate, days) as "up" | "down" | "neutral"
+      }));
+
+    return sortedQuestions;
+
+  } catch (error) {
+    console.error("Error in getTopQuestions:", error);
+    return [];
+  }
+}
+
+/**
+ * Normalize a question for grouping similar questions together
+ */
+function normalizeQuestion(message: string): string | null {
+  // Convert to lowercase and clean up
+  let normalized = message.toLowerCase().trim();
+
+  // Remove filler words at start
+  normalized = normalized.replace(/^(hi|hello|hey|um|uh|so|well|okay|ok|please|can you|could you|would you|do you)\s*/gi, '');
+
+  // Identify question type and normalize
+  if (normalized.includes("councillor") || normalized.includes("councilor") || normalized.includes("counselor") || normalized.includes("cancelor") || normalized.includes("canceler")) {
+    // Group councillor questions
+    const suburbMatch = normalized.match(/(?:for|in)\s+(\w+(?:\s+\w+)?)/i);
+    if (suburbMatch) {
+      return `Who is the councillor for ${capitalizeFirst(suburbMatch[1])}?`;
+    }
+    return "Who is my local councillor?";
+  }
+
+  if (normalized.includes("bin") || normalized.includes("rubbish") || normalized.includes("garbage") || normalized.includes("waste")) {
+    if (normalized.includes("when") || normalized.includes("day") || normalized.includes("put out")) {
+      return "When is my bin collection day?";
+    }
+    return "Bin collection information";
+  }
+
+  if (normalized.includes("phone") || normalized.includes("contact") || normalized.includes("email") || normalized.includes("number")) {
+    return "Contact details inquiry";
+  }
+
+  if (normalized.includes("opening") || normalized.includes("hours") || normalized.includes("open")) {
+    return "Opening hours inquiry";
+  }
+
+  if (normalized.includes("rate") || normalized.includes("payment") || normalized.includes("pay")) {
+    return "Rates and payments inquiry";
+  }
+
+  if (normalized.includes("dog") || normalized.includes("pet") || normalized.includes("animal")) {
+    return "Pet/animal related inquiry";
+  }
+
+  if (normalized.includes("park") || normalized.includes("playground") || normalized.includes("facility")) {
+    return "Parks and facilities inquiry";
+  }
+
+  // If it's a question (has ?) and is substantial, keep a shortened version
+  if (message.includes("?") && message.length > 15) {
+    // Truncate to first 60 chars and add ellipsis
+    const truncated = message.substring(0, 60).trim();
+    return truncated.length < message.length ? truncated + "..." : truncated;
+  }
+
+  // Skip non-questions and very short messages
+  return null;
+}
+
+/**
+ * Determine trend based on recency
+ */
+function determineTrend(recentDate: Date, periodDays: number): string {
+  const now = new Date();
+  const daysSinceRecent = (now.getTime() - recentDate.getTime()) / (1000 * 60 * 60 * 24);
+
+  // If asked in last 25% of period, trending up
+  if (daysSinceRecent < periodDays * 0.25) {
+    return "up";
+  }
+  // If asked in last 50% of period, neutral
+  if (daysSinceRecent < periodDays * 0.5) {
+    return "neutral";
+  }
+  // If older, trending down
+  return "down";
+}
+
+/**
+ * Capitalize first letter
+ */
+function capitalizeFirst(str: string): string {
+  return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
 }
 
 /**
