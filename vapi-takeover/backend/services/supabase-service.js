@@ -536,6 +536,63 @@ class SupabaseService {
       logger.error('Error logging audit:', error);
     }
   }
+
+  // ===========================================================================
+  // SYSTEM SETTINGS
+  // ===========================================================================
+
+  /**
+   * Get the universal system prompt from system_settings
+   * This prompt is used by all assistants that have use_default_prompt=true
+   */
+  async getUniversalPrompt() {
+    try {
+      const { data, error } = await supabase
+        .from('system_settings')
+        .select('universal_system_prompt')
+        .eq('id', 1)
+        .single();
+
+      if (error) {
+        logger.warn('Error fetching universal prompt:', error.message);
+        return null;
+      }
+
+      return data?.universal_system_prompt || null;
+    } catch (err) {
+      logger.warn('Failed to get universal prompt:', err.message);
+      return null;
+    }
+  }
+
+  /**
+   * Update the universal system prompt in system_settings
+   * @param {string} prompt - The new universal prompt
+   */
+  async updateUniversalPrompt(prompt) {
+    try {
+      const { data, error } = await supabase
+        .from('system_settings')
+        .upsert({
+          id: 1,
+          universal_system_prompt: prompt,
+          updated_at: new Date().toISOString()
+        })
+        .select()
+        .single();
+
+      if (error) {
+        logger.error('Error updating universal prompt:', error);
+        throw error;
+      }
+
+      logger.info('Universal prompt updated');
+      return data;
+    } catch (err) {
+      logger.error('Failed to update universal prompt:', err);
+      throw err;
+    }
+  }
 }
 
 const supabaseService = new SupabaseService();

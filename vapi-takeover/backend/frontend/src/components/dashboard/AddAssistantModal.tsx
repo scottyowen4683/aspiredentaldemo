@@ -37,6 +37,7 @@ interface FormData {
   elevenLabsVoiceId: string;
   customVoiceId: string;
   prompt: string;
+  useDefaultPrompt: boolean;
   model: string;
   temperature: number;
   maxTokens: number;
@@ -48,6 +49,13 @@ interface FormData {
   autoScore: boolean;
   backgroundSound: "none" | "office" | "cafe";
   backgroundVolume: number;
+  // New feature fields
+  callTransferEnabled: boolean;
+  callTransferNumber: string;
+  smsEnabled: boolean;
+  smsNotificationNumber: string;
+  emailNotificationsEnabled: boolean;
+  emailNotificationAddress: string;
 }
 
 const DEFAULT_VOICES = [
@@ -85,6 +93,7 @@ export function AddAssistantModal({ open, onOpenChange, initialData, onSuccess }
     elevenLabsVoiceId: "21m00Tcm4TlvDq8ikWAM",
     customVoiceId: "",
     prompt: "",
+    useDefaultPrompt: true,
     model: "gpt-4o-mini",
     temperature: 0.7,
     maxTokens: 1000,
@@ -96,6 +105,13 @@ export function AddAssistantModal({ open, onOpenChange, initialData, onSuccess }
     autoScore: true,
     backgroundSound: "none",
     backgroundVolume: 0.15,
+    // New feature defaults
+    callTransferEnabled: false,
+    callTransferNumber: "",
+    smsEnabled: false,
+    smsNotificationNumber: "",
+    emailNotificationsEnabled: true,
+    emailNotificationAddress: "",
   });
 
   // Fetch organizations for super_admin
@@ -183,6 +199,7 @@ export function AddAssistantModal({ open, onOpenChange, initialData, onSuccess }
           elevenLabsVoiceId: isCustomVoice ? "21m00Tcm4TlvDq8ikWAM" : (initialData.elevenlabs_voice_id ?? "21m00Tcm4TlvDq8ikWAM"),
           customVoiceId: isCustomVoice ? (initialData.elevenlabs_voice_id ?? "") : "",
           prompt: initialData.prompt ?? "",
+          useDefaultPrompt: initialData.use_default_prompt ?? true,
           model: initialData.model ?? "gpt-4o-mini",
           temperature: initialData.temperature ?? 0.7,
           maxTokens: initialData.max_tokens ?? 1000,
@@ -194,6 +211,13 @@ export function AddAssistantModal({ open, onOpenChange, initialData, onSuccess }
           autoScore: initialData.auto_score ?? true,
           backgroundSound: (initialData.background_sound as "none" | "office" | "cafe") ?? "none",
           backgroundVolume: initialData.background_volume ?? 0.15,
+          // Feature fields
+          callTransferEnabled: initialData.call_transfer_enabled ?? false,
+          callTransferNumber: initialData.call_transfer_number ?? "",
+          smsEnabled: initialData.sms_enabled ?? false,
+          smsNotificationNumber: initialData.sms_notification_number ?? "",
+          emailNotificationsEnabled: initialData.email_notifications_enabled ?? true,
+          emailNotificationAddress: initialData.email_notification_address ?? "",
         });
       } else {
         // Reset to defaults for new assistant
@@ -205,6 +229,7 @@ export function AddAssistantModal({ open, onOpenChange, initialData, onSuccess }
           elevenLabsVoiceId: "21m00Tcm4TlvDq8ikWAM",
           customVoiceId: "",
           prompt: "",
+          useDefaultPrompt: true,
           model: "gpt-4o-mini",
           temperature: 0.7,
           maxTokens: 1000,
@@ -216,6 +241,13 @@ export function AddAssistantModal({ open, onOpenChange, initialData, onSuccess }
           autoScore: true,
           backgroundSound: "none",
           backgroundVolume: 0.15,
+          // Feature defaults
+          callTransferEnabled: false,
+          callTransferNumber: "",
+          smsEnabled: false,
+          smsNotificationNumber: "",
+          emailNotificationsEnabled: true,
+          emailNotificationAddress: "",
         });
       }
     }
@@ -295,7 +327,8 @@ export function AddAssistantModal({ open, onOpenChange, initialData, onSuccess }
         bot_type: formData.assistantType,
         phone_number: formData.assistantType === "voice" ? formData.phoneNumber : null,
         elevenlabs_voice_id: formData.assistantType === "voice" ? getEffectiveVoiceId() : null,
-        prompt: formData.prompt || null,
+        prompt: formData.useDefaultPrompt ? null : (formData.prompt || null),
+        use_default_prompt: formData.useDefaultPrompt,
         model: formData.model,
         temperature: formData.temperature,
         max_tokens: formData.maxTokens,
@@ -304,6 +337,13 @@ export function AddAssistantModal({ open, onOpenChange, initialData, onSuccess }
         auto_score: formData.autoScore,
         background_sound: formData.assistantType === "voice" ? formData.backgroundSound : null,
         background_volume: formData.assistantType === "voice" ? formData.backgroundVolume : null,
+        // Feature settings
+        call_transfer_enabled: formData.assistantType === "voice" ? formData.callTransferEnabled : false,
+        call_transfer_number: formData.assistantType === "voice" && formData.callTransferEnabled ? formData.callTransferNumber : null,
+        sms_enabled: formData.smsEnabled,
+        sms_notification_number: formData.smsEnabled ? formData.smsNotificationNumber : null,
+        email_notifications_enabled: formData.emailNotificationsEnabled,
+        email_notification_address: formData.emailNotificationsEnabled ? formData.emailNotificationAddress : null,
       };
 
       let result;
@@ -622,25 +662,42 @@ export function AddAssistantModal({ open, onOpenChange, initialData, onSuccess }
           )}
 
           {/* System Prompt */}
-          <div className="space-y-2">
-            <div className="flex items-center gap-2">
-              <Label htmlFor="prompt">System Prompt</Label>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button type="button" className="inline-flex"><HelpCircle className="h-4 w-4 text-muted-foreground" /></button>
-                </TooltipTrigger>
-                <TooltipContent className="max-w-80">
-                  <p>Instructions that define how the assistant behaves. This is combined with the universal prompt.</p>
-                </TooltipContent>
-              </Tooltip>
+          <div className="space-y-3 p-4 bg-slate-50/50 dark:bg-slate-950/20 rounded-xl border border-slate-200 dark:border-slate-800">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Label>System Prompt</Label>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button type="button" className="inline-flex"><HelpCircle className="h-4 w-4 text-muted-foreground" /></button>
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-80">
+                    <p>Use the universal prompt from Settings, or define a custom prompt for this assistant.</p>
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+              <div className="flex items-center gap-2">
+                <Label htmlFor="useDefaultPrompt" className="text-sm text-muted-foreground">Use Default</Label>
+                <Switch
+                  id="useDefaultPrompt"
+                  checked={formData.useDefaultPrompt}
+                  onCheckedChange={(v) => handleChange("useDefaultPrompt", !!v)}
+                />
+              </div>
             </div>
-            <Textarea
-              id="prompt"
-              placeholder="You are a helpful customer service assistant for..."
-              value={formData.prompt}
-              onChange={(e) => handleChange("prompt", e.target.value)}
-              className="min-h-[120px]"
-            />
+            {!formData.useDefaultPrompt && (
+              <Textarea
+                id="prompt"
+                placeholder="You are a helpful customer service assistant for..."
+                value={formData.prompt}
+                onChange={(e) => handleChange("prompt", e.target.value)}
+                className="min-h-[120px]"
+              />
+            )}
+            {formData.useDefaultPrompt && (
+              <p className="text-sm text-muted-foreground italic">
+                Using universal prompt from Settings. Toggle off to customize.
+              </p>
+            )}
           </div>
 
           {/* Knowledge Base */}
@@ -701,6 +758,93 @@ export function AddAssistantModal({ open, onOpenChange, initialData, onSuccess }
                     className="min-h-[100px]"
                   />
                 </div>
+              </div>
+            )}
+          </div>
+
+          {/* Call Transfer - Voice Only */}
+          {formData.assistantType === "voice" && (
+            <div className="space-y-3 p-4 bg-orange-50/50 dark:bg-orange-950/20 rounded-xl border border-orange-200 dark:border-orange-900">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Phone className="h-4 w-4 text-orange-500" />
+                  <h4 className="font-medium text-orange-700 dark:text-orange-300">Call Transfer</h4>
+                </div>
+                <Switch
+                  checked={formData.callTransferEnabled}
+                  onCheckedChange={(v) => handleChange("callTransferEnabled", !!v)}
+                />
+              </div>
+              {formData.callTransferEnabled && (
+                <div className="space-y-2">
+                  <Label htmlFor="callTransferNumber">Transfer Number</Label>
+                  <Input
+                    id="callTransferNumber"
+                    placeholder="+61400000000"
+                    value={formData.callTransferNumber}
+                    onChange={(e) => handleChange("callTransferNumber", e.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Callers can request to be transferred to this number
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* SMS Notifications */}
+          <div className="space-y-3 p-4 bg-cyan-50/50 dark:bg-cyan-950/20 rounded-xl border border-cyan-200 dark:border-cyan-900">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <MessageSquare className="h-4 w-4 text-cyan-500" />
+                <h4 className="font-medium text-cyan-700 dark:text-cyan-300">SMS Notifications</h4>
+              </div>
+              <Switch
+                checked={formData.smsEnabled}
+                onCheckedChange={(v) => handleChange("smsEnabled", !!v)}
+              />
+            </div>
+            {formData.smsEnabled && (
+              <div className="space-y-2">
+                <Label htmlFor="smsNotificationNumber">SMS Notification Number</Label>
+                <Input
+                  id="smsNotificationNumber"
+                  placeholder="+61400000000"
+                  value={formData.smsNotificationNumber}
+                  onChange={(e) => handleChange("smsNotificationNumber", e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Send SMS notifications to this number for contact requests
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Email Notifications */}
+          <div className="space-y-3 p-4 bg-emerald-50/50 dark:bg-emerald-950/20 rounded-xl border border-emerald-200 dark:border-emerald-900">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <FileText className="h-4 w-4 text-emerald-500" />
+                <h4 className="font-medium text-emerald-700 dark:text-emerald-300">Email Notifications</h4>
+              </div>
+              <Switch
+                checked={formData.emailNotificationsEnabled}
+                onCheckedChange={(v) => handleChange("emailNotificationsEnabled", !!v)}
+              />
+            </div>
+            {formData.emailNotificationsEnabled && (
+              <div className="space-y-2">
+                <Label htmlFor="emailNotificationAddress">Notification Email</Label>
+                <Input
+                  id="emailNotificationAddress"
+                  type="email"
+                  placeholder="notifications@example.com"
+                  value={formData.emailNotificationAddress}
+                  onChange={(e) => handleChange("emailNotificationAddress", e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Send email notifications for contact requests (leave empty to use org default)
+                </p>
               </div>
             )}
           </div>

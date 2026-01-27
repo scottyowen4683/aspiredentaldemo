@@ -97,10 +97,11 @@ export default function Settings() {
     try {
       setLoading(true);
 
-      // Try to fetch from system_settings table
+      // Try to fetch from system_settings table (id=1 is the main settings row)
       const { data, error } = await supabase
         .from("system_settings")
         .select("*")
+        .eq("id", 1)
         .single();
 
       if (error && error.code !== "PGRST116") {
@@ -161,25 +162,15 @@ export default function Settings() {
         updated_by: user?.id,
       };
 
-      if (settings.id) {
-        // Update existing
-        const { error } = await supabase
-          .from("system_settings")
-          .update(settingsData)
-          .eq("id", settings.id);
+      // Always upsert to id=1 (the main settings row created by migration)
+      const { data, error } = await supabase
+        .from("system_settings")
+        .upsert({ id: 1, ...settingsData })
+        .select()
+        .single();
 
-        if (error) throw error;
-      } else {
-        // Insert new
-        const { data, error } = await supabase
-          .from("system_settings")
-          .insert([settingsData])
-          .select()
-          .single();
-
-        if (error) throw error;
-        setSettings({ ...settings, id: data.id });
-      }
+      if (error) throw error;
+      setSettings({ ...settings, id: data.id });
 
       toast({
         title: "Settings Saved",
@@ -331,8 +322,9 @@ export default function Settings() {
                   </Button>
                 </CardTitle>
                 <CardDescription>
-                  This prompt is prepended to all assistant conversations. Use it to set global
-                  behavior guidelines, compliance requirements, and brand voice.
+                  <strong className="text-foreground">This prompt is used by ALL assistants that have "Use Default Prompt" enabled.</strong>{" "}
+                  When you edit this prompt, it immediately changes the behavior of all assistants using the default.
+                  Use it to set global behavior guidelines, compliance requirements, and brand voice.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">

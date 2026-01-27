@@ -10,6 +10,7 @@ import { BufferManager, ulawToWav } from '../audio/buffer-manager.js';
 import { scoreConversation } from './rubric-scorer.js';
 import { sendContactRequestNotification } from '../services/email-service.js';
 import { createStreamingTranscriber } from '../services/deepgram-streaming.js';
+import { transferCall, sendSMS } from '../services/twilio-service.js';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
@@ -49,6 +50,43 @@ const VOICE_FUNCTIONS = [
     }
   }
 ];
+
+// Call transfer function - only added when call_transfer_enabled is true
+const TRANSFER_CALL_FUNCTION = {
+  name: 'transfer_call',
+  description: 'Transfer the current call to a human representative. Use this when the caller explicitly requests to speak to a real person, or when you cannot adequately help them with their request.',
+  parameters: {
+    type: 'object',
+    properties: {
+      reason: {
+        type: 'string',
+        description: 'Brief reason for the transfer (e.g., "customer requested human assistance", "complex issue requiring specialist")'
+      }
+    },
+    required: ['reason']
+  }
+};
+
+// SMS notification function - only added when sms_enabled is true
+const SEND_SMS_FUNCTION = {
+  name: 'send_sms_notification',
+  description: 'Send an SMS notification about an important request or urgent matter. Use this to notify staff about urgent issues or to confirm details with the caller.',
+  parameters: {
+    type: 'object',
+    properties: {
+      message: {
+        type: 'string',
+        description: 'The SMS message content (keep brief, under 160 characters)'
+      },
+      urgency: {
+        type: 'string',
+        enum: ['normal', 'urgent'],
+        description: 'Urgency level of the notification'
+      }
+    },
+    required: ['message']
+  }
+};
 
 // Phrases that indicate the call should end
 const END_CALL_PHRASES = [
@@ -111,6 +149,26 @@ When a user:
 You MUST call the capture_contact_request function to log their request.
 Ask for their name and contact details if not provided.
 Always confirm the address related to the issue.`;
+
+// Call transfer instructions - appended when call_transfer_enabled
+const TRANSFER_INSTRUCTIONS = `
+
+CALL TRANSFER:
+You have the ability to transfer this call to a human representative.
+- Use the transfer_call function when the caller explicitly asks to speak to a person/human/representative
+- Use it if you cannot help them adequately with their request
+- Before transferring, briefly explain you'll be connecting them to someone who can help
+- Example: "Let me transfer you to one of our team members who can assist you further."`;
+
+// SMS notification instructions - appended when sms_enabled
+const SMS_INSTRUCTIONS = `
+
+SMS NOTIFICATIONS:
+You have the ability to send SMS notifications for urgent matters.
+- Use the send_sms_notification function for urgent requests that need immediate attention
+- Use it to notify staff about important caller issues
+- Keep messages brief (under 160 characters)
+- Only use for genuinely urgent or important matters, not routine inquiries`;
 
 // Default system prompt - used when assistant has no custom prompt
 // This matches the moretonbaypilot chatbot behavior with email capture
@@ -192,12 +250,60 @@ class VoiceHandler {
     this.streamingTranscriber = null;
     this.pendingTranscript = null; // Stores transcript ready for processing
     this.onStreamingSpeechEnd = null; // Callback when streaming transcription ready
+
+    // Transfer and notification state
+    this.transferRequested = false;
+    this.transferNumber = null;
+  }
+
+  /**
+   * Get the list of voice functions based on assistant configuration
+   * Returns base functions plus optional transfer/SMS functions
+   */
+  getVoiceFunctions() {
+    const functions = [...VOICE_FUNCTIONS];
+
+    // Add call transfer function if enabled
+    if (this.assistant?.call_transfer_enabled && this.assistant?.call_transfer_number) {
+      functions.push(TRANSFER_CALL_FUNCTION);
+      this.transferNumber = this.assistant.call_transfer_number;
+    }
+
+    // Add SMS notification function if enabled
+    if (this.assistant?.sms_enabled && this.assistant?.sms_notification_number) {
+      functions.push(SEND_SMS_FUNCTION);
+    }
+
+    return functions;
+  }
+
+  /**
+   * Get additional prompt instructions based on assistant configuration
+   */
+  getFeatureInstructions() {
+    let instructions = '';
+
+    if (this.assistant?.call_transfer_enabled && this.assistant?.call_transfer_number) {
+      instructions += TRANSFER_INSTRUCTIONS;
+    }
+
+    if (this.assistant?.sms_enabled && this.assistant?.sms_notification_number) {
+      instructions += SMS_INSTRUCTIONS;
+    }
+
+    return instructions;
   }
 
   async initialize() {
     try {
-      // Get assistant configuration
-      this.assistant = await supabaseService.getAssistant(this.assistantId);
+      // Get assistant configuration and universal prompt in parallel
+      const [assistant, universalPrompt] = await Promise.all([
+        supabaseService.getAssistant(this.assistantId),
+        supabaseService.getUniversalPrompt()
+      ]);
+
+      this.assistant = assistant;
+      this.universalPrompt = universalPrompt;
       if (!this.assistant) {
         // Create a minimal fallback assistant config so call can still work
         logger.warn(`Assistant not found: ${this.assistantId}, using defaults`);
@@ -748,13 +854,25 @@ DO NOT make up or guess information like names, contact details, or specific fac
         }
       }
 
-      // Use assistant's custom prompt, or fall back to default
-      const basePrompt = this.assistant.prompt && this.assistant.prompt.trim()
-        ? this.assistant.prompt
-        : DEFAULT_SYSTEM_PROMPT;
+      // Determine which prompt to use:
+      // 1. If use_default_prompt=true (or not set), use universal prompt from system_settings
+      // 2. If use_default_prompt=false, use assistant's custom prompt
+      // 3. Fall back to hardcoded DEFAULT_SYSTEM_PROMPT if nothing else available
+      let basePrompt;
 
-      // Always append function calling instructions
-      const systemPrompt = basePrompt + VOICE_RULES + FUNCTION_INSTRUCTIONS + kbContext;
+      if (this.assistant.use_default_prompt !== false) {
+        // Use universal prompt from system_settings (fetched during initialize)
+        basePrompt = this.universalPrompt || DEFAULT_SYSTEM_PROMPT;
+      } else {
+        // Use assistant's custom prompt
+        basePrompt = this.assistant.prompt && this.assistant.prompt.trim()
+          ? this.assistant.prompt
+          : DEFAULT_SYSTEM_PROMPT;
+      }
+
+      // Always append function calling instructions + feature-specific instructions
+      const featureInstructions = this.getFeatureInstructions();
+      const systemPrompt = basePrompt + VOICE_RULES + FUNCTION_INSTRUCTIONS + featureInstructions + kbContext;
 
       // Build messages with knowledge base context
       const messages = [
@@ -769,13 +887,16 @@ DO NOT make up or guess information like names, contact details, or specific fac
         }
       ];
 
+      // Get functions based on assistant configuration (includes transfer/SMS if enabled)
+      const voiceFunctions = this.getVoiceFunctions();
+
       // Call GPT with function calling - use gpt-4o-mini for speed
       const completion = await openai.chat.completions.create({
         model: this.assistant.model || 'gpt-4o-mini',
         messages,
         temperature: this.assistant.temperature || 0.7,
         max_tokens: this.assistant.max_tokens || 150,
-        tools: VOICE_FUNCTIONS.map(fn => ({ type: 'function', function: fn })),
+        tools: voiceFunctions.map(fn => ({ type: 'function', function: fn })),
         tool_choice: 'auto'
       });
 
@@ -837,6 +958,82 @@ DO NOT make up or guess information like names, contact details, or specific fac
               }
             } catch (fnError) {
               logger.error('Voice: Error processing function call:', fnError);
+            }
+          }
+
+          // Handle call transfer function
+          if (toolCall.function.name === 'transfer_call') {
+            try {
+              const args = JSON.parse(toolCall.function.arguments);
+              logger.info('Voice: Transfer call requested', {
+                reason: args.reason,
+                callSid: this.callSid,
+                transferTo: this.transferNumber
+              });
+
+              if (this.transferNumber) {
+                // Mark transfer as requested - actual transfer happens after TTS
+                this.transferRequested = true;
+
+                // Initiate the transfer
+                const transferResult = await transferCall(this.callSid, this.transferNumber, {
+                  timeout: 30
+                });
+
+                if (transferResult.success) {
+                  logger.info('Voice: Call transfer initiated', transferResult);
+                  if (!responseText) {
+                    responseText = "I'm transferring you now. Please hold.";
+                  }
+                } else {
+                  logger.error('Voice: Call transfer failed', transferResult);
+                  responseText = "I apologize, but I'm unable to transfer your call at the moment. Is there something else I can help you with?";
+                }
+              } else {
+                logger.warn('Voice: Transfer requested but no transfer number configured');
+                responseText = "I apologize, but call transfer is not available at the moment. Is there something else I can help you with?";
+              }
+            } catch (fnError) {
+              logger.error('Voice: Error processing transfer call:', fnError);
+              responseText = "I apologize, but I encountered an error trying to transfer your call. Is there something else I can help you with?";
+            }
+          }
+
+          // Handle SMS notification function
+          if (toolCall.function.name === 'send_sms_notification') {
+            try {
+              const args = JSON.parse(toolCall.function.arguments);
+              const smsNumber = this.assistant.sms_notification_number;
+
+              logger.info('Voice: SMS notification requested', {
+                message: args.message,
+                urgency: args.urgency,
+                smsNumber
+              });
+
+              if (smsNumber) {
+                // Format the SMS message with context
+                const urgencyPrefix = args.urgency === 'urgent' ? '[URGENT] ' : '';
+                const smsMessage = `${urgencyPrefix}Voice AI Alert (${this.assistant.friendly_name || 'Assistant'}): ${args.message}`;
+
+                const smsResult = await sendSMS(smsNumber, smsMessage, {
+                  fromNumber: this.assistant.phone_number || process.env.TWILIO_PHONE_NUMBER
+                });
+
+                if (smsResult.success) {
+                  logger.info('Voice: SMS notification sent', { sid: smsResult.sid });
+                  if (!responseText) {
+                    responseText = "I've sent a notification to our team. They will be in touch shortly.";
+                  }
+                } else {
+                  logger.error('Voice: SMS notification failed', smsResult);
+                  // Don't mention failure to caller, just log it
+                }
+              } else {
+                logger.warn('Voice: SMS requested but no SMS number configured');
+              }
+            } catch (fnError) {
+              logger.error('Voice: Error processing SMS notification:', fnError);
             }
           }
         }
@@ -926,12 +1123,20 @@ DO NOT make up or guess information like names, contact details, or specific fac
         }
       }
 
-      const basePrompt = this.assistant.prompt && this.assistant.prompt.trim()
-        ? this.assistant.prompt
-        : DEFAULT_SYSTEM_PROMPT;
+      // Determine which prompt to use (same logic as generateResponse)
+      let basePrompt;
 
-      // Add function calling instructions for contact capture
-      const systemPrompt = basePrompt + VOICE_RULES + FUNCTION_INSTRUCTIONS + kbContext;
+      if (this.assistant.use_default_prompt !== false) {
+        basePrompt = this.universalPrompt || DEFAULT_SYSTEM_PROMPT;
+      } else {
+        basePrompt = this.assistant.prompt && this.assistant.prompt.trim()
+          ? this.assistant.prompt
+          : DEFAULT_SYSTEM_PROMPT;
+      }
+
+      // Add function calling instructions + feature-specific instructions
+      const featureInstructions = this.getFeatureInstructions();
+      const systemPrompt = basePrompt + VOICE_RULES + FUNCTION_INSTRUCTIONS + featureInstructions + kbContext;
 
       const messages = [
         { role: 'system', content: systemPrompt },
@@ -939,13 +1144,16 @@ DO NOT make up or guess information like names, contact details, or specific fac
         { role: 'user', content: userMessage }
       ];
 
+      // Get functions based on assistant configuration (includes transfer/SMS if enabled)
+      const voiceFunctions = this.getVoiceFunctions();
+
       // Stream GPT response with function calling
       const stream = await openai.chat.completions.create({
         model: this.assistant.model || 'gpt-4o-mini',
         messages,
         temperature: this.assistant.temperature || 0.7,
         max_tokens: this.assistant.max_tokens || 150,
-        tools: VOICE_FUNCTIONS.map(fn => ({ type: 'function', function: fn })),
+        tools: voiceFunctions.map(fn => ({ type: 'function', function: fn })),
         tool_choice: 'auto',
         stream: true
       });
@@ -1054,6 +1262,81 @@ DO NOT make up or guess information like names, contact details, or specific fac
               }
             } catch (fnError) {
               logger.error('Voice streaming: Error processing function call:', fnError);
+            }
+          }
+
+          // Handle call transfer function
+          if (toolCall.name === 'transfer_call') {
+            try {
+              const args = JSON.parse(toolCall.arguments);
+              logger.info('Voice streaming: Transfer call requested', {
+                reason: args.reason,
+                callSid: this.callSid,
+                transferTo: this.transferNumber
+              });
+
+              if (this.transferNumber) {
+                this.transferRequested = true;
+
+                const transferResult = await transferCall(this.callSid, this.transferNumber, {
+                  timeout: 30
+                });
+
+                if (transferResult.success) {
+                  logger.info('Voice streaming: Call transfer initiated', transferResult);
+                  if (!fullText.trim()) {
+                    fullText = "I'm transferring you now. Please hold.";
+                    onSentence(fullText);
+                  }
+                } else {
+                  logger.error('Voice streaming: Call transfer failed', transferResult);
+                  fullText = "I apologize, but I'm unable to transfer your call at the moment. Is there something else I can help you with?";
+                  onSentence(fullText);
+                }
+              } else {
+                logger.warn('Voice streaming: Transfer requested but no transfer number configured');
+                fullText = "I apologize, but call transfer is not available at the moment. Is there something else I can help you with?";
+                onSentence(fullText);
+              }
+            } catch (fnError) {
+              logger.error('Voice streaming: Error processing transfer call:', fnError);
+            }
+          }
+
+          // Handle SMS notification function
+          if (toolCall.name === 'send_sms_notification') {
+            try {
+              const args = JSON.parse(toolCall.arguments);
+              const smsNumber = this.assistant.sms_notification_number;
+
+              logger.info('Voice streaming: SMS notification requested', {
+                message: args.message,
+                urgency: args.urgency,
+                smsNumber
+              });
+
+              if (smsNumber) {
+                const urgencyPrefix = args.urgency === 'urgent' ? '[URGENT] ' : '';
+                const smsMessage = `${urgencyPrefix}Voice AI Alert (${this.assistant.friendly_name || 'Assistant'}): ${args.message}`;
+
+                const smsResult = await sendSMS(smsNumber, smsMessage, {
+                  fromNumber: this.assistant.phone_number || process.env.TWILIO_PHONE_NUMBER
+                });
+
+                if (smsResult.success) {
+                  logger.info('Voice streaming: SMS notification sent', { sid: smsResult.sid });
+                  if (!fullText.trim()) {
+                    fullText = "I've sent a notification to our team. They will be in touch shortly.";
+                    onSentence(fullText);
+                  }
+                } else {
+                  logger.error('Voice streaming: SMS notification failed', smsResult);
+                }
+              } else {
+                logger.warn('Voice streaming: SMS requested but no SMS number configured');
+              }
+            } catch (fnError) {
+              logger.error('Voice streaming: Error processing SMS notification:', fnError);
             }
           }
         }

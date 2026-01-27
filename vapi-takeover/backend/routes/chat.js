@@ -205,9 +205,22 @@ router.post('/', async (req, res) => {
       logger.info('KB not enabled for this assistant');
     }
 
-    // Build system prompt - use assistant's prompt if set, otherwise use default
-    // ALWAYS append function calling instructions so requests get captured
-    const basePrompt = assistant.prompt || DEFAULT_CHAT_PROMPT;
+    // Determine which prompt to use:
+    // 1. If use_default_prompt=true (or not set), use universal prompt from system_settings
+    // 2. If use_default_prompt=false, use assistant's custom prompt
+    // 3. Fall back to hardcoded DEFAULT_CHAT_PROMPT if nothing else available
+    let basePrompt;
+
+    if (assistant.use_default_prompt !== false) {
+      // Use universal prompt from system_settings
+      const universalPrompt = await supabaseService.getUniversalPrompt();
+      basePrompt = universalPrompt || DEFAULT_CHAT_PROMPT;
+    } else {
+      // Use assistant's custom prompt
+      basePrompt = assistant.prompt && assistant.prompt.trim()
+        ? assistant.prompt
+        : DEFAULT_CHAT_PROMPT;
+    }
 
     // Function calling instructions - always included
     const functionInstructions = `

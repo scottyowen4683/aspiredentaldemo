@@ -30,6 +30,14 @@ export interface CreateAssistantInput {
   auto_score?: boolean | null;
   background_sound?: string | null;
   background_volume?: number | null;
+  // New feature fields
+  use_default_prompt?: boolean | null;
+  call_transfer_enabled?: boolean | null;
+  call_transfer_number?: string | null;
+  sms_enabled?: boolean | null;
+  sms_notification_number?: string | null;
+  email_notifications_enabled?: boolean | null;
+  email_notification_address?: string | null;
 }
 
 export async function createAssistant(input: CreateAssistantInput, userId?: string) {
@@ -143,6 +151,14 @@ export async function createAssistant(input: CreateAssistantInput, userId?: stri
       kb_enabled: input.kb_enabled ?? false,
       background_sound: input.background_sound ?? null,
       background_volume: input.background_volume ?? null,
+      // Feature settings
+      use_default_prompt: input.use_default_prompt ?? true,
+      call_transfer_enabled: input.call_transfer_enabled ?? false,
+      call_transfer_number: input.call_transfer_number ?? null,
+      sms_enabled: input.sms_enabled ?? false,
+      sms_notification_number: input.sms_notification_number ?? null,
+      email_notifications_enabled: input.email_notifications_enabled ?? true,
+      email_notification_address: input.email_notification_address ?? null,
     };
 
     const { data, error } = await supabase.from("assistants").insert([insertObj]).select().single();
@@ -203,6 +219,14 @@ export interface AssistantRow {
   auto_score?: boolean | null;
   background_sound?: string | null;
   background_volume?: number | null;
+  // New feature fields
+  use_default_prompt?: boolean | null;
+  call_transfer_enabled?: boolean | null;
+  call_transfer_number?: string | null;
+  sms_enabled?: boolean | null;
+  sms_notification_number?: string | null;
+  email_notifications_enabled?: boolean | null;
+  email_notification_address?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
   // Computed fields
@@ -213,7 +237,7 @@ export async function fetchAssistants(): Promise<AssistantRow[]> {
   const { data, error } = await supabase
     .from("assistants")
     .select(
-      `id, org_id, friendly_name, bot_type, active, phone_number, elevenlabs_voice_id, widget_config, prompt, model, temperature, max_tokens, first_message, kb_enabled, kb_match_count, kb_path, last_kb_upload_at, kb_chunks_count, total_interactions, avg_interaction_time, performance_rank, auto_score, background_sound, background_volume, created_at, updated_at`
+      `id, org_id, friendly_name, bot_type, active, phone_number, elevenlabs_voice_id, widget_config, prompt, model, temperature, max_tokens, first_message, kb_enabled, kb_match_count, kb_path, last_kb_upload_at, kb_chunks_count, total_interactions, avg_interaction_time, performance_rank, auto_score, background_sound, background_volume, use_default_prompt, call_transfer_enabled, call_transfer_number, sms_enabled, sms_notification_number, email_notifications_enabled, email_notification_address, created_at, updated_at`
     )
     .order("created_at", { ascending: false });
 
@@ -350,6 +374,14 @@ export async function updateAssistant(id: string, input: CreateAssistantInput, u
       kb_enabled: input.kb_enabled ?? false,
       background_sound: input.background_sound ?? null,
       background_volume: input.background_volume ?? null,
+      // Feature toggles
+      use_default_prompt: input.use_default_prompt ?? true,
+      call_transfer_enabled: input.call_transfer_enabled ?? false,
+      call_transfer_number: input.call_transfer_number ?? null,
+      sms_enabled: input.sms_enabled ?? false,
+      sms_notification_number: input.sms_notification_number ?? null,
+      email_notifications_enabled: input.email_notifications_enabled ?? true,
+      email_notification_address: input.email_notification_address ?? null,
     };
 
     const { data, error } = await supabase.from("assistants").update(updateObj).eq("id", id).select().single();
