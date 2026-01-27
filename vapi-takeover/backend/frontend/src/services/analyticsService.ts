@@ -399,7 +399,14 @@ function capitalizeFirst(str: string): string {
 }
 
 /**
- * Get sentiment analysis data based on conversation success rate
+ * Get sentiment analysis data based on conversation outcomes
+ *
+ * Improved logic:
+ * - POSITIVE: Query resolved (high score, positive end words, user said thanks/goodbye)
+ * - NEUTRAL: Uncertain outcome (timeout, short conversation, no clear indicators)
+ * - NEGATIVE: Clear dissatisfaction (low score, escalated, explicit negative feedback)
+ *
+ * Key insight: A customer hanging up after getting their answer is POSITIVE, not negative!
  */
 export async function getSentimentData(
   orgId?: string,
@@ -412,7 +419,7 @@ export async function getSentimentData(
 
     let query = supabase
       .from("conversations")
-      .select("success, overall_score")
+      .select("success, overall_score, end_reason, transcript, duration_seconds")
       .gte("started_at", dateFrom.toISOString());
 
     if (orgId && orgId !== "all") {
@@ -436,16 +443,16 @@ export async function getSentimentData(
       ];
     }
 
-    // Use success and score to infer sentiment
-    const positive = conversations?.filter(c =>
-      c.success === true || (c.overall_score && c.overall_score >= 70)
-    ).length || 0;
+    let positive = 0;
+    let negative = 0;
+    let neutral = 0;
 
-    const negative = conversations?.filter(c =>
-      c.success === false && (!c.overall_score || c.overall_score < 50)
-    ).length || 0;
-
-    const neutral = total - positive - negative;
+    for (const conv of conversations || []) {
+      const sentiment = analyzeConversationSentiment(conv);
+      if (sentiment === "positive") positive++;
+      else if (sentiment === "negative") negative++;
+      else neutral++;
+    }
 
     return [
       { name: "Positive", value: Math.round((positive / total) * 1000) / 10, color: "#10B981" },
@@ -461,6 +468,111 @@ export async function getSentimentData(
       { name: "Negative", value: 0, color: "#EF4444" },
     ];
   }
+}
+
+/**
+ * Analyze a single conversation to determine customer sentiment
+ * Returns: "positive" | "neutral" | "negative"
+ */
+function analyzeConversationSentiment(conv: {
+  success?: boolean | null;
+  overall_score?: number | null;
+  end_reason?: string | null;
+  transcript?: { conversation_flow?: Array<{ role: string; message: string }> } | null;
+  duration_seconds?: number | null;
+}): "positive" | "neutral" | "negative" {
+
+  // Priority 1: High score = definitely positive
+  if (conv.overall_score && conv.overall_score >= 80) {
+    return "positive";
+  }
+
+  // Priority 2: Very low score = negative
+  if (conv.overall_score && conv.overall_score < 50) {
+    return "negative";
+  }
+
+  // Priority 3: Analyze end reason
+  const endReason = conv.end_reason?.toLowerCase() || "";
+
+  // Escalated/transferred usually means AI couldn't help = neutral (not necessarily negative)
+  if (endReason === "escalated" || endReason === "transferred") {
+    // If they explicitly asked for a human, that's neutral - we connected them
+    return "neutral";
+  }
+
+  // Priority 4: Analyze transcript for sentiment indicators
+  const transcript = conv.transcript as { conversation_flow?: Array<{ role: string; message: string }> } | null;
+  const flow = transcript?.conversation_flow;
+
+  if (flow && Array.isArray(flow)) {
+    // Get the last few user messages to check for sentiment
+    const userMessages = flow
+      .filter(msg => msg.role === "user" && msg.message)
+      .map(msg => msg.message.toLowerCase());
+
+    const lastUserMessages = userMessages.slice(-3); // Last 3 user messages
+    const allUserText = lastUserMessages.join(" ");
+
+    // Positive indicators - customer got what they needed
+    const positiveIndicators = [
+      "thank", "thanks", "perfect", "great", "awesome", "excellent",
+      "that's all", "thats all", "that is all", "nothing else",
+      "goodbye", "bye", "cheers", "appreciated", "helpful", "wonderful"
+    ];
+
+    // Negative indicators - customer is frustrated
+    const negativeIndicators = [
+      "frustrated", "useless", "unhelpful", "not helpful", "waste of time",
+      "terrible", "awful", "worst", "ridiculous", "stupid", "angry",
+      "can't help", "cannot help", "wrong", "incorrect"
+    ];
+
+    // Check for positive sentiment
+    const hasPositive = positiveIndicators.some(word => allUserText.includes(word));
+    const hasNegative = negativeIndicators.some(word => allUserText.includes(word));
+
+    if (hasPositive && !hasNegative) {
+      return "positive";
+    }
+
+    if (hasNegative && !hasPositive) {
+      return "negative";
+    }
+
+    // If they said thanks/goodbye, that's positive regardless of how call ended
+    if (hasPositive) {
+      return "positive";
+    }
+  }
+
+  // Priority 5: Use success flag if available
+  if (conv.success === true) {
+    return "positive";
+  }
+
+  // Priority 6: Reasonable duration + completed = likely positive
+  // (They stayed on and the call ended normally)
+  if (conv.duration_seconds && conv.duration_seconds >= 30 &&
+      (endReason === "completed" || endReason === "user_ended" || endReason === "goodbye")) {
+    return "positive";
+  }
+
+  // Priority 7: Very short calls with no resolution might be negative or neutral
+  if (conv.duration_seconds && conv.duration_seconds < 15) {
+    // Very short call - probably hung up early, but not necessarily negative
+    return "neutral";
+  }
+
+  // Priority 8: Score in middle range (50-79)
+  if (conv.overall_score && conv.overall_score >= 50 && conv.overall_score < 80) {
+    // Decent score but not great - neutral
+    return "neutral";
+  }
+
+  // Default: If we can't determine, it's neutral (not negative!)
+  // Better to be conservative than mark satisfied customers as dissatisfied
+  return "neutral";
 }
 
 /**
