@@ -802,11 +802,13 @@ class VoiceHandler {
         try {
           const embedding = embeddingResult.data[0].embedding;
 
-          // Search knowledge base - fetch 3 for voice (less context = faster GPT)
+          // Search knowledge base - fetch 5 for voice with low threshold for better recall
+          // Lower threshold (0.2) captures more semantic matches, then filter client-side
           const kbResults = await supabaseService.searchKnowledgeBase(
             this.assistant.org_id,
             embedding,
-            3 // Voice uses fewer matches for speed
+            5, // Fetch more results
+            0.2 // Low similarity threshold - filter later if needed
           );
 
           if (kbResults && kbResults.length > 0) {
@@ -1113,7 +1115,8 @@ DO NOT make up or guess information like names, contact details, or specific fac
           const kbResults = await supabaseService.searchKnowledgeBase(
             this.assistant.org_id,
             embedding,
-            this.assistant.kb_match_count || 5
+            this.assistant.kb_match_count || 5,
+            0.2 // Low threshold for voice - better recall
           );
           if (kbResults && kbResults.length > 0) {
             kbContext = formatKBContext(kbResults);

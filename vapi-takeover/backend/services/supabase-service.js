@@ -379,41 +379,35 @@ class SupabaseService {
   // KNOWLEDGE BASE
   // ===========================================================================
 
-  async searchKnowledgeBase(tenantId, queryEmbedding, matchCount = 5) {
+  async searchKnowledgeBase(tenantId, queryEmbedding, matchCount = 5, similarityThreshold = 0.2) {
     // Ensure tenant_id is a string (DB stores it as text)
     const tenantIdStr = String(tenantId);
 
-    // Try the moretonbaypilot parameter naming first (p_tenant_id format)
-    let { data, error } = await supabase.rpc('match_knowledge_chunks', {
-      p_tenant_id: tenantIdStr,
-      p_query_embedding: queryEmbedding,
-      p_match_count: matchCount
+    logger.info('Searching knowledge base', {
+      tenantId: tenantIdStr,
+      matchCount,
+      similarityThreshold
     });
 
-    // If that fails, try alternative parameter naming
-    if (error) {
-      logger.info('Trying alternative RPC parameters...');
-      const result = await supabase.rpc('match_knowledge_chunks', {
-        query_embedding: queryEmbedding,
-        match_tenant_id: tenantIdStr,
-        match_count: matchCount,
-        similarity_threshold: 0.7
-      });
-      data = result.data;
-      error = result.error;
-    }
+    // Use correct RPC parameter names as per migration schema
+    let { data, error } = await supabase.rpc('match_knowledge_chunks', {
+      query_embedding: queryEmbedding,
+      match_tenant_id: tenantIdStr,
+      match_count: matchCount,
+      similarity_threshold: similarityThreshold
+    });
 
     if (error) {
-      logger.error('Error searching knowledge base:', error);
+      logger.error('RPC search failed:', error);
 
       // Fallback: direct query with cosine similarity if RPC doesn't exist
       logger.info('Trying fallback direct query...');
       const fallbackResult = await supabase
         .from('knowledge_chunks')
-        .select('id, content, source, section, metadata, embedding')
+        .select('id, content, source, section, heading, metadata, embedding')
         .eq('tenant_id', tenantIdStr)
         .eq('active', true)
-        .limit(matchCount * 2); // Get more and filter by similarity client-side
+        .limit(matchCount * 3); // Get more and filter by similarity client-side
 
       if (fallbackResult.error) {
         logger.error('Fallback query also failed:', fallbackResult.error);
@@ -422,6 +416,7 @@ class SupabaseService {
 
       // Simple cosine similarity calculation
       const cosineSimilarity = (a, b) => {
+        if (!a || !b || a.length !== b.length) return 0;
         let dotProduct = 0;
         let normA = 0;
         let normB = 0;
@@ -439,15 +434,21 @@ class SupabaseService {
           ...chunk,
           similarity: chunk.embedding ? cosineSimilarity(queryEmbedding, chunk.embedding) : 0
         }))
-        .filter(chunk => chunk.similarity > 0.7)
+        .filter(chunk => chunk.similarity >= similarityThreshold)
         .sort((a, b) => b.similarity - a.similarity)
         .slice(0, matchCount);
 
-      logger.info('Fallback KB search results:', { count: scored.length });
+      logger.info('Fallback KB search results:', {
+        count: scored.length,
+        topSimilarity: scored[0]?.similarity
+      });
       return scored;
     }
 
-    logger.info('KB search results:', { count: data?.length || 0 });
+    logger.info('KB search results:', {
+      count: data?.length || 0,
+      topSimilarity: data?.[0]?.similarity
+    });
     return data || [];
   }
 

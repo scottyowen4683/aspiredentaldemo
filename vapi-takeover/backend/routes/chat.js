@@ -179,11 +179,12 @@ router.post('/', async (req, res) => {
         const embedding = embeddingResponse.data[0].embedding;
         logger.info('Created embedding for KB search', { embeddingLength: embedding.length });
 
-        // Search knowledge base
+        // Search knowledge base with lower threshold for better recall
         const kbResults = await supabaseService.searchKnowledgeBase(
           assistant.org_id, // Use org_id as tenant_id
           embedding,
-          assistant.kb_match_count || 5
+          assistant.kb_match_count || 5,
+          0.25 // Lower threshold for better semantic matching
         );
 
         logger.info('KB search results', {
