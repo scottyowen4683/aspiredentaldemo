@@ -812,33 +812,15 @@ class VoiceHandler {
           );
 
           if (kbResults && kbResults.length > 0) {
-            // Filter out low-relevance matches (similarity < 0.3) for voice
-            // This prevents irrelevant context from slowing GPT
-            const relevantResults = kbResults.filter(r => r.similarity >= 0.3);
+            // Use all results that passed the 0.2 threshold in searchKnowledgeBase
+            // Don't double-filter - even 0.2 similarity can contain relevant info
+            kbContext = formatKBContext(kbResults);
 
-            if (relevantResults.length > 0) {
-              kbContext = formatKBContext(relevantResults);
-
-              logger.info('Knowledge base context added', {
-                matchCount: relevantResults.length,
-                filteredOut: kbResults.length - relevantResults.length,
-                contextLength: kbContext.length,
-                topSimilarity: relevantResults[0]?.similarity
-              });
-            } else {
-              // No relevant KB matches - tell GPT explicitly to not make things up
-              kbContext = `
-
----
-IMPORTANT: No relevant information found in knowledge base for this query.
-You MUST say "I don't have that specific information" and offer to connect them with someone who can help.
-DO NOT make up or guess information like names, contact details, or specific facts.
----`;
-              logger.info('KB matches filtered out (low similarity)', {
-                originalCount: kbResults.length,
-                topSimilarity: kbResults[0]?.similarity
-              });
-            }
+            logger.info('Knowledge base context added', {
+              matchCount: kbResults.length,
+              contextLength: kbContext.length,
+              topSimilarity: kbResults[0]?.similarity
+            });
           } else {
             // No KB results at all - tell GPT explicitly
             kbContext = `
