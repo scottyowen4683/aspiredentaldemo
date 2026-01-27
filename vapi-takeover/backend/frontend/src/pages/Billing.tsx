@@ -350,6 +350,12 @@ export default function Billing() {
             // Assume 70% inbound, 30% outbound for voice without detailed logs
             usage.interactions.callInbound++;
           }
+        } else if (conv.channel === 'sms') {
+          // SMS conversation - count as SMS interaction
+          if (!interactionLogs || interactionLogs.length === 0) {
+            // Default to inbound SMS if direction unknown
+            usage.interactions.smsInbound++;
+          }
         } else {
           // Chat session - apply timeout logic
           const durationMinutes = (conv.duration_seconds || 0) / 60;
@@ -451,9 +457,17 @@ export default function Billing() {
           : 0;
 
         // Calculate total interactions from the detailed breakdown
+        // If no detailed breakdown available, use DB value
         const totalInteractionsFromUsage = usage.interactions.total > 0
           ? usage.interactions.total
           : currentInteractions;
+
+        // Ensure the interactions object has the correct total
+        // This is needed for platform-wide aggregation
+        const finalInteractions = {
+          ...usage.interactions,
+          total: totalInteractionsFromUsage
+        };
 
         return {
           id: org.id,
@@ -470,7 +484,7 @@ export default function Billing() {
           chatSessions: usage.chatSessions,
           inputTokens: usage.inputTokens,
           outputTokens: usage.outputTokens,
-          interactions: usage.interactions,
+          interactions: finalInteractions,
           elevenLabsCost,
           twilioCost,
           deepgramCost,

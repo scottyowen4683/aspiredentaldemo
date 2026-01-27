@@ -1023,6 +1023,24 @@ DO NOT make up or guess information like names, contact details, or specific fac
 
                 if (smsResult.success) {
                   logger.info('Voice: SMS notification sent', { sid: smsResult.sid });
+
+                  // Log SMS interaction for billing tracking
+                  if (this.assistant?.org_id) {
+                    try {
+                      await supabaseService.logInteraction({
+                        orgId: this.assistant.org_id,
+                        assistantId: this.assistantId,
+                        interactionType: 'sms_outbound',
+                        conversationId: this.conversation?.id || null,
+                        sessionId: this.sessionId,
+                        contactNumber: smsNumber,
+                        cost: 0 // SMS cost is typically flat rate
+                      });
+                    } catch (logError) {
+                      logger.warn('Could not log SMS interaction:', logError.message);
+                    }
+                  }
+
                   if (!responseText) {
                     responseText = "I've sent a notification to our team. They will be in touch shortly.";
                   }
@@ -1358,6 +1376,24 @@ DO NOT make up or guess information like names, contact details, or specific fac
 
                 if (smsResult.success) {
                   logger.info('Voice streaming: SMS notification sent', { sid: smsResult.sid });
+
+                  // Log SMS interaction for billing tracking
+                  if (this.assistant?.org_id) {
+                    try {
+                      await supabaseService.logInteraction({
+                        orgId: this.assistant.org_id,
+                        assistantId: this.assistantId,
+                        interactionType: 'sms_outbound',
+                        conversationId: this.conversation?.id || null,
+                        sessionId: this.sessionId,
+                        contactNumber: smsNumber,
+                        cost: 0 // SMS cost is typically flat rate
+                      });
+                    } catch (logError) {
+                      logger.warn('Could not log SMS interaction:', logError.message);
+                    }
+                  }
+
                   if (!fullText.trim()) {
                     fullText = "I've sent a notification to our team. They will be in touch shortly.";
                     onSentence(fullText);
