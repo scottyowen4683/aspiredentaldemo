@@ -214,7 +214,7 @@ export function AddAssistantModal({ open, onOpenChange, initialData, onSuccess }
 
         setFormData({
           friendlyName: initialData.friendly_name ?? "",
-          assistantType: (initialData.assistant_type as "voice" | "chat") ?? "voice",
+          assistantType: (initialData.bot_type as "voice" | "chat") ?? "voice",
           phoneNumber: initialData.phone_number ?? "",
           voiceSelectionMode: isCustomVoice ? "custom" : "preset",
           elevenLabsVoiceId: isCustomVoice ? "21m00Tcm4TlvDq8ikWAM" : (initialData.elevenlabs_voice_id ?? "21m00Tcm4TlvDq8ikWAM"),
