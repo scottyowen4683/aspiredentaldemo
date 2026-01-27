@@ -396,7 +396,23 @@ export async function processKnowledgeBase(options) {
 
     logger.info(`Preparing to embed+upsert ${pending.length} chunks`);
 
-    // Step 3: Batch embed and upsert
+    // Step 3: DELETE existing chunks for this tenant/source BEFORE inserting new ones
+    // This ensures old data is replaced, not accumulated
+    logger.info(`Deleting existing chunks for tenant_id=${tenant_id}, source=${source}`);
+    const { error: deleteError, count: deletedCount } = await supabaseService.client
+      .from('knowledge_chunks')
+      .delete()
+      .eq('tenant_id', tenant_id)
+      .eq('source', source);
+
+    if (deleteError) {
+      logger.error('Failed to delete old chunks:', deleteError);
+      // Continue anyway - better to have duplicates than fail completely
+    } else {
+      logger.info(`Deleted ${deletedCount || 0} old chunks`);
+    }
+
+    // Step 4: Batch embed and insert new chunks
     const BATCH_SIZE = 50;
     let totalEmbeddingCost = 0;
     let savedCount = 0;
