@@ -355,36 +355,38 @@ class VoiceHandler {
 
   async initialize() {
     try {
-      // SPECIAL CASE: Marketing demo uses hardcoded config (not in database)
-      // Check this BEFORE querying database to avoid UUID parse error
+      // SPECIAL CASE: Marketing demo - can use portal assistant or fallback to hardcoded
       if (this.assistantId === 'outbound-demo') {
-        const outboundVoiceId = process.env.ELEVENLABS_OUTBOUND_VOICE_ID || 'UQVsQrmNGOENbsLCAH2g';
-        logger.info('Using Aspire outbound demo configuration (marketing site)', {
-          voiceId: outboundVoiceId,
-          hasApiKey: !!process.env.ELEVENLABS_API_KEY
-        });
-        this.assistant = {
-          id: 'outbound-demo',
-          org_id: null,
-          friendly_name: 'Aspire AI Demo',
-          // Full outbound introduction - this is a demo callback
-          first_message: "Hi there! I'm calling from Aspire Executive Solutions. You requested a demo of our AI services, so I wanted to give you a quick call back. What questions can I answer for you about our AI voice and chat solutions?",
-          prompt: ASPIRE_OUTBOUND_DEMO_PROMPT,
-          model: 'gpt-4o-mini',
-          temperature: 0.7,
-          max_tokens: 200,
-          kb_enabled: false,
-          elevenlabs_voice_id: outboundVoiceId,
-          // Enable call transfer to Scott's number
-          call_transfer_enabled: true,
-          call_transfer_number: '+61408062129',
-          // Enable contact capture (uses Brevo email)
-          capture_contact_enabled: true,
-          // Disable filler audio ("mhm") - sounds dismissive
-          use_filler_audio: false
-        };
-        // Still get universal prompt for potential use
-        this.universalPrompt = await supabaseService.getUniversalPrompt();
+        // Check if a portal assistant is configured for outbound demo
+        const portalAssistantId = process.env.OUTBOUND_DEMO_ASSISTANT_ID;
+
+        if (portalAssistantId) {
+          // Use portal assistant - full KB, tracking, editable prompt
+          logger.info('Outbound demo using portal assistant', { portalAssistantId });
+          const [assistant, universalPrompt] = await Promise.all([
+            supabaseService.getAssistant(portalAssistantId),
+            supabaseService.getUniversalPrompt()
+          ]);
+
+          if (assistant) {
+            this.assistant = assistant;
+            this.universalPrompt = universalPrompt;
+            // Override the ID for conversation tracking
+            this.assistantId = portalAssistantId;
+            logger.info('Loaded portal assistant for outbound demo', {
+              assistantId: portalAssistantId,
+              name: assistant.friendly_name,
+              hasKB: assistant.kb_enabled
+            });
+          } else {
+            logger.warn('Portal assistant not found, falling back to hardcoded', { portalAssistantId });
+            this._useHardcodedOutboundConfig();
+          }
+        } else {
+          // No portal assistant configured - use hardcoded fallback
+          logger.info('No OUTBOUND_DEMO_ASSISTANT_ID set, using hardcoded config');
+          this._useHardcodedOutboundConfig();
+        }
       } else {
         // Regular assistant - query database
         const [assistant, universalPrompt] = await Promise.all([
@@ -471,6 +473,34 @@ class VoiceHandler {
       logger.error('Voice handler initialization failed:', error);
       throw error;
     }
+  }
+
+  /**
+   * Fallback hardcoded config for outbound demo (when no portal assistant configured)
+   */
+  async _useHardcodedOutboundConfig() {
+    const outboundVoiceId = process.env.ELEVENLABS_OUTBOUND_VOICE_ID || 'UQVsQrmNGOENbsLCAH2g';
+    logger.info('Using hardcoded Aspire outbound demo configuration', {
+      voiceId: outboundVoiceId,
+      hasApiKey: !!process.env.ELEVENLABS_API_KEY
+    });
+    this.assistant = {
+      id: 'outbound-demo',
+      org_id: null,
+      friendly_name: 'Aspire AI Demo',
+      first_message: "Hi there! I'm calling from Aspire Executive Solutions. You requested a demo of our AI services, so I wanted to give you a quick call back. What questions can I answer for you about our AI voice and chat solutions?",
+      prompt: ASPIRE_OUTBOUND_DEMO_PROMPT,
+      model: 'gpt-4o-mini',
+      temperature: 0.7,
+      max_tokens: 200,
+      kb_enabled: false,
+      elevenlabs_voice_id: outboundVoiceId,
+      call_transfer_enabled: true,
+      call_transfer_number: '+61408062129',
+      capture_contact_enabled: true
+      // Note: filler audio enabled by default for portal assistants
+    };
+    this.universalPrompt = await supabaseService.getUniversalPrompt();
   }
 
   /**
