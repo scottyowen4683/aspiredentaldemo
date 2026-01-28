@@ -199,6 +199,72 @@ If a user wants to lodge a request or complaint:
 
 Remember: You're speaking on a phone call - be brief, clear, and helpful.`;
 
+// Aspire outbound demo prompt - used for website demo calls
+const ASPIRE_OUTBOUND_DEMO_PROMPT = `You are an AI voice assistant for Aspire Executive Solutions, calling someone who requested a demo from the website.
+
+YOUR ROLE:
+You are demonstrating Aspire's AI voice technology. Be friendly, professional, and helpful. Answer questions about Aspire's services.
+
+RESPONSE STYLE:
+- Keep responses brief and conversational (under 50 words)
+- Be warm and professional
+- Use Australian English
+- If asked something you don't know, say you can have the Aspire team follow up
+
+ABOUT ASPIRE EXECUTIVE SOLUTIONS:
+Aspire is an Australian executive recruitment and AI automation company. Founded by Scott Owen, former CEO in Queensland government and ex-military veteran.
+
+ASPIRE AI SERVICES:
+- Fully managed voice and chat assistants for councils and businesses
+- Handles inbound calls, web chat, service requests, complaints
+- After-hours support 24/7
+- SMS and email follow-ups
+- CRM integrations (TechnologyOne, Civica, Salesforce)
+- Monthly analytics via the Aspire Portal
+
+KEY VALUE PROPOSITIONS:
+- More than 50% cheaper than a full-time customer service officer
+- 24/7 operation with no breaks or turnover
+- Up to 5,000 interactions included in fixed monthly service
+- Go live in up to 4 weeks, often 7-14 days
+- Australian-hosted, privacy compliant
+- Bespoke knowledge base for each client
+
+PRICING:
+- Fixed monthly service includes everything
+- No per-call fees
+- Custom knowledge base included
+- After-hours support included
+- Analytics and portal access included
+
+FOR COUNCILS:
+- Reduces frontline workload
+- After-hours coverage
+- Consistent information delivery
+- Handles barking dogs, noise complaints, rates enquiries, bin collections
+- Integration ready for council systems
+
+FOR BUSINESSES:
+- Instant lead callbacks
+- Missed call recovery
+- Quote and invoice follow-ups
+- Customer reactivation
+- Premium voice quality
+
+EXECUTIVE SEARCH SERVICES:
+- Aspire also provides executive recruitment
+- CEOs, Directors, General Managers
+- Government and complex organisations
+- Personally led by Scott Owen
+
+ENDING CALLS:
+When the user says goodbye, thanks, or that's all:
+- Say a brief friendly goodbye
+- Include the word "goodbye" to signal call end
+- Example: "Thanks for taking my call! Feel free to book a demo at calendly.com/scott-owen-aspire if you'd like to see more. Goodbye!"
+
+Remember: You're demonstrating Aspire's AI voice technology. Be impressive but honest.`;
+
 /**
  * Format KB results like moretonbaypilot for better context
  */
@@ -305,19 +371,36 @@ class VoiceHandler {
       this.assistant = assistant;
       this.universalPrompt = universalPrompt;
       if (!this.assistant) {
-        // Create a minimal fallback assistant config so call can still work
-        logger.warn(`Assistant not found: ${this.assistantId}, using defaults`);
-        this.assistant = {
-          id: this.assistantId,
-          org_id: null,
-          friendly_name: 'Default Assistant',
-          prompt: DEFAULT_SYSTEM_PROMPT,
-          model: 'gpt-4o-mini',
-          temperature: 0.7,
-          max_tokens: 150,
-          kb_enabled: false,
-          elevenlabs_voice_id: process.env.ELEVENLABS_VOICE_ID || 'EXAVITQu4vr4xnSDxMaL'
-        };
+        // Check if this is the outbound demo - use special config
+        if (this.assistantId === 'outbound-demo') {
+          logger.info('Using Aspire outbound demo configuration');
+          this.assistant = {
+            id: 'outbound-demo',
+            org_id: null,
+            friendly_name: 'Aspire AI Demo',
+            first_message: "Hi! This is Aspire AI calling. You requested a demo of our AI voice assistant for councils and businesses. How can I help you learn about our services?",
+            prompt: ASPIRE_OUTBOUND_DEMO_PROMPT,
+            model: 'gpt-4o-mini',
+            temperature: 0.7,
+            max_tokens: 200,
+            kb_enabled: false,
+            elevenlabs_voice_id: 'UQVsQrmNGOENbsLCAH2g' // Scott's cloned voice
+          };
+        } else {
+          // Create a minimal fallback assistant config so call can still work
+          logger.warn(`Assistant not found: ${this.assistantId}, using defaults`);
+          this.assistant = {
+            id: this.assistantId,
+            org_id: null,
+            friendly_name: 'Default Assistant',
+            prompt: DEFAULT_SYSTEM_PROMPT,
+            model: 'gpt-4o-mini',
+            temperature: 0.7,
+            max_tokens: 150,
+            kb_enabled: false,
+            elevenlabs_voice_id: process.env.ELEVENLABS_VOICE_ID || 'EXAVITQu4vr4xnSDxMaL'
+          };
+        }
       }
 
       // Try to create conversation - but don't fail if it errors

@@ -101,7 +101,7 @@ app.post('/api/contact', async (req, res) => {
       email,
       phone: phone || 'Not provided',
       request_type: 'Contact Form',
-      details: org ? `Organisation: ${org}\n\n${message}` : message
+      request_details: org ? `Organisation: ${org}\n\n${message}` : message
     });
 
     logger.info('Contact form submission received', { name, email });
