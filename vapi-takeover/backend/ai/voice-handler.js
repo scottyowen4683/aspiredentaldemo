@@ -608,15 +608,17 @@ class VoiceHandler {
   }
 
   /**
-   * Process audio chunk - sends to both VAD buffer AND streaming transcriber
+   * Process audio chunk - sends to streaming transcriber OR VAD buffer (not both)
+   * When streaming is active, Deepgram handles all VAD - no need for our buffer
    */
   async processAudioChunk(audioBase64) {
-    // Add to VAD buffer for filler timing and fallback
-    this.audioBuffer.add(audioBase64);
-
-    // Also send to streaming transcriber for real-time transcription
     if (this.streamingTranscriber) {
+      // Streaming mode: Deepgram handles VAD, don't add to local buffer
+      // This prevents duplicate speech detection events and log spam
       this.streamingTranscriber.sendAudioBase64(audioBase64);
+    } else {
+      // Fallback mode: Use local VAD buffer when streaming isn't available
+      this.audioBuffer.add(audioBase64);
     }
   }
 
