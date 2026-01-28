@@ -1002,12 +1002,13 @@ DO NOT make up or guess information like names, contact details, or specific fac
       const systemPrompt = basePrompt + VOICE_RULES + FUNCTION_INSTRUCTIONS + featureInstructions + kbContext;
 
       // Build messages with knowledge base context
+      // Limit history to last 8 messages (4 exchanges) to reduce GPT latency
       const messages = [
         {
           role: 'system',
           content: systemPrompt
         },
-        ...history,
+        ...history.slice(-8),
         {
           role: 'user',
           content: userMessage
@@ -1316,9 +1317,10 @@ DO NOT make up or guess information like names, contact details, or specific fac
       const featureInstructions = this.getFeatureInstructions();
       const systemPrompt = basePrompt + VOICE_RULES + FUNCTION_INSTRUCTIONS + featureInstructions + kbContext;
 
+      // Limit history to last 8 messages (4 exchanges) to reduce GPT latency
       const messages = [
         { role: 'system', content: systemPrompt },
-        ...history,
+        ...history.slice(-8),
         { role: 'user', content: userMessage }
       ];
 
