@@ -375,6 +375,9 @@ class VoiceHandler {
     // Transfer and notification state
     this.transferRequested = false;
     this.transferNumber = null;
+
+    // Prevent duplicate endCall processing
+    this.isEnded = false;
   }
 
   /**
@@ -1881,6 +1884,13 @@ DO NOT make up or guess information like names, contact details, or specific fac
   }
 
   async endCall(endReason = 'completed') {
+    // Prevent duplicate processing (both 'stop' event and WebSocket 'close' can trigger this)
+    if (this.isEnded) {
+      logger.debug('endCall already processed, skipping duplicate', { callSid: this.callSid });
+      return;
+    }
+    this.isEnded = true;
+
     try {
       // Close streaming transcriber if active
       if (this.streamingTranscriber) {
