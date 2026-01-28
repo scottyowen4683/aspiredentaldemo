@@ -152,10 +152,11 @@ app.post('/api/outbound-call', async (req, res) => {
     logger.info('Initiating outbound call', { to, from: OUTBOUND_FROM_NUMBER, voiceId: OUTBOUND_VOICE_ID });
 
     // Create outbound call via Twilio - connects to our voice WebSocket
+    // IMPORTANT: Uses dedicated demo TwiML endpoint, separate from portal campaigns
     const call = await twilioClient.calls.create({
       to: to,
       from: OUTBOUND_FROM_NUMBER,
-      url: `${baseUrl}/api/voice/outbound-twiml`,
+      url: `${baseUrl}/api/marketing/demo-twiml`,
       method: 'POST',
       statusCallback: `${baseUrl}/api/voice/status`,
       statusCallbackMethod: 'POST',
@@ -178,8 +179,12 @@ app.post('/api/outbound-call', async (req, res) => {
   }
 });
 
-// TwiML endpoint for outbound calls
-app.post('/api/voice/outbound-twiml', (req, res) => {
+// ============================================
+// MARKETING DEMO TwiML ENDPOINT
+// Completely separate from portal voice routes
+// Only used by /api/outbound-call for website demos
+// ============================================
+app.post('/api/marketing/demo-twiml', (req, res) => {
   const VoiceResponse = twilio.twiml.VoiceResponse;
   const response = new VoiceResponse();
   const baseUrl = process.env.BASE_URL || `https://${process.env.FLY_APP_NAME}.fly.dev`;
@@ -190,15 +195,17 @@ app.post('/api/voice/outbound-twiml', (req, res) => {
     url: `wss://${new URL(baseUrl).host}/voice/stream`
   });
 
-  // Add custom parameters using the .parameter() method
-  // These will be available in data.start.customParameters on WebSocket
+  // MARKETING DEMO ONLY: Hardcode 'outbound-demo' assistant ID
+  // This is completely separate from portal campaigns which use /api/voice/incoming
   stream.parameter({ name: 'assistantId', value: 'outbound-demo' });
   stream.parameter({ name: 'callerNumber', value: req.body.To || 'unknown' });
   stream.parameter({ name: 'isOutbound', value: 'true' });
+  stream.parameter({ name: 'isMarketingDemo', value: 'true' });
 
-  logger.info('Outbound TwiML generated', {
+  logger.info('Marketing demo TwiML generated', {
     wsUrl: `wss://${new URL(baseUrl).host}/voice/stream`,
-    to: req.body.To
+    to: req.body.To,
+    assistantId: 'outbound-demo'
   });
 
   res.type('text/xml');
