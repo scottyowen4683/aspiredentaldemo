@@ -243,6 +243,7 @@ wss.on('connection', async (ws, req) => {
           const assistantId = data.start.customParameters?.assistantId;
           const callerNumber = data.start.customParameters?.callerNumber;
           const callSid = data.start.callSid;
+          const isMarketingDemo = data.start.customParameters?.isMarketingDemo === 'true';
 
           if (!assistantId) {
             logger.error('No assistantId in call parameters');
@@ -279,9 +280,21 @@ wss.on('connection', async (ws, req) => {
           try {
             await voiceHandler.initialize();
 
-            const voiceId = voiceHandler.assistant.elevenlabs_voice_id ||
-              process.env.ELEVENLABS_VOICE_ID ||
-              'EXAVITQu4vr4xnSDxMaL'; // Default: "Sarah" voice
+            // Force specific voice for marketing demo (Scott's cloned voice)
+            const MARKETING_DEMO_VOICE_ID = 'UQVsQrmNGOENbsLCAH2g';
+
+            let voiceId;
+            if (isMarketingDemo) {
+              // Marketing demo ALWAYS uses the specific cloned voice
+              voiceId = MARKETING_DEMO_VOICE_ID;
+              // Also update assistant config so it's used throughout the call
+              voiceHandler.assistant.elevenlabs_voice_id = MARKETING_DEMO_VOICE_ID;
+              logger.info('Marketing demo: forcing voice ID', { voiceId: MARKETING_DEMO_VOICE_ID });
+            } else {
+              voiceId = voiceHandler.assistant.elevenlabs_voice_id ||
+                process.env.ELEVENLABS_VOICE_ID ||
+                'EXAVITQu4vr4xnSDxMaL'; // Default: "Sarah" voice
+            }
 
             // Only send greeting if first_message is configured
             // If null/empty, wait for caller to speak first (smoother for outbound)
