@@ -16,7 +16,7 @@ import VoiceHandler from './ai/voice-handler.js';
 import { streamElevenLabsAudio, preGenerateFillerPhrases, getInstantFillerAudio } from './ai/elevenlabs.js';
 
 // Routes
-import chatRouter from './routes/chat.js';
+import chatRouter, { cleanupStaleSessions } from './routes/chat.js';
 import voiceRouter from './routes/voice.js';
 import adminRouter from './routes/admin.js';
 import campaignsRouter from './routes/campaigns.js';
@@ -667,6 +667,30 @@ server.listen(PORT, async () => {
   } catch (e) {
     logger.warn('Could not pre-generate fillers at startup:', e.message);
   }
+
+  // ============================================
+  // STALE SESSION CLEANUP JOB
+  // Runs every 5 minutes to close chat sessions that survived server restarts
+  // ============================================
+  const CLEANUP_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+
+  // Run cleanup once at startup (after 30 second delay to let server warm up)
+  setTimeout(async () => {
+    logger.info('Running initial stale session cleanup...');
+    const result = await cleanupStaleSessions();
+    logger.info('Initial cleanup complete', result);
+  }, 30000);
+
+  // Then run every 5 minutes
+  setInterval(async () => {
+    try {
+      await cleanupStaleSessions();
+    } catch (e) {
+      logger.error('Periodic cleanup failed:', e.message);
+    }
+  }, CLEANUP_INTERVAL_MS);
+
+  logger.info(`✅ Stale session cleanup job scheduled (every ${CLEANUP_INTERVAL_MS / 60000} minutes)`);
 });
 
 // Graceful shutdown

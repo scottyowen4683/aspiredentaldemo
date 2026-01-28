@@ -94,6 +94,45 @@ Always be helpful and guide users to the information they need.`;
 // Session timeout tracking
 const activeSessions = new Map();
 const SESSION_TIMEOUT_MS = parseInt(process.env.SESSION_TIMEOUT_MS) || 900000; // 15 minutes
+const WRAP_UP_TIMEOUT_MS = 180000; // 3 minutes after "anything else?" question
+
+// Patterns that indicate user wants to end the conversation
+const SESSION_END_PATTERNS = [
+  /^no\s*(thanks?|thank\s*you)?\.?$/i,
+  /^nope\.?$/i,
+  /^that'?s?\s*(all|it)\.?$/i,
+  /^nothing\s*(else)?\.?$/i,
+  /^i'?m?\s*(good|fine|all\s*set)\.?$/i,
+  /^(good)?bye\.?$/i,
+  /^thanks?,?\s*(that'?s?\s*(all|it))?\.?$/i,
+  /^thank\s*you,?\s*(that'?s?\s*(all|it))?\.?$/i,
+  /^no,?\s*i'?m?\s*(good|fine|done)\.?$/i,
+  /^all\s*(good|done|set)\.?$/i,
+  /^have\s*a\s*(good|great|nice)\s*(day|one)\.?$/i
+];
+
+// Check if user message indicates they want to end the conversation
+function shouldEndSession(message) {
+  const trimmed = message.trim().toLowerCase();
+  return SESSION_END_PATTERNS.some(pattern => pattern.test(trimmed));
+}
+
+// Check if AI response contains a wrap-up question
+function isWrapUpQuestion(response) {
+  const wrapUpPhrases = [
+    'anything else',
+    'help you with anything',
+    'other questions',
+    'anything more',
+    'further assistance',
+    'help with something else',
+    'else i can help',
+    'else can i help',
+    'else i can assist'
+  ];
+  const lower = response.toLowerCase();
+  return wrapUpPhrases.some(phrase => lower.includes(phrase));
+}
 
 // POST /api/chat
 // Body: { assistantId, sessionId?, message }
@@ -136,17 +175,15 @@ router.post('/', async (req, res) => {
       isNewConversation = true;
     }
 
-    // Update session timeout
+    // Clear existing timeout (will be reset after response with appropriate duration)
     clearTimeout(activeSessions.get(sessionId)?.timeout);
-    const timeout = setTimeout(() => {
-      handleSessionTimeout(sessionId, conversation.id, assistant.id);
-    }, SESSION_TIMEOUT_MS);
 
+    // Track session (timeout will be set after response)
     activeSessions.set(sessionId, {
       conversationId: conversation.id,
       assistantId: assistant.id,
       lastActivity: new Date(),
-      timeout
+      timeout: null
     });
 
     // Add user message to database
@@ -380,13 +417,56 @@ After capturing, confirm what you've recorded and let them know someone will fol
       latencyMs: Date.now() - startTime
     });
 
-    // Update conversation with costs
+    // Update conversation with costs and last activity
     await supabaseService.updateConversation(sessionId, {
       gpt_cost: (conversation.gpt_cost || 0) + gptCost,
       total_cost: (conversation.total_cost || 0) + gptCost,
       tokens_in: (conversation.tokens_in || 0) + tokensIn,
-      tokens_out: (conversation.tokens_out || 0) + tokensOut
+      tokens_out: (conversation.tokens_out || 0) + tokensOut,
+      last_activity_at: new Date().toISOString()
     });
+
+    // Check if user wants to end the session
+    const userWantsToEnd = shouldEndSession(message);
+
+    // Check if AI asked a wrap-up question (use shorter timeout)
+    const askedWrapUp = isWrapUpQuestion(aiResponse);
+
+    // Determine appropriate timeout
+    let timeoutMs = SESSION_TIMEOUT_MS;
+    if (askedWrapUp) {
+      timeoutMs = WRAP_UP_TIMEOUT_MS; // Shorter timeout after "anything else?"
+      logger.info('Wrap-up question detected, using shorter timeout', { timeoutMs });
+    }
+
+    // Update session timeout with appropriate duration
+    clearTimeout(activeSessions.get(sessionId)?.timeout);
+    const newTimeout = setTimeout(() => {
+      handleSessionTimeout(sessionId, conversation.id, assistant.id);
+    }, timeoutMs);
+
+    activeSessions.set(sessionId, {
+      ...activeSessions.get(sessionId),
+      lastActivity: new Date(),
+      timeout: newTimeout,
+      askedWrapUp
+    });
+
+    // If user wants to end, trigger immediate session end after response is sent
+    let sessionEnded = false;
+    if (userWantsToEnd) {
+      logger.info('User indicated session end', { sessionId, message });
+      sessionEnded = true;
+
+      // End session after a brief delay to ensure response is processed
+      setImmediate(async () => {
+        try {
+          await endSessionGracefully(sessionId, conversation.id, assistant.id, 'user_ended');
+        } catch (err) {
+          logger.error('Error ending session gracefully:', err);
+        }
+      });
+    }
 
     logger.info('Chat response generated', {
       sessionId,
@@ -402,6 +482,7 @@ After capturing, confirm what you've recorded and let them know someone will fol
       sessionId,
       response: aiResponse,
       isNewConversation,
+      sessionEnded, // Tell client if session was ended
       tokens: {
         input: tokensIn,
         output: tokensOut
@@ -500,6 +581,70 @@ async function scoreChatConversation(sessionId, conversationId, assistantId) {
   } catch (error) {
     logger.error('Conversation scoring failed:', error);
     // Don't throw - scoring failure shouldn't break session end
+  }
+}
+
+// Gracefully end a session and log the interaction
+async function endSessionGracefully(sessionId, conversationId, assistantId, endReason = 'user_ended') {
+  logger.info('Ending session gracefully', { sessionId, endReason });
+
+  try {
+    // Clear any existing timeout
+    const session = activeSessions.get(sessionId);
+    if (session?.timeout) {
+      clearTimeout(session.timeout);
+    }
+
+    // Get current conversation data
+    const conversation = await supabaseService.getConversation(sessionId);
+    if (!conversation || conversation.ended_at) {
+      logger.info('Session already ended or not found', { sessionId });
+      activeSessions.delete(sessionId);
+      return;
+    }
+
+    // Calculate duration
+    const startedAt = new Date(conversation.started_at);
+    const duration = Math.floor((Date.now() - startedAt) / 1000);
+
+    // End conversation
+    await supabaseService.endConversation(sessionId, {
+      endReason,
+      duration,
+      costs: {}
+    });
+
+    // Get assistant for org_id
+    const assistant = await supabaseService.getAssistant(assistantId);
+
+    // Log interaction for billing tracking
+    await supabaseService.logInteraction({
+      orgId: assistant.org_id,
+      assistantId,
+      interactionType: 'chat_session',
+      conversationId,
+      sessionId,
+      durationSeconds: duration,
+      messageCount: conversation.tokens_in && conversation.tokens_out ?
+        Math.ceil((conversation.tokens_in + conversation.tokens_out) / 100) : 1,
+      cost: conversation.total_cost || 0
+    });
+
+    // Auto-score conversation
+    await scoreChatConversation(sessionId, conversationId, assistantId);
+
+    // Cleanup
+    activeSessions.delete(sessionId);
+
+    logger.info('Session ended gracefully', {
+      sessionId,
+      endReason,
+      duration: `${duration}s`
+    });
+
+  } catch (error) {
+    logger.error('Error ending session gracefully:', error);
+    activeSessions.delete(sessionId);
   }
 }
 
@@ -618,5 +763,93 @@ router.post('/end', async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+
+// Cleanup stale chat sessions that weren't ended properly
+// This is called periodically by server.js to handle sessions that survived server restarts
+export async function cleanupStaleSessions() {
+  const STALE_THRESHOLD_MINUTES = 15;
+
+  try {
+    logger.info('Running stale session cleanup');
+
+    // Find chat sessions that haven't ended and have no activity for 15+ minutes
+    const { data: staleSessions, error } = await supabaseService.client
+      .from('conversations')
+      .select('id, session_id, assistant_id, org_id, started_at, last_activity_at, tokens_in, tokens_out, total_cost')
+      .eq('channel', 'chat')
+      .is('ended_at', null)
+      .lt('last_activity_at', new Date(Date.now() - STALE_THRESHOLD_MINUTES * 60 * 1000).toISOString());
+
+    if (error) {
+      logger.error('Error fetching stale sessions:', error);
+      return { processed: 0, errors: 1 };
+    }
+
+    if (!staleSessions || staleSessions.length === 0) {
+      logger.info('No stale sessions found');
+      return { processed: 0, errors: 0 };
+    }
+
+    logger.info(`Found ${staleSessions.length} stale sessions to cleanup`);
+
+    let processed = 0;
+    let errors = 0;
+
+    for (const session of staleSessions) {
+      try {
+        // Calculate duration
+        const startedAt = new Date(session.started_at);
+        const lastActivity = new Date(session.last_activity_at || session.started_at);
+        const duration = Math.floor((lastActivity - startedAt) / 1000);
+
+        // End conversation
+        await supabaseService.client
+          .from('conversations')
+          .update({
+            ended_at: new Date().toISOString(),
+            end_reason: 'stale_cleanup',
+            duration_seconds: duration
+          })
+          .eq('id', session.id);
+
+        // Log interaction for billing
+        await supabaseService.logInteraction({
+          orgId: session.org_id,
+          assistantId: session.assistant_id,
+          interactionType: 'chat_session',
+          conversationId: session.id,
+          sessionId: session.session_id,
+          durationSeconds: duration,
+          messageCount: session.tokens_in && session.tokens_out ?
+            Math.ceil((session.tokens_in + session.tokens_out) / 100) : 1,
+          cost: session.total_cost || 0
+        });
+
+        // Remove from active sessions if present
+        activeSessions.delete(session.session_id);
+
+        processed++;
+        logger.info('Cleaned up stale session', {
+          sessionId: session.session_id,
+          duration: `${duration}s`
+        });
+
+      } catch (sessionError) {
+        errors++;
+        logger.error('Error cleaning up session:', {
+          sessionId: session.session_id,
+          error: sessionError.message
+        });
+      }
+    }
+
+    logger.info('Stale session cleanup complete', { processed, errors });
+    return { processed, errors };
+
+  } catch (error) {
+    logger.error('Stale session cleanup failed:', error);
+    return { processed: 0, errors: 1 };
+  }
+}
 
 export default router;
