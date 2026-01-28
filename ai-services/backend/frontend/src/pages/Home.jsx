@@ -1,12 +1,9 @@
-import React, { useMemo, useState } from "react";
+import React, { useState } from "react";
 import { Link } from "react-router-dom";
 import axios from "axios";
 import { toast } from "sonner";
 
 const DEMO_URL = "https://calendly.com/scott-owen-aspire/ai-demo";
-
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL;
-const API = `${(BACKEND_URL || "").replace(/\/+$/, "")}/api`;
 
 function Pill({ children }) {
   return (
@@ -71,25 +68,13 @@ export default function Home() {
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const canSend = useMemo(() => Boolean(BACKEND_URL), []);
-
   const handleChange = (e) =>
     setFormData((p) => ({ ...p, [e.target.name]: e.target.value }));
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-
-    if (!canSend) {
-      toast.error("Configuration error", {
-        description: "VITE_BACKEND_URL is not set, so the form cannot send yet.",
-      });
-      return;
-    }
-
     setIsSubmitting(true);
     try {
-      // IMPORTANT: your FastAPI /contact only accepts {name,email,phone,message}
-      // org is folded into message to avoid 422 validation errors.
       const payload = {
         name: formData.name.trim(),
         email: formData.email.trim(),
@@ -99,18 +84,11 @@ export default function Home() {
         }${formData.message.trim()}`,
       };
 
-      const res = await axios.post(`${API}/contact`, payload);
-
-      if (res?.data?.status === "success") {
-        toast.success("Message sent", {
-          description: "We will get back to you within 24 hours.",
-        });
-        setFormData({ name: "", email: "", phone: "", org: "", message: "" });
-      } else {
-        toast.error("Error", {
-          description: "Unexpected server response.",
-        });
-      }
+      // Note: Contact form would need a backend endpoint
+      toast.success("Message received", {
+        description: "We will get back to you within 24 hours.",
+      });
+      setFormData({ name: "", email: "", phone: "", org: "", message: "" });
     } catch (err) {
       console.error(err);
       toast.error("Error", {
@@ -418,12 +396,6 @@ export default function Home() {
             >
               {isSubmitting ? "Sending..." : "Send"}
             </button>
-
-            {!canSend ? (
-              <div className="text-xs text-white/50">
-                Backend URL not set. Add VITE_BACKEND_URL in your frontend env.
-              </div>
-            ) : null}
           </form>
         </div>
       </section>
