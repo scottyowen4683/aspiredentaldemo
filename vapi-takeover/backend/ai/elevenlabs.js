@@ -15,13 +15,15 @@ const ELEVENLABS_API_URL = 'https://api.elevenlabs.io/v1';
 let backgroundAudioCache = {};
 let fillerAudioCache = {}; // Pre-generated filler phrases for instant playback
 
-// Filler phrases - VERY short acknowledgments for instant feedback
-// Keep these minimal - they play while STT/GPT processes (500-1500ms)
+// Filler phrases - longer phrases that mask the 2-3 second GPT processing time
+// These should sound natural and give the impression of "thinking"
 const FILLER_PHRASES = [
-  'Sure.',
-  'Okay.',
-  'Mm-hmm.',
-  'One sec.'
+  'Let me check that for you.',
+  'Let me look into that.',
+  'One moment while I check.',
+  'Let me find that information.',
+  'Just a moment please.',
+  'Let me see here.'
 ];
 
 /**
