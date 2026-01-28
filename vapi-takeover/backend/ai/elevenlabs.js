@@ -194,7 +194,7 @@ export async function streamElevenLabsTTS(text, voiceId, onChunk, options = {}) 
       url: `${ELEVENLABS_API_URL}/text-to-speech/${voiceId}/stream`,
       data: {
         text,
-        model_id: 'eleven_turbo_v2_5', // Turbo model for lowest latency
+        model_id: 'eleven_flash_v2', // Flash model for ultra-low latency (~75ms)
         voice_settings: {
           stability: 0.5,
           similarity_boost: 0.8,
@@ -303,7 +303,7 @@ export async function streamElevenLabsAudio(text, voiceId, options = {}) {
       `${ELEVENLABS_API_URL}/text-to-speech/${voiceId}`,
       {
         text,
-        model_id: 'eleven_turbo_v2_5', // Fastest model
+        model_id: 'eleven_flash_v2', // Flash model for ultra-low latency (~75ms)
         voice_settings: {
           stability: 0.5,
           similarity_boost: 0.8,
