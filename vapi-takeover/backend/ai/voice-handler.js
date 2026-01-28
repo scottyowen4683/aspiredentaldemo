@@ -98,6 +98,68 @@ const END_CALL_PHRASES = [
   'thank you for calling'
 ];
 
+// ============================================
+// OPTIMIZATION 1: Simple query detection - skip KB search for these
+// ============================================
+const SIMPLE_QUERY_PATTERNS = [
+  /^(yes|yeah|yep|yup|sure|okay|ok|no|nope|nah|mm-?hmm?|uh-?huh)[\.\!\?]?$/i,
+  /^(thanks?|thank you|cheers|ta)[\.\!\?]?$/i,
+  /^(bye|goodbye|see ya|catch you later)[\.\!\?]?$/i,
+  /^(hi|hello|hey|g'?day)[\.\!\?]?$/i,
+  /^(that's all|that is all|nothing else|i'?m done|all good|all set)[\.\!\?]?$/i,
+  /^(sounds good|perfect|great|awesome|cool|got it|understood|alright|right)[\.\!\?]?$/i,
+  /^(go ahead|please|continue|carry on)[\.\!\?]?$/i,
+];
+
+function isSimpleQuery(text) {
+  const trimmed = text.trim().toLowerCase();
+  return SIMPLE_QUERY_PATTERNS.some(pattern => pattern.test(trimmed));
+}
+
+// ============================================
+// OPTIMIZATION 4: Response caching for common questions
+// ============================================
+const responseCache = new Map();
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const MAX_CACHE_SIZE = 100;
+
+function getCacheKey(orgId, query) {
+  // Normalize query: lowercase, trim, remove punctuation
+  const normalized = query.toLowerCase().trim().replace(/[^\w\s]/g, '');
+  return `${orgId || 'default'}:${normalized}`;
+}
+
+function getCachedResponse(orgId, query) {
+  const key = getCacheKey(orgId, query);
+  const cached = responseCache.get(key);
+
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+    logger.info('Cache HIT', { key: key.substring(0, 50), age: Date.now() - cached.timestamp });
+    return cached.response;
+  }
+
+  if (cached) {
+    responseCache.delete(key); // Expired
+  }
+  return null;
+}
+
+function setCachedResponse(orgId, query, response) {
+  const key = getCacheKey(orgId, query);
+
+  // LRU eviction if cache is full
+  if (responseCache.size >= MAX_CACHE_SIZE) {
+    const oldestKey = responseCache.keys().next().value;
+    responseCache.delete(oldestKey);
+  }
+
+  responseCache.set(key, {
+    response,
+    timestamp: Date.now()
+  });
+  logger.debug('Cached response', { key: key.substring(0, 50) });
+}
+
 // User phrases that indicate they want to end the call
 const USER_END_PHRASES = [
   'goodbye',
@@ -907,13 +969,47 @@ class VoiceHandler {
 
   async generateResponse(userMessage) {
     try {
-      // Get conversation history first - we need it for context-aware KB search
-      const history = await supabaseService.getConversationHistory(this.sessionId);
+      // ============================================
+      // OPTIMIZATION 4: Check cache first
+      // ============================================
+      const cachedResponse = getCachedResponse(this.assistant.org_id, userMessage);
+      if (cachedResponse) {
+        logger.info('🚀 Using CACHED response', {
+          query: userMessage.substring(0, 30),
+          responsePreview: cachedResponse.text.substring(0, 30)
+        });
+        return cachedResponse;
+      }
 
-      // Build context-enriched query for KB search
-      // Include recent conversation context so "Yes" or "What about Griffin?" works
+      // ============================================
+      // OPTIMIZATION 1: Skip KB for simple queries
+      // ============================================
+      const skipKB = isSimpleQuery(userMessage);
+      if (skipKB) {
+        logger.info('⚡ Skipping KB search for simple query', { query: userMessage });
+      }
+
+      // ============================================
+      // OPTIMIZATION 2: Parallelize KB search with conversation history fetch
+      // ============================================
+      const historyPromise = supabaseService.getConversationHistory(this.sessionId);
+
+      // Start embedding creation early (in parallel with history fetch)
+      let embeddingPromise = null;
+      if (this.assistant.kb_enabled && !skipKB) {
+        // We'll enhance the query after history loads, but start with basic query for now
+        embeddingPromise = openai.embeddings.create({
+          model: 'text-embedding-3-small',
+          input: userMessage // Start with user message, may enhance later
+        });
+      }
+
+      // Wait for history (needed for context)
+      const history = await historyPromise;
+
+      // Build context-enriched query for KB search if we have history
       let kbQueryText = userMessage;
-      if (history && history.length > 0) {
+      if (history && history.length > 0 && !skipKB) {
         // Get last 2-3 exchanges for context (up to 500 chars)
         const recentContext = history
           .slice(-4) // Last 4 messages (2 exchanges)
@@ -928,19 +1024,22 @@ class VoiceHandler {
           originalQuery: userMessage.substring(0, 50),
           enrichedQueryLength: kbQueryText.length
         });
-      }
 
-      // Create embedding with context-enriched query
-      const embeddingResult = this.assistant.kb_enabled
-        ? await openai.embeddings.create({
+        // If context changed significantly, create new embedding with context
+        if (kbQueryText.length > userMessage.length + 50) {
+          embeddingPromise = openai.embeddings.create({
             model: 'text-embedding-3-small',
             input: kbQueryText
-          })
-        : null;
+          });
+        }
+      }
 
-      // Search knowledge base if enabled (RAG)
+      // Wait for embedding if we started one
+      const embeddingResult = embeddingPromise ? await embeddingPromise : null;
+
+      // Search knowledge base if enabled (RAG) - skip for simple queries
       let kbContext = '';
-      if (this.assistant.kb_enabled && embeddingResult) {
+      if (this.assistant.kb_enabled && embeddingResult && !skipKB) {
         try {
           const embedding = embeddingResult.data[0].embedding;
 
@@ -1188,12 +1287,23 @@ DO NOT make up or guess information like names, contact details, or specific fac
       const GPT_OUTPUT_COST = 0.60 / 1000000;
       const gptCost = (tokensIn * GPT_INPUT_COST) + (tokensOut * GPT_OUTPUT_COST);
 
-      return {
+      const response = {
         text: responseText,
         tokensIn,
         tokensOut,
         cost: gptCost
       };
+
+      // ============================================
+      // OPTIMIZATION 4: Cache response for reuse
+      // Only cache if no function calls were made (those are context-dependent)
+      // ============================================
+      const hadFunctionCalls = toolCalls && toolCalls.length > 0;
+      if (!hadFunctionCalls && !isSimpleQuery(userMessage) && responseText.length > 20) {
+        setCachedResponse(this.assistant.org_id, userMessage, response);
+      }
+
+      return response;
     } catch (error) {
       logger.error('GPT generation failed:', error);
       throw error;
