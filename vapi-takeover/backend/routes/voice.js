@@ -337,4 +337,178 @@ router.post('/outbound', async (req, res) => {
   }
 });
 
+// =============================================================================
+// CAMPAIGN OUTBOUND CALL ENDPOINTS
+// =============================================================================
+
+// POST /api/voice/campaign-twiml
+// TwiML for campaign outbound calls - uses campaign-specific prompt/first_message
+router.post('/campaign-twiml', async (req, res) => {
+  try {
+    const { campaignId, contactId, voiceId, prompt, firstMessage } = req.query;
+
+    logger.info('Campaign TwiML requested:', {
+      campaignId,
+      contactId,
+      voiceId,
+      hasPrompt: !!prompt,
+      hasFirstMessage: !!firstMessage
+    });
+
+    // Create TwiML response
+    const response = new VoiceResponse();
+
+    // Connect to WebSocket Media Stream for AI conversation
+    const wsHost = process.env.BASE_URL
+      ? process.env.BASE_URL.replace('https://', '').replace('http://', '')
+      : req.headers.host;
+
+    const connect = response.connect();
+    const stream = connect.stream({
+      url: `wss://${wsHost}/voice/stream`
+    });
+
+    // Pass campaign context as parameters
+    stream.parameter({ name: 'campaignId', value: campaignId || '' });
+    stream.parameter({ name: 'contactId', value: contactId || '' });
+    stream.parameter({ name: 'voiceId', value: voiceId || '' });
+    stream.parameter({ name: 'outboundPrompt', value: prompt || '' });
+    stream.parameter({ name: 'firstMessage', value: firstMessage || '' });
+    stream.parameter({ name: 'isCampaignCall', value: 'true' });
+
+    res.type('text/xml');
+    res.send(response.toString());
+
+    logger.info('Campaign TwiML sent:', {
+      campaignId,
+      contactId,
+      wsUrl: `wss://${wsHost}/voice/stream`
+    });
+
+  } catch (error) {
+    logger.error('Campaign TwiML error:', error);
+    const response = new VoiceResponse();
+    response.say({ voice: 'Polly.Joanna' }, 'Sorry, there was an error. Goodbye.');
+    response.hangup();
+    res.type('text/xml');
+    res.send(response.toString());
+  }
+});
+
+// POST /api/voice/campaign-status
+// Status callback for campaign calls - updates contact status
+router.post('/campaign-status', async (req, res) => {
+  try {
+    const { campaignId, contactId } = req.query;
+    const { CallSid, CallStatus, CallDuration, AnsweredBy } = req.body;
+
+    logger.info('Campaign call status:', {
+      campaignId,
+      contactId,
+      callSid: CallSid,
+      status: CallStatus,
+      duration: CallDuration,
+      answeredBy: AnsweredBy
+    });
+
+    if (!contactId) {
+      return res.sendStatus(200);
+    }
+
+    // Map Twilio status to our contact status
+    let contactStatus = 'in_progress';
+    let isSuccessful = false;
+
+    switch (CallStatus) {
+      case 'completed':
+        // Call was answered and completed
+        contactStatus = 'completed';
+        isSuccessful = true;
+        break;
+      case 'busy':
+        contactStatus = 'busy';
+        break;
+      case 'no-answer':
+        contactStatus = 'no_answer';
+        break;
+      case 'failed':
+      case 'canceled':
+        contactStatus = 'failed';
+        break;
+      case 'initiated':
+      case 'ringing':
+      case 'in-progress':
+        // Still in progress, don't update final status yet
+        return res.sendStatus(200);
+    }
+
+    // Update contact status
+    await supabaseService.client
+      .from('campaign_contacts')
+      .update({
+        status: contactStatus,
+        call_duration: parseInt(CallDuration) || 0,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', contactId);
+
+    // Update campaign stats if call is finished
+    if (campaignId && (isSuccessful || ['busy', 'no_answer', 'failed'].includes(contactStatus))) {
+      const { data: campaign } = await supabaseService.client
+        .from('outbound_campaigns')
+        .select('successful, failed')
+        .eq('id', campaignId)
+        .single();
+
+      if (campaign) {
+        const updates = {
+          updated_at: new Date().toISOString()
+        };
+
+        if (isSuccessful) {
+          updates.successful = (campaign.successful || 0) + 1;
+        } else {
+          updates.failed = (campaign.failed || 0) + 1;
+        }
+
+        await supabaseService.client
+          .from('outbound_campaigns')
+          .update(updates)
+          .eq('id', campaignId);
+      }
+
+      // Log interaction for billing
+      const { data: campaignData } = await supabaseService.client
+        .from('outbound_campaigns')
+        .select('org_id, assistant_id')
+        .eq('id', campaignId)
+        .single();
+
+      if (campaignData?.org_id && isSuccessful) {
+        try {
+          await supabaseService.logInteraction({
+            orgId: campaignData.org_id,
+            assistantId: campaignData.assistant_id,
+            interactionType: 'call_outbound',
+            conversationId: null,
+            sessionId: CallSid,
+            contactNumber: null,
+            durationSeconds: parseInt(CallDuration) || 0,
+            cost: 0,
+            campaignId: campaignId
+          });
+        } catch (logError) {
+          logger.warn('Could not log campaign interaction:', logError.message);
+        }
+      }
+    }
+
+    res.sendStatus(200);
+
+  } catch (error) {
+    logger.error('Campaign status callback error:', error);
+    res.sendStatus(500);
+  }
+});
+
 export default router;

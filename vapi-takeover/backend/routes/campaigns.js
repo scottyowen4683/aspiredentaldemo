@@ -42,7 +42,12 @@ router.post('/', async (req, res) => {
       call_hours_end,
       timezone,
       max_concurrent_calls,
-      calls_per_minute
+      calls_per_minute,
+      // New outbound-specific fields
+      outbound_prompt,
+      first_message,
+      voice_id,
+      from_number
     } = req.body;
 
     // Validation
@@ -85,7 +90,12 @@ router.post('/', async (req, res) => {
         call_hours_end: call_hours_end || '17:00:00',
         timezone: timezone || 'Australia/Brisbane',
         max_concurrent_calls: max_concurrent_calls || 5,
-        calls_per_minute: calls_per_minute || 10
+        calls_per_minute: calls_per_minute || 10,
+        // Outbound-specific fields
+        outbound_prompt: outbound_prompt || null,
+        first_message: first_message || null,
+        voice_id: voice_id || null,
+        from_number: from_number || null
       })
       .select()
       .single();
@@ -516,6 +526,185 @@ router.post('/:id/pause', async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to pause campaign'
+    });
+  }
+});
+
+// POST /api/campaigns/:id/run - Run campaign NOW (immediately dial contacts)
+router.post('/:id/run', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { limit = 10 } = req.body; // Max contacts to dial in this batch
+
+    // Get campaign with assistant details
+    const { data: campaign, error: campaignError } = await supabaseService.client
+      .from('outbound_campaigns')
+      .select('*, assistants(*)')
+      .eq('id', id)
+      .single();
+
+    if (campaignError) throw campaignError;
+
+    if (!campaign) {
+      return res.status(404).json({
+        success: false,
+        error: 'Campaign not found'
+      });
+    }
+
+    // Get pending contacts
+    const { data: contacts, error: contactsError } = await supabaseService.client
+      .from('campaign_contacts')
+      .select('*')
+      .eq('campaign_id', id)
+      .eq('status', 'pending')
+      .limit(limit);
+
+    if (contactsError) throw contactsError;
+
+    if (!contacts || contacts.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'No pending contacts to call'
+      });
+    }
+
+    // Initialize Twilio client
+    const twilioClient = twilio(
+      process.env.TWILIO_ACCOUNT_SID,
+      process.env.TWILIO_AUTH_TOKEN
+    );
+
+    // Determine from number (campaign override > assistant > env default)
+    const fromNumber = campaign.from_number ||
+                       campaign.assistants?.phone_number ||
+                       process.env.TWILIO_PHONE_NUMBER;
+
+    // Voice ID defaults to assistant's voice
+    const voiceId = campaign.voice_id ||
+                    campaign.assistants?.elevenlabs_voice_id ||
+                    process.env.ELEVENLABS_VOICE_DEFAULT;
+
+    const baseUrl = process.env.BASE_URL || 'https://aspire-ai-platform.fly.dev';
+
+    logger.info('Starting campaign run:', {
+      campaignId: id,
+      campaignName: campaign.name,
+      contactCount: contacts.length,
+      fromNumber,
+      voiceId
+    });
+
+    // Update campaign status to active
+    await supabaseService.client
+      .from('outbound_campaigns')
+      .update({
+        status: 'active',
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', id);
+
+    // Track results
+    const results = {
+      initiated: 0,
+      failed: 0,
+      errors: []
+    };
+
+    // Dial each contact
+    for (const contact of contacts) {
+      try {
+        // Mark contact as in_progress
+        await supabaseService.client
+          .from('campaign_contacts')
+          .update({
+            status: 'in_progress',
+            attempts: (contact.attempts || 0) + 1,
+            last_attempt_at: new Date().toISOString()
+          })
+          .eq('id', contact.id);
+
+        // Build TwiML URL with campaign context
+        const twimlUrl = `${baseUrl}/api/voice/campaign-twiml?` + new URLSearchParams({
+          campaignId: id,
+          contactId: contact.id,
+          voiceId: voiceId,
+          // Pass campaign-specific prompt/message as URL params (will be used by voice handler)
+          ...(campaign.outbound_prompt && { prompt: campaign.outbound_prompt }),
+          ...(campaign.first_message && { firstMessage: campaign.first_message })
+        }).toString();
+
+        // Make the outbound call
+        const call = await twilioClient.calls.create({
+          to: contact.phone_number,
+          from: fromNumber,
+          url: twimlUrl,
+          statusCallback: `${baseUrl}/api/voice/campaign-status?campaignId=${id}&contactId=${contact.id}`,
+          statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
+          statusCallbackMethod: 'POST',
+          timeout: 30
+        });
+
+        logger.info('Outbound call initiated:', {
+          callSid: call.sid,
+          to: contact.phone_number,
+          contactId: contact.id,
+          campaignId: id
+        });
+
+        results.initiated++;
+
+      } catch (callError) {
+        logger.error('Failed to initiate call:', {
+          contactId: contact.id,
+          phone: contact.phone_number,
+          error: callError.message
+        });
+
+        // Mark contact as failed
+        await supabaseService.client
+          .from('campaign_contacts')
+          .update({
+            status: 'failed',
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', contact.id);
+
+        results.failed++;
+        results.errors.push({
+          contactId: contact.id,
+          phone: contact.phone_number,
+          error: callError.message
+        });
+      }
+    }
+
+    // Update campaign stats
+    await supabaseService.client
+      .from('outbound_campaigns')
+      .update({
+        contacted: (campaign.contacted || 0) + results.initiated,
+        failed: (campaign.failed || 0) + results.failed,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', id);
+
+    logger.info('Campaign run completed:', {
+      campaignId: id,
+      ...results
+    });
+
+    res.json({
+      success: true,
+      message: `Initiated ${results.initiated} calls, ${results.failed} failed`,
+      results
+    });
+
+  } catch (error) {
+    logger.error('Campaign run error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to run campaign'
     });
   }
 });

@@ -83,6 +83,9 @@ export default function Campaigns() {
     timezone: "Australia/Sydney",
     max_concurrent_calls: 5,
     calls_per_minute: 2,
+    // Outbound-specific fields
+    outbound_prompt: "",
+    first_message: "",
   });
 
   // Load data
@@ -176,6 +179,8 @@ export default function Campaigns() {
           timezone: "Australia/Sydney",
           max_concurrent_calls: 5,
           calls_per_minute: 2,
+          outbound_prompt: "",
+          first_message: "",
         });
         toast({ title: "Success", description: "Campaign created successfully" });
       } else {
@@ -215,6 +220,35 @@ export default function Campaigns() {
       }
     } catch (err) {
       toast({ title: "Error", description: "Failed to pause campaign", variant: "destructive" });
+    }
+  };
+
+  const handleRunNow = async (campaignId: string) => {
+    try {
+      const res = await fetch(`/api/campaigns/${campaignId}/run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ limit: 10 }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setCampaigns((prev) => prev.map((c) => (c.id === campaignId ? { ...c, status: "active" } : c)));
+        toast({ title: "Calls Initiated", description: data.message });
+
+        // Refresh stats after a short delay
+        setTimeout(async () => {
+          const statsRes = await fetch(`/api/campaigns/${campaignId}/stats`);
+          if (statsRes.ok) {
+            const stats = await statsRes.json();
+            setCampaignStats((prev) => ({ ...prev, [campaignId]: stats.stats }));
+          }
+        }, 2000);
+      } else {
+        const error = await res.json();
+        toast({ title: "Error", description: error.error || "Failed to run campaign", variant: "destructive" });
+      }
+    } catch (err) {
+      toast({ title: "Error", description: "Failed to run campaign", variant: "destructive" });
     }
   };
 
@@ -407,15 +441,18 @@ export default function Campaigns() {
                     {/* Actions */}
                     <div className="flex gap-2 pt-2">
                       {campaign.status === "draft" || campaign.status === "paused" ? (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="flex-1"
-                          onClick={() => handleStartCampaign(campaign.id)}
-                        >
-                          <Play className="h-3 w-3 mr-1" />
-                          Start
-                        </Button>
+                        <>
+                          <Button
+                            size="sm"
+                            variant="default"
+                            className="flex-1 bg-green-600 hover:bg-green-700"
+                            onClick={() => handleRunNow(campaign.id)}
+                            disabled={!stats?.total_contacts || stats.total_contacts === 0}
+                          >
+                            <Play className="h-3 w-3 mr-1" />
+                            Run Now
+                          </Button>
+                        </>
                       ) : campaign.status === "active" ? (
                         <Button
                           size="sm"
@@ -526,6 +563,35 @@ export default function Campaigns() {
                 value={formData.description}
                 onChange={(e) => setFormData({ ...formData, description: e.target.value })}
               />
+            </div>
+
+            {/* Outbound-specific fields */}
+            <div className="border-t pt-4 mt-4">
+              <h4 className="font-medium text-sm mb-3 text-muted-foreground">Outbound Call Settings</h4>
+
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label>Opening Message</Label>
+                  <Textarea
+                    placeholder="What the AI says when the call is answered, e.g. 'Hi, this is Sarah from ABC Company. I'm calling about...'"
+                    value={formData.first_message}
+                    onChange={(e) => setFormData({ ...formData, first_message: e.target.value })}
+                    rows={2}
+                  />
+                  <p className="text-xs text-muted-foreground">Leave blank to use the assistant's default greeting</p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Campaign Prompt</Label>
+                  <Textarea
+                    placeholder="Custom instructions for this campaign, e.g. 'You are calling to follow up on their recent enquiry about...'"
+                    value={formData.outbound_prompt}
+                    onChange={(e) => setFormData({ ...formData, outbound_prompt: e.target.value })}
+                    rows={4}
+                  />
+                  <p className="text-xs text-muted-foreground">Leave blank to use the assistant's default prompt</p>
+                </div>
+              </div>
             </div>
 
             <div className="grid grid-cols-2 gap-4">
