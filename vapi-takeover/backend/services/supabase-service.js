@@ -92,33 +92,30 @@ class SupabaseService {
       withoutPlus
     });
 
-    // Try normalized format first (with +)
+    // Try normalized format first (with +) - don't use maybeSingle to handle duplicates
     let { data, error } = await supabase
       .from('assistants')
       .select('*')
-      .eq('phone_number', normalizedNumber)
-      .maybeSingle();
+      .eq('phone_number', normalizedNumber);
 
     // If not found, try without the + prefix
-    if (!data) {
+    if (!data || data.length === 0) {
       logger.info('Not found with +, trying without:', withoutPlus);
       const result = await supabase
         .from('assistants')
         .select('*')
-        .eq('phone_number', withoutPlus)
-        .maybeSingle();
+        .eq('phone_number', withoutPlus);
       data = result.data;
       error = result.error;
     }
 
     // If still not found, try original format
-    if (!data && phoneNumber !== normalizedNumber && phoneNumber !== withoutPlus) {
+    if ((!data || data.length === 0) && phoneNumber !== normalizedNumber && phoneNumber !== withoutPlus) {
       logger.info('Not found, trying original format:', phoneNumber);
       const result = await supabase
         .from('assistants')
         .select('*')
-        .eq('phone_number', phoneNumber)
-        .maybeSingle();
+        .eq('phone_number', phoneNumber);
       data = result.data;
       error = result.error;
     }
@@ -127,19 +124,37 @@ class SupabaseService {
       logger.error('Error fetching assistant by phone:', error);
     }
 
-    if (!data) {
+    if (!data || data.length === 0) {
       logger.warn('No assistant found for phone number:', { phoneNumber, normalizedNumber, withoutPlus });
       return null;
     }
 
+    // Handle multiple assistants with same phone number
+    let assistant = data[0];
+    if (data.length > 1) {
+      logger.info('Multiple assistants found for phone number, selecting best match:', { count: data.length });
+      // Prefer assistants that don't have "outbound" in the name (for inbound calls)
+      const inboundAssistant = data.find(a =>
+        a.active !== false && !a.friendly_name?.toLowerCase().includes('outbound')
+      );
+      if (inboundAssistant) {
+        assistant = inboundAssistant;
+        logger.info('Selected non-outbound assistant:', { id: assistant.id, name: assistant.friendly_name });
+      } else {
+        // Just use first active one
+        assistant = data.find(a => a.active !== false) || data[0];
+        logger.info('Using first available assistant:', { id: assistant.id, name: assistant.friendly_name });
+      }
+    }
+
     // Check if assistant is active
-    if (data.active === false) {
-      logger.warn('Assistant found but is inactive:', { id: data.id, name: data.friendly_name });
+    if (assistant.active === false) {
+      logger.warn('Assistant found but is inactive:', { id: assistant.id, name: assistant.friendly_name });
       return null;
     }
 
-    logger.info('Assistant found:', { id: data.id, name: data.friendly_name, phone: data.phone_number });
-    return data;
+    logger.info('Assistant found:', { id: assistant.id, name: assistant.friendly_name, phone: assistant.phone_number });
+    return assistant;
   }
 
   // ===========================================================================
