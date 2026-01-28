@@ -59,6 +59,15 @@ app.get('/health', (req, res) => {
   });
 });
 
+// Public config endpoint - returns non-sensitive configuration
+app.get('/api/config', (req, res) => {
+  const baseUrl = process.env.BASE_URL || `${req.protocol}://${req.get('host')}`;
+  res.json({
+    baseUrl,
+    environment: process.env.NODE_ENV
+  });
+});
+
 // Debug: Check if public folder exists and list files
 import { existsSync, readdirSync } from 'fs';
 const publicPath = join(__dirname, 'public');

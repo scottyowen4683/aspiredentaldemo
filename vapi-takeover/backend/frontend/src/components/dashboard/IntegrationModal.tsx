@@ -42,7 +42,11 @@ interface EmbedCodeData {
     name: string;
     type: string;
     organization: string;
+    pilotEnabled?: boolean;
+    pilotSlug?: string | null;
   };
+  baseUrl: string; // Production base URL from server
+  pilotUrl: string | null; // Full pilot URL ready to share
   embedCodes: {
     chat?: {
       script: string;
@@ -230,15 +234,15 @@ export default function IntegrationModal({
                   <CardContent className="space-y-4">
                     {/* Direct URL */}
                     <div>
-                      <p className="text-sm font-medium mb-2">Direct URL</p>
+                      <p className="text-sm font-medium mb-2">Direct URL (share this with clients)</p>
                       <div className="flex items-center gap-2">
                         <code className="flex-1 text-sm bg-slate-950 text-slate-50 px-4 py-3 rounded-lg">
-                          {window.location.origin}/pilot/{pilotSlug}
+                          {embedData.pilotUrl || `${embedData.baseUrl}/pilot/${pilotSlug}`}
                         </code>
                         <Button
                           variant="secondary"
                           size="sm"
-                          onClick={() => copyToClipboard(`${window.location.origin}/pilot/${pilotSlug}`, "Pilot URL")}
+                          onClick={() => copyToClipboard(embedData.pilotUrl || `${embedData.baseUrl}/pilot/${pilotSlug}`, "Pilot URL")}
                         >
                           {copiedField === "Pilot URL" ? (
                             <CheckCircle className="h-4 w-4 text-green-500" />
@@ -269,7 +273,7 @@ export default function IntegrationModal({
                       <p className="text-sm font-medium mb-2">Embed as iframe</p>
                       <CodeBlock
                         code={`<iframe
-  src="${window.location.origin}/pilot/${pilotSlug}"
+  src="${embedData.pilotUrl || `${embedData.baseUrl}/pilot/${pilotSlug}`}"
   width="100%"
   height="800"
   frameborder="0"

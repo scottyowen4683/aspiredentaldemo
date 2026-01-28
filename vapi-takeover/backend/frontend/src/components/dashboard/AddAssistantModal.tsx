@@ -510,7 +510,7 @@ export function AddAssistantModal({ open, onOpenChange, initialData, onSuccess }
 
         toast({
           title: initialData?.id ? "Assistant Updated" : "Assistant Created",
-          description: `${formData.friendlyName} has been ${initialData?.id ? "updated" : "created"} successfully.${formData.pilotEnabled ? ` Pilot page URL: /pilot/${payload.pilot_slug}` : ''}`
+          description: `${formData.friendlyName} has been ${initialData?.id ? "updated" : "created"} successfully.${formData.pilotEnabled ? ` Use the Integration button to get the shareable Pilot URL.` : ''}`
         });
         onOpenChange(false);
         onSuccess?.();
@@ -1170,24 +1170,14 @@ export function AddAssistantModal({ open, onOpenChange, initialData, onSuccess }
                     <div className="p-3 bg-white dark:bg-slate-900 rounded-lg border">
                       <div className="flex items-center gap-2 text-sm">
                         <Link2 className="h-4 w-4 text-indigo-500" />
-                        <span className="text-muted-foreground">Pilot URL:</span>
+                        <span className="text-muted-foreground">Pilot URL slug:</span>
                         <code className="px-2 py-0.5 bg-slate-100 dark:bg-slate-800 rounded text-indigo-600 dark:text-indigo-400">
                           /pilot/{initialData?.pilot_slug || formData.pilotCompanyName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}
                         </code>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="ml-auto h-7"
-                          onClick={() => {
-                            const slug = initialData?.pilot_slug || formData.pilotCompanyName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-                            navigator.clipboard.writeText(`${window.location.origin}/pilot/${slug}`);
-                            toast({ title: "Copied!", description: "Pilot URL copied to clipboard" });
-                          }}
-                        >
-                          <Copy className="h-3 w-3 mr-1" /> Copy
-                        </Button>
                       </div>
+                      <p className="text-xs text-muted-foreground mt-2">
+                        After saving, use the Integration button to get the full shareable URL.
+                      </p>
                     </div>
                   )}
                 </div>

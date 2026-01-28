@@ -585,7 +585,7 @@ router.post('/:id/run', async (req, res) => {
                     campaign.assistants?.elevenlabs_voice_id ||
                     process.env.ELEVENLABS_VOICE_DEFAULT;
 
-    const baseUrl = process.env.BASE_URL || 'https://aspire-ai-platform.fly.dev';
+    const baseUrl = process.env.BASE_URL || 'https://aspireexecutive.ai';
 
     logger.info('Starting campaign run:', {
       campaignId: id,

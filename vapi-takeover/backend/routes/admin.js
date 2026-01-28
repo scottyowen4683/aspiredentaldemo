@@ -945,14 +945,23 @@ export function AspireChatWidget() {
       };
     }
 
+    // Include pilot URL if pilot mode is enabled
+    const pilotUrl = assistant.pilot_enabled && assistant.pilot_slug
+      ? `${baseUrl}/pilot/${assistant.pilot_slug}`
+      : null;
+
     res.json({
       success: true,
       assistant: {
         id: assistant.id,
         name: assistant.friendly_name,
         type: assistant.bot_type,
-        organization: assistant.organizations?.name
+        organization: assistant.organizations?.name,
+        pilotEnabled: assistant.pilot_enabled,
+        pilotSlug: assistant.pilot_slug
       },
+      baseUrl, // Expose production base URL for frontend
+      pilotUrl, // Full pilot URL ready to share
       embedCodes,
       widgetConfig: {
         primaryColor,
