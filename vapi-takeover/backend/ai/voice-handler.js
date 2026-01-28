@@ -362,36 +362,39 @@ class VoiceHandler {
 
   async initialize() {
     try {
-      // Get assistant configuration and universal prompt in parallel
-      const [assistant, universalPrompt] = await Promise.all([
-        supabaseService.getAssistant(this.assistantId),
-        supabaseService.getUniversalPrompt()
-      ]);
+      // SPECIAL CASE: Marketing demo uses hardcoded config (not in database)
+      // Check this BEFORE querying database to avoid UUID parse error
+      if (this.assistantId === 'outbound-demo') {
+        const outboundVoiceId = process.env.ELEVENLABS_OUTBOUND_VOICE_ID || 'UQVsQrmNGOENbsLCAH2g';
+        logger.info('Using Aspire outbound demo configuration (marketing site)', {
+          voiceId: outboundVoiceId,
+          hasApiKey: !!process.env.ELEVENLABS_API_KEY
+        });
+        this.assistant = {
+          id: 'outbound-demo',
+          org_id: null,
+          friendly_name: 'Aspire AI Demo',
+          first_message: "Hi! This is Aspire AI calling. You requested a demo of our AI voice assistant for councils and businesses. How can I help you learn about our services?",
+          prompt: ASPIRE_OUTBOUND_DEMO_PROMPT,
+          model: 'gpt-4o-mini',
+          temperature: 0.7,
+          max_tokens: 200,
+          kb_enabled: false,
+          elevenlabs_voice_id: outboundVoiceId
+        };
+        // Still get universal prompt for potential use
+        this.universalPrompt = await supabaseService.getUniversalPrompt();
+      } else {
+        // Regular assistant - query database
+        const [assistant, universalPrompt] = await Promise.all([
+          supabaseService.getAssistant(this.assistantId),
+          supabaseService.getUniversalPrompt()
+        ]);
 
-      this.assistant = assistant;
-      this.universalPrompt = universalPrompt;
-      if (!this.assistant) {
-        // Check if this is the outbound demo - use special config
-        if (this.assistantId === 'outbound-demo') {
-          // Use Scott's cloned voice if env var set, otherwise use hardcoded ID
-          const outboundVoiceId = process.env.ELEVENLABS_OUTBOUND_VOICE_ID || 'UQVsQrmNGOENbsLCAH2g';
-          logger.info('Using Aspire outbound demo configuration', {
-            voiceId: outboundVoiceId,
-            hasApiKey: !!process.env.ELEVENLABS_API_KEY
-          });
-          this.assistant = {
-            id: 'outbound-demo',
-            org_id: null,
-            friendly_name: 'Aspire AI Demo',
-            first_message: "Hi! This is Aspire AI calling. You requested a demo of our AI voice assistant for councils and businesses. How can I help you learn about our services?",
-            prompt: ASPIRE_OUTBOUND_DEMO_PROMPT,
-            model: 'gpt-4o-mini',
-            temperature: 0.7,
-            max_tokens: 200,
-            kb_enabled: false,
-            elevenlabs_voice_id: outboundVoiceId
-          };
-        } else {
+        this.assistant = assistant;
+        this.universalPrompt = universalPrompt;
+
+        if (!this.assistant) {
           // Create a minimal fallback assistant config so call can still work
           logger.warn(`Assistant not found: ${this.assistantId}, using defaults`);
           this.assistant = {
