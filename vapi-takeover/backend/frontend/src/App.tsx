@@ -37,6 +37,14 @@ import Billing from "./pages/Billing";
 import Pilot from "./pages/Pilot";
 import Index from "./pages/Index";
 
+// Marketing Pages
+import MarketingLayout from "./pages/marketing/MarketingLayout";
+import MarketingHome from "./pages/marketing/Home";
+import MarketingBusiness from "./pages/marketing/Business";
+import MarketingGovernment from "./pages/marketing/Government";
+import MarketingFramework from "./pages/marketing/Framework";
+import MarketingAgents from "./pages/marketing/Agents";
+
 // Debug flag - set to true to use minimal app for testing
 const DEBUG_MINIMAL_APP = false;
 
@@ -99,7 +107,17 @@ const App = () => {
           {/* 👇 Wrap all routes inside UserProvider */}
           <UserProvider>
             <Routes>
-              <Route path="/" element={<Index />} />
+              {/* Marketing Site Routes (Public Landing Pages) */}
+              <Route element={<MarketingLayout />}>
+                <Route path="/" element={<MarketingHome />} />
+                <Route path="/business" element={<MarketingBusiness />} />
+                <Route path="/government" element={<MarketingGovernment />} />
+                <Route path="/framework" element={<MarketingFramework />} />
+                <Route path="/agents" element={<MarketingAgents />} />
+              </Route>
+
+              {/* Portal Routes */}
+              <Route path="/portal" element={<Index />} />
               <Route path="/auth" element={<Auth />} />
               <Route path="/reset-password" element={<ResetPassword />} />
 
