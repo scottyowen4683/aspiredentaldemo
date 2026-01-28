@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Outlet, Link, NavLink, useLocation } from "react-router-dom";
 import { LogIn } from "lucide-react";
 
-function NavItem({ to, children }: { to: string; children: React.ReactNode }) {
+function NavItem({ to, children }) {
   return (
     <NavLink
       to={to}
@@ -18,22 +18,29 @@ function NavItem({ to, children }: { to: string; children: React.ReactNode }) {
   );
 }
 
-export default function MarketingLayout() {
+export default function SiteLayout() {
   const [open, setOpen] = useState(false);
   const location = useLocation();
 
   useEffect(() => setOpen(false), [location.pathname]);
 
+  // 1) Always go to top on route change (pathname change)
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: "auto" });
   }, [location.pathname]);
 
+  // 2) If a hash exists (e.g. #contact), scroll to it with offset (sticky header)
   useEffect(() => {
     if (!location.hash) return;
+
     const id = location.hash.replace("#", "");
     const el = document.getElementById(id);
     if (!el) return;
+
+    // Sticky header offset: adjust this if you change header height
     const HEADER_OFFSET = 96;
+
+    // Wait a tick so the new route has rendered its DOM
     requestAnimationFrame(() => {
       const rect = el.getBoundingClientRect();
       const absoluteTop = rect.top + window.pageYOffset;
@@ -42,6 +49,7 @@ export default function MarketingLayout() {
     });
   }, [location.hash, location.pathname]);
 
+  // Logo preference
   const [logoSrc, setLogoSrc] = useState("/aspire-mark.png");
 
   return (
@@ -55,22 +63,24 @@ export default function MarketingLayout() {
               src={logoSrc}
               alt="Aspire Executive Solutions"
               className="h-9 w-auto"
-              onError={() => setLogoSrc("/aspire.png")}
+              onError={() => setLogoSrc("/aspire1.png")}
             />
+
             <div className="leading-tight">
               <div className="text-sm font-semibold tracking-wide">Aspire</div>
               <div className="text-xs text-white/60">
-                ASPIRE Enterprise AI Framework
+                ASPIRE™ Enterprise AI Framework
               </div>
             </div>
           </Link>
 
-          <nav className="hidden items-center gap-6 md:flex">
+          <nav className="hidden items-center gap-8 md:flex">
             <NavItem to="/agents">Agents</NavItem>
             <NavItem to="/framework">Framework</NavItem>
             <NavItem to="/government">Government</NavItem>
             <NavItem to="/business">Business</NavItem>
 
+            {/* Use Link so it stays SPA and works with hash scroll */}
             <Link
               to="/#contact"
               className="rounded-xl bg-white/10 px-4 py-2 text-sm font-semibold text-white hover:bg-white/15"
@@ -78,6 +88,7 @@ export default function MarketingLayout() {
               Contact
             </Link>
 
+            {/* Login button - links to portal */}
             <Link
               to="/auth"
               className="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2 text-sm font-semibold text-black hover:bg-white/90"
@@ -110,12 +121,16 @@ export default function MarketingLayout() {
               <Link className="text-white/80 hover:text-white" to="/business">
                 Business
               </Link>
+
+              {/* Use Link here too */}
               <Link
                 to="/#contact"
                 className="rounded-xl bg-white/10 px-4 py-2 text-sm font-semibold text-white hover:bg-white/15 text-center"
               >
                 Contact
               </Link>
+
+              {/* Mobile Login button */}
               <Link
                 to="/auth"
                 className="inline-flex items-center justify-center gap-2 rounded-xl bg-white px-4 py-2 text-sm font-semibold text-black hover:bg-white/90"
@@ -137,7 +152,7 @@ export default function MarketingLayout() {
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div>
               <div className="font-semibold text-white/85">
-                ASPIRE Enterprise AI Framework
+                ASPIRE™ Enterprise AI Framework
               </div>
               <div className="mt-1">
                 Premium-grade AI agents for Government and Business.
@@ -163,9 +178,6 @@ export default function MarketingLayout() {
               </Link>
               <Link className="hover:text-white" to="/business">
                 Business
-              </Link>
-              <Link className="hover:text-white" to="/auth">
-                Portal Login
               </Link>
             </div>
           </div>

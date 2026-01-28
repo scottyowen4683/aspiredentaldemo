@@ -1,20 +1,20 @@
-import { useState } from "react";
+// frontend/src/pages/marketing/OutboundCTA.jsx
+// Self-hosted outbound calling via Twilio + ElevenLabs (no VAPI)
+import React, { useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
 import { Phone, CheckCircle, Megaphone, Sparkles } from "lucide-react";
 
-const normalizeAu = (raw: string) => {
+const normalizeAu = (raw) => {
   let s = (raw || "").replace(/[^\d+]/g, "");
   if (s.startsWith("0")) s = "+61" + s.slice(1);
   if (s.startsWith("61")) s = "+" + s;
   return /^\+61\d{9}$/.test(s) ? s : null;
 };
 
-interface OutboundCTAProps {
-  variant?: "government" | "business";
-}
-
-export default function OutboundCTA({ variant = "business" }: OutboundCTAProps) {
+export default function OutboundCTA({
+  variant = "business", // "government" | "business"
+}) {
   const [phone, setPhone] = useState("");
   const [consent, setConsent] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -54,7 +54,8 @@ export default function OutboundCTA({ variant = "business" }: OutboundCTAProps) 
     try {
       setLoading(true);
 
-      // Call our self-hosted Twilio API endpoint
+      // Call self-hosted API (Twilio + ElevenLabs)
+      // Uses phone +61731322220 and voice ID UQVsQrmNGOENbsLCAH2g (configured on backend)
       await axios.post("/api/outbound-call", {
         to,
         context: { variant, path: window.location.pathname },
@@ -63,7 +64,7 @@ export default function OutboundCTA({ variant = "business" }: OutboundCTAProps) 
       toast.success("All set - we're calling you now.");
       setPhone("");
       setConsent(false);
-    } catch (e: any) {
+    } catch (e) {
       console.error(e);
       const msg = e?.response?.data?.message || "Couldn't trigger the call.";
       toast.error(msg);
@@ -98,13 +99,38 @@ export default function OutboundCTA({ variant = "business" }: OutboundCTAProps) 
           value={phone}
           onChange={(e) => setPhone(e.target.value)}
           inputMode="tel"
-          className="w-full rounded-2xl border border-white/15 bg-white/5 px-4 py-3 text-sm text-white placeholder:text-white/40 outline-none focus:border-white/30"
+          className="
+            w-full
+            rounded-2xl
+            border border-white/15
+            bg-white/5
+            px-4 py-3
+            text-sm
+            text-white
+            placeholder:text-white/40
+            outline-none
+            focus:border-white/30
+          "
         />
 
         <button
           onClick={handleCall}
           disabled={loading}
-          className="w-full sm:w-auto rounded-2xl bg-white px-5 py-3 text-sm font-semibold text-black hover:bg-white/90 disabled:opacity-60 inline-flex items-center justify-center gap-2"
+          className="
+            w-full sm:w-auto
+            rounded-2xl
+            bg-white
+            px-5 py-3
+            text-sm
+            font-semibold
+            text-black
+            hover:bg-white/90
+            disabled:opacity-60
+            inline-flex
+            items-center
+            justify-center
+            gap-2
+          "
         >
           <Phone size={18} />
           {loading ? "Calling..." : "Get the AI to call me now"}

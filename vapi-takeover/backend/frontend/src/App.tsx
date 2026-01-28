@@ -37,13 +37,16 @@ import Billing from "./pages/Billing";
 import Pilot from "./pages/Pilot";
 import Index from "./pages/Index";
 
-// Marketing Pages
+// Marketing Pages (from premium-redesign)
 import MarketingLayout from "./pages/marketing/MarketingLayout";
 import MarketingHome from "./pages/marketing/Home";
 import MarketingBusiness from "./pages/marketing/Business";
 import MarketingGovernment from "./pages/marketing/Government";
 import MarketingFramework from "./pages/marketing/Framework";
 import MarketingAgents from "./pages/marketing/Agents";
+import MarketingAgentsVoice from "./pages/marketing/AgentsVoice";
+import MarketingAgentsChat from "./pages/marketing/AgentsChat";
+import MarketingAgentsOutbound from "./pages/marketing/AgentsOutbound";
 
 // Debug flag - set to true to use minimal app for testing
 const DEBUG_MINIMAL_APP = false;
@@ -114,6 +117,9 @@ const App = () => {
                 <Route path="/government" element={<MarketingGovernment />} />
                 <Route path="/framework" element={<MarketingFramework />} />
                 <Route path="/agents" element={<MarketingAgents />} />
+                <Route path="/agents/voice" element={<MarketingAgentsVoice />} />
+                <Route path="/agents/chat" element={<MarketingAgentsChat />} />
+                <Route path="/agents/outbound" element={<MarketingAgentsOutbound />} />
               </Route>
 
               {/* Portal Routes */}

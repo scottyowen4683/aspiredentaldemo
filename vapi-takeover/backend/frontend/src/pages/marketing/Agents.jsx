@@ -1,3 +1,4 @@
+import React from "react";
 import { Link } from "react-router-dom";
 import {
   ArrowRight,
@@ -22,7 +23,7 @@ export default function Agents() {
         <div className="relative">
           <p className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-4 py-2 text-xs text-white/70">
             <ShieldCheck className="h-4 w-4" />
-            Aspire AI Agents. Governed by the ASPIRE Enterprise AI Framework.
+            Aspire AI Agents. Governed by the ASPIRE™ Enterprise AI Framework.
           </p>
 
           <h1 className="mt-6 text-4xl md:text-6xl font-semibold tracking-tight">
@@ -42,17 +43,17 @@ export default function Agents() {
             <ValueCard
               icon={<Gauge className="h-4 w-4" />}
               title="High throughput"
-              text="Architected for reliability under load, including high-volume periods."
+              text="Architected for reliability under load, including high-volume periods. Capacity is deployment dependent and engineered, not assumed."
             />
             <ValueCard
               icon={<LineChart className="h-4 w-4" />}
               title="Real-time reporting"
-              text="See what people asked, what resolved, and where optimisation is required."
+              text="See what people asked, what resolved, what escalated, and where optimisation is required. Visibility is operational, not vanity metrics."
             />
             <ValueCard
               icon={<Workflow className="h-4 w-4" />}
               title="Controlled outcomes"
-              text="Triage, action, escalation. Clean handover summaries for your team."
+              text="Triage, action, escalation. Clean handover summaries so your team receives context and urgency in a format they can act on."
             />
           </div>
 
@@ -61,32 +62,35 @@ export default function Agents() {
             <AgentCard
               icon={<PhoneCall className="h-4 w-4" />}
               title="Voice Agents"
-              text="Instant call answering with structured triage, intent capture, and controlled escalation."
+              text="Instant call answering with structured triage, intent capture, and controlled escalation. Calm, consistent tone by design."
               highlights={[
                 "Fast pickup and structured triage",
                 "Consent-aware and escalation-ready",
                 "Outcome summaries for staff",
               ]}
+              to="/agents/voice"
             />
             <AgentCard
               icon={<MessageSquare className="h-4 w-4" />}
               title="Chat Agents"
-              text="Premium web chat that resolves common enquiries and routes the rest cleanly."
+              text="Premium web chat that resolves common enquiries and routes the rest. Grounded answers, controlled behaviour, and clean handover."
               highlights={[
                 "Grounded answers and safe fallback",
                 "Short answers by default, detail on request",
                 "Routes to forms, email, or humans",
               ]}
+              to="/agents/chat"
             />
             <AgentCard
               icon={<Zap className="h-4 w-4" />}
               title="Outbound Agents"
-              text="Controlled outbound for callbacks, confirmations, reminders, and proactive updates."
+              text="Controlled outbound for callbacks, confirmations, reminders, and proactive updates. Consent-first and brand-protective."
               highlights={[
                 "Consent-first outbound logic",
                 "Guardrails and escalation paths",
                 "Measured outcomes and reporting",
               ]}
+              to="/agents/outbound"
             />
           </div>
 
@@ -101,13 +105,15 @@ export default function Agents() {
                 <p className="mt-3 text-sm md:text-base text-white/70 leading-relaxed">
                   Every interaction becomes operational intelligence, not noise.
                   Track volumes, top enquiries, resolution versus escalation,
-                  failure modes, and optimisation opportunities.
+                  failure modes, and optimisation opportunities. This is how
+                  Aspire stays premium in production. Measurable, governed, and
+                  continuously improved.
                 </p>
                 <div className="mt-6 grid gap-3 md:grid-cols-2">
                   <Bullet text="Real-time dashboards and trend reporting" />
                   <Bullet text="Top questions, deflection, and escalation drivers" />
                   <Bullet text="Quality review signals to improve performance" />
-                  <Bullet text="Monthly optimisation loop under the ASPIRE Framework" />
+                  <Bullet text="Monthly optimisation loop under the ASPIRE™ Framework" />
                 </div>
               </div>
 
@@ -120,6 +126,7 @@ export default function Agents() {
                 </Link>
                 <div className="mt-3 text-xs text-white/55 max-w-[260px]">
                   Agents are deployed under governance, reporting, and control.
+                  This is not set and forget.
                 </div>
               </div>
             </div>
@@ -148,13 +155,20 @@ export default function Agents() {
               Book a demo <ArrowRight className="h-4 w-4" />
             </a>
           </div>
+
+          <div className="mt-6 text-xs text-white/55">
+            Note: throughput depends on deployment configuration, telephony, and
+            workflow complexity. We architect for reliability under load.
+          </div>
         </div>
       </section>
     </div>
   );
 }
 
-function ValueCard({ icon, title, text }: { icon: React.ReactNode; title: string; text: string }) {
+/* UI */
+
+function ValueCard({ icon, title, text }) {
   return (
     <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
       <div className="flex items-center gap-2 text-white/80">
@@ -166,19 +180,12 @@ function ValueCard({ icon, title, text }: { icon: React.ReactNode; title: string
   );
 }
 
-function AgentCard({
-  icon,
-  title,
-  text,
-  highlights,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  text: string;
-  highlights: string[];
-}) {
+function AgentCard({ icon, title, text, highlights, to }) {
   return (
-    <div className="group flex h-full flex-col rounded-3xl border border-white/10 bg-white/5 p-8 hover:bg-white/10 transition-colors">
+    <Link
+      to={to}
+      className="group flex h-full flex-col rounded-3xl border border-white/10 bg-white/5 p-8 hover:bg-white/10 transition-colors"
+    >
       <div className="flex items-center gap-2 text-white/85">
         <div className="rounded-2xl border border-white/15 bg-white/5 p-3 group-hover:bg-white/10">
           {icon}
@@ -186,7 +193,8 @@ function AgentCard({
         <p className="text-lg font-semibold">{title}</p>
       </div>
 
-      <p className="mt-4 text-sm text-white/70 leading-relaxed">
+      {/* THIS IS THE ONLY CHANGE: lock description height so bullet blocks align */}
+      <p className="mt-4 text-sm text-white/70 leading-relaxed md:line-clamp-3 md:min-h-[4.5rem]">
         {text}
       </p>
 
@@ -195,11 +203,15 @@ function AgentCard({
           <Bullet key={h} text={h} />
         ))}
       </div>
-    </div>
+
+      <div className="mt-auto pt-6 inline-flex items-center gap-2 text-sm font-semibold text-white/85">
+        Explore <ArrowRight className="h-4 w-4" />
+      </div>
+    </Link>
   );
 }
 
-function Bullet({ text }: { text: string }) {
+function Bullet({ text }) {
   return (
     <div className="flex items-start gap-2 text-sm text-white/75">
       <CheckCircle2 className="mt-0.5 h-4 w-4 text-white/70" />

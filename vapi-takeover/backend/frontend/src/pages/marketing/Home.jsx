@@ -1,10 +1,14 @@
-import { useState, useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import axios from "axios";
 import { toast } from "sonner";
 
 const DEMO_URL = "https://calendly.com/scott-owen-aspire/ai-demo";
 
-function Pill({ children }: { children: React.ReactNode }) {
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL;
+const API = `${(BACKEND_URL || "").replace(/\/+$/, "")}/api`;
+
+function Pill({ children }) {
   return (
     <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/75">
       {children}
@@ -12,7 +16,7 @@ function Pill({ children }: { children: React.ReactNode }) {
   );
 }
 
-function Card({ title, desc, bullets, to }: { title: string; desc: string; bullets: string[]; to: string }) {
+function Card({ title, desc, bullets, to }) {
   return (
     <div className="group relative overflow-hidden rounded-3xl border border-white/10 bg-white/[0.03] p-7 shadow-[0_0_0_1px_rgba(255,255,255,0.02)]">
       <div className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-500 group-hover:opacity-100">
@@ -42,6 +46,7 @@ function Card({ title, desc, bullets, to }: { title: string; desc: string; bulle
           >
             View {title}
           </Link>
+
           <a
             href={DEMO_URL}
             target="_blank"
@@ -66,18 +71,46 @@ export default function Home() {
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+  const canSend = useMemo(() => Boolean(BACKEND_URL), []);
+
+  const handleChange = (e) =>
     setFormData((p) => ({ ...p, [e.target.name]: e.target.value }));
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
+
+    if (!canSend) {
+      toast.error("Configuration error", {
+        description: "VITE_BACKEND_URL is not set, so the form cannot send yet.",
+      });
+      return;
+    }
+
     setIsSubmitting(true);
     try {
-      // Contact form submission
-      toast.success("Message sent", {
-        description: "We will get back to you within 24 hours.",
-      });
-      setFormData({ name: "", email: "", phone: "", org: "", message: "" });
+      // IMPORTANT: your FastAPI /contact only accepts {name,email,phone,message}
+      // org is folded into message to avoid 422 validation errors.
+      const payload = {
+        name: formData.name.trim(),
+        email: formData.email.trim(),
+        phone: (formData.phone || "").trim(),
+        message: `${
+          formData.org?.trim() ? `Organisation: ${formData.org.trim()}\n\n` : ""
+        }${formData.message.trim()}`,
+      };
+
+      const res = await axios.post(`${API}/contact`, payload);
+
+      if (res?.data?.status === "success") {
+        toast.success("Message sent", {
+          description: "We will get back to you within 24 hours.",
+        });
+        setFormData({ name: "", email: "", phone: "", org: "", message: "" });
+      } else {
+        toast.error("Error", {
+          description: "Unexpected server response.",
+        });
+      }
     } catch (err) {
       console.error(err);
       toast.error("Error", {
@@ -385,6 +418,12 @@ export default function Home() {
             >
               {isSubmitting ? "Sending..." : "Send"}
             </button>
+
+            {!canSend ? (
+              <div className="text-xs text-white/50">
+                Backend URL not set. Add VITE_BACKEND_URL in your frontend env.
+              </div>
+            ) : null}
           </form>
         </div>
       </section>
