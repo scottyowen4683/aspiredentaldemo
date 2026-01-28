@@ -1,5 +1,4 @@
 import React, { useState } from "react";
-import axios from "axios";
 import { toast } from "sonner";
 import {
   PhoneCall,
@@ -31,14 +30,19 @@ export default function Business() {
     e.preventDefault();
     setIsSubmitting(true);
     try {
-      const res = await axios.post(`${API}/contact`, formData);
-      if (res.data.status === "success") {
+      const res = await fetch("/api/contact", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(formData),
+      });
+      const data = await res.json();
+      if (data.status === "success") {
         toast.success("Message sent", {
           description: "We will get back to you within 24 hours.",
         });
         setFormData({ name: "", email: "", phone: "", message: "" });
       } else {
-        toast.error("Error", { description: "Unexpected server response." });
+        toast.error("Error", { description: data.message || "Unexpected server response." });
       }
     } catch (err) {
       console.error(err);
