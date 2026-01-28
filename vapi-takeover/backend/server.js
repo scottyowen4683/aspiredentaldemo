@@ -13,7 +13,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 import supabaseService from './services/supabase-service.js';
 import VoiceHandler from './ai/voice-handler.js';
-import { streamElevenLabsAudio } from './ai/elevenlabs.js';
+import { streamElevenLabsAudio, preGenerateFillerPhrases } from './ai/elevenlabs.js';
 
 // Routes
 import chatRouter from './routes/chat.js';
@@ -564,11 +564,54 @@ app.use((err, req, res, next) => {
 
 // Start server
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
+server.listen(PORT, async () => {
   logger.info(`🚀 VAPI Takeover server running on port ${PORT}`);
   logger.info(`   Environment: ${process.env.NODE_ENV}`);
   logger.info(`   WebSocket endpoint: ws://localhost:${PORT}/voice/stream`);
   logger.info(`   API endpoint: http://localhost:${PORT}/api`);
+
+  // Pre-generate filler phrases at startup for commonly used voices
+  // This ensures instant filler playback from the very first call
+  try {
+    const voicesToPreload = new Set();
+
+    // Add default voice if configured
+    if (process.env.ELEVENLABS_VOICE_DEFAULT) {
+      voicesToPreload.add(process.env.ELEVENLABS_VOICE_DEFAULT);
+    }
+    if (process.env.ELEVENLABS_OUTBOUND_VOICE_ID) {
+      voicesToPreload.add(process.env.ELEVENLABS_OUTBOUND_VOICE_ID);
+    }
+
+    // Fetch active assistants and pre-generate for their voices
+    const { data: assistants } = await supabaseService.client
+      .from('assistants')
+      .select('elevenlabs_voice_id')
+      .eq('active', true)
+      .not('elevenlabs_voice_id', 'is', null)
+      .limit(10);
+
+    if (assistants) {
+      assistants.forEach(a => {
+        if (a.elevenlabs_voice_id) voicesToPreload.add(a.elevenlabs_voice_id);
+      });
+    }
+
+    logger.info(`Pre-generating filler phrases for ${voicesToPreload.size} voices at startup`);
+
+    // Generate in parallel for speed
+    await Promise.all(
+      Array.from(voicesToPreload).map(voiceId =>
+        preGenerateFillerPhrases(voiceId, { backgroundSound: 'none' })
+          .then(() => logger.info(`Fillers ready for voice: ${voiceId}`))
+          .catch(e => logger.warn(`Failed to pre-generate fillers for ${voiceId}:`, e.message))
+      )
+    );
+
+    logger.info('✅ Filler phrases pre-loaded and ready for instant playback');
+  } catch (e) {
+    logger.warn('Could not pre-generate fillers at startup:', e.message);
+  }
 });
 
 // Graceful shutdown
