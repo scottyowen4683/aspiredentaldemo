@@ -22,6 +22,22 @@
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
-    <!-- Note: Chat widget removed from here - pilot pages have their own built-in widget -->
+
+    <!-- Aspire AI Chat Widget - Hidden on pilot pages (they have their own widget) -->
+    <script>
+      // Only load chat widget if NOT on a pilot page
+      if (!window.location.pathname.startsWith('/pilot/')) {
+        var script = document.createElement('script');
+        script.src = 'https://aspireexecutive.ai/widget/aspire-chat.js';
+        script.setAttribute('data-assistant-id', 'fa497716-e50a-4e36-ba49-06a042f135b2');
+        script.setAttribute('data-api-url', 'https://aspireexecutive.ai');
+        script.setAttribute('data-primary-color', '#8B5CF6');
+        script.setAttribute('data-greeting', 'Hello! I\'m Aspire Executive Solutions. How can I help you today?');
+        script.setAttribute('data-title', 'Aspire Executive Solutions');
+        script.setAttribute('data-position', 'bottom-right');
+        script.async = true;
+        document.body.appendChild(script);
+      }
+    </script>
   </body>
 </html>
