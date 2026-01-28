@@ -374,13 +374,19 @@ class VoiceHandler {
           id: 'outbound-demo',
           org_id: null,
           friendly_name: 'Aspire AI Demo',
-          first_message: "Hi! This is Aspire AI calling. You requested a demo of our AI voice assistant for councils and businesses. How can I help you learn about our services?",
+          // No first_message - wait for caller to speak first for smoother conversation
+          first_message: null,
           prompt: ASPIRE_OUTBOUND_DEMO_PROMPT,
           model: 'gpt-4o-mini',
           temperature: 0.7,
           max_tokens: 200,
           kb_enabled: false,
-          elevenlabs_voice_id: outboundVoiceId
+          elevenlabs_voice_id: outboundVoiceId,
+          // Enable call transfer to Scott's number
+          call_transfer_enabled: true,
+          call_transfer_number: '+61408062129',
+          // Enable contact capture (uses Brevo email)
+          capture_contact_enabled: true
         };
         // Still get universal prompt for potential use
         this.universalPrompt = await supabaseService.getUniversalPrompt();
