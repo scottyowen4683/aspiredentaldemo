@@ -445,19 +445,8 @@ class VoiceHandler {
         assistantName: this.assistant.friendly_name
       });
 
-      // Pre-generate filler phrases in background (don't block initialization)
-      const voiceId = this.assistant.elevenlabs_voice_id || process.env.ELEVENLABS_VOICE_DEFAULT;
-      // DISABLED: Synthetic background noise causes crackling on phone
-      // const backgroundSound = this.assistant.background_sound || 'none';
-      const backgroundSound = 'none'; // Force disable synthetic noise
-      const backgroundVolume = 0.40;
-
-      if (voiceId && !hasFillerPhrasesReady(voiceId, backgroundSound)) {
-        // Generate in background - don't await
-        preGenerateFillerPhrases(voiceId, { backgroundSound, backgroundVolume })
-          .then(() => logger.info('Filler phrases ready for instant playback'))
-          .catch(e => logger.warn('Filler pre-generation failed:', e.message));
-      }
+      // NOTE: Filler phrase generation moved to startFillerGeneration()
+      // Call it AFTER greeting is sent to avoid API contention on shared CPU
 
       // Initialize streaming transcriber if Deepgram API key is set
       if (process.env.DEEPGRAM_API_KEY) {
@@ -472,6 +461,25 @@ class VoiceHandler {
     } catch (error) {
       logger.error('Voice handler initialization failed:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Start pre-generating filler phrases in background
+   * Call this AFTER greeting is sent to avoid API contention
+   */
+  startFillerGeneration() {
+    const voiceId = this.assistant.elevenlabs_voice_id || process.env.ELEVENLABS_VOICE_DEFAULT;
+    const backgroundSound = 'none'; // Synthetic noise disabled
+    const backgroundVolume = 0.40;
+
+    if (voiceId && !hasFillerPhrasesReady(voiceId, backgroundSound)) {
+      logger.info('Starting filler phrase generation (after greeting)', { voiceId });
+      preGenerateFillerPhrases(voiceId, { backgroundSound, backgroundVolume })
+        .then(() => logger.info('Filler phrases ready for instant playback'))
+        .catch(e => logger.warn('Filler pre-generation failed:', e.message));
+    } else {
+      logger.info('Filler phrases already cached', { voiceId });
     }
   }
 
