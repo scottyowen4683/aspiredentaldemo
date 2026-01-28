@@ -414,18 +414,19 @@ wss.on('connection', async (ws, req) => {
                   sendFiller();
 
                   // ============================================
-                  // OPTIMIZATION 3: Chain multiple fillers if GPT takes >2.5s
-                  // Send additional fillers every 2.5s to mask long processing
+                  // OPTIMIZATION 3: Chain multiple fillers if GPT takes >3.5s
+                  // Send additional fillers every 3.5s to mask long processing
+                  // Only trigger on genuinely slow responses (GPT typically 2-2.5s)
                   // ============================================
                   fillerInterval = setInterval(() => {
-                    if (fillersSent < 3) { // Max 3 fillers (initial + 2 more)
+                    if (fillersSent < 2) { // Max 2 fillers total (initial + 1 more)
                       logger.info('GPT taking long, sending additional filler', { fillersSent });
                       sendFiller();
                     } else {
                       clearInterval(fillerInterval);
                       fillerInterval = null;
                     }
-                  }, 2500); // Every 2.5 seconds
+                  }, 3500); // Every 3.5 seconds (gives GPT time to finish)
                 }
 
                 // Buffer response audio chunks (filler already sent above)
