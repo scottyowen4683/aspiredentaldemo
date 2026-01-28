@@ -279,38 +279,36 @@ wss.on('connection', async (ws, req) => {
           try {
             await voiceHandler.initialize();
 
-            // Send initial greeting with ElevenLabs voice IMMEDIATELY
-            // This is what makes it feel like VAPI - instant AI voice response
-            const greeting = voiceHandler.assistant.first_message ||
-              `Hi! How can I help you today?`;
-
-            logger.info('Sending ElevenLabs greeting', { greeting });
-
             const voiceId = voiceHandler.assistant.elevenlabs_voice_id ||
               process.env.ELEVENLABS_VOICE_ID ||
               'EXAVITQu4vr4xnSDxMaL'; // Default: "Sarah" voice
 
-            try {
-              // DISABLED: Synthetic background noise causes crackling on phone audio
-              // TODO: Re-enable when we have proper pre-recorded ambient audio files
-              // const backgroundSound = voiceHandler.assistant.background_sound || 'office';
-              const backgroundSound = 'none'; // Force disable synthetic noise
-              const backgroundVolume = 0.40; // Not used when backgroundSound is 'none'
+            // Only send greeting if first_message is configured
+            // If null/empty, wait for caller to speak first (smoother for outbound)
+            const greeting = voiceHandler.assistant.first_message;
 
-              // Debug logging for background sound
-              logger.info('Background sound settings', {
-                assistantId: voiceHandler.assistant.id,
-                background_sound_raw: voiceHandler.assistant.background_sound,
-                background_volume_raw: voiceHandler.assistant.background_volume,
-                effectiveSound: backgroundSound,
-                effectiveVolume: backgroundVolume,
-                note: 'Synthetic noise disabled - causes crackling'
-              });
+            if (greeting) {
+              logger.info('Sending ElevenLabs greeting', { greeting, voiceId });
 
-              const greetingAudio = await streamElevenLabsAudio(greeting, voiceId, {
-                backgroundSound,
-                backgroundVolume
-              });
+              try {
+                // DISABLED: Synthetic background noise causes crackling on phone audio
+                const backgroundSound = 'none';
+                const backgroundVolume = 0.40;
+
+                // Debug logging for background sound
+                logger.info('Background sound settings', {
+                  assistantId: voiceHandler.assistant.id,
+                  background_sound_raw: voiceHandler.assistant.background_sound,
+                  background_volume_raw: voiceHandler.assistant.background_volume,
+                  effectiveSound: backgroundSound,
+                  effectiveVolume: backgroundVolume,
+                  note: 'Synthetic noise disabled - causes crackling'
+                });
+
+                const greetingAudio = await streamElevenLabsAudio(greeting, voiceId, {
+                  backgroundSound,
+                  backgroundVolume
+                });
 
               logger.info('ElevenLabs greeting received', {
                 audioSizeKB: (greetingAudio.length / 1024).toFixed(2),
@@ -361,9 +359,16 @@ wss.on('connection', async (ws, req) => {
 
               logger.info('ElevenLabs greeting fully sent');
 
-            } catch (greetingError) {
-              logger.error('Failed to send ElevenLabs greeting:', greetingError);
-              // Continue anyway - conversation can still work
+              } catch (greetingError) {
+                logger.error('Failed to send ElevenLabs greeting:', greetingError);
+                // Continue anyway - conversation can still work
+              }
+            } else {
+              // No greeting - wait for caller to speak first (outbound demo mode)
+              logger.info('No first_message configured, waiting for caller to speak first', {
+                assistantId: voiceHandler.assistant.id,
+                voiceId
+              });
             }
 
             // Helper function to process speech and send audio
