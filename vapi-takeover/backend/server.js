@@ -359,9 +359,13 @@ wss.on('connection', async (ws, req) => {
 
               logger.info('ElevenLabs greeting fully sent');
 
+              // Start filler generation AFTER greeting to avoid API contention
+              voiceHandler.startFillerGeneration();
+
               } catch (greetingError) {
                 logger.error('Failed to send ElevenLabs greeting:', greetingError);
-                // Continue anyway - conversation can still work
+                // Still start filler generation even if greeting failed
+                voiceHandler.startFillerGeneration();
               }
             } else {
               // No greeting - wait for caller to speak first (outbound demo mode)
@@ -369,6 +373,8 @@ wss.on('connection', async (ws, req) => {
                 assistantId: voiceHandler.assistant.id,
                 voiceId
               });
+              // Start filler generation immediately for outbound (no greeting to wait for)
+              voiceHandler.startFillerGeneration();
             }
 
             // Helper function to process speech and send audio
