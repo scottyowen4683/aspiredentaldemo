@@ -359,8 +359,136 @@ https://aspireexecutive.ai
   }
 }
 
+/**
+ * Send confirmation email to customer after their contact request is captured
+ * @param {Object} request - The contact request data
+ * @param {string} request.name - Customer name
+ * @param {string} request.email - Customer email (required)
+ * @param {string} request.request_type - Type of request
+ * @param {string} request.request_details - What they requested
+ * @param {string} referenceId - The reference number for tracking
+ * @param {Object} metadata - Additional info
+ * @param {string} metadata.assistantName - Name of the assistant/organization
+ * @param {string} metadata.companyName - Company name for branding
+ */
+export async function sendCustomerConfirmationEmail(request, referenceId, metadata = {}) {
+  // Customer email is required
+  if (!request.email) {
+    logger.warn('No customer email provided, skipping confirmation email');
+    return { skipped: true, reason: 'no_customer_email' };
+  }
+
+  const customerName = request.name || 'there';
+  const companyName = metadata.companyName || metadata.assistantName || 'our team';
+
+  const requestTypeLabels = {
+    complaint: 'complaint',
+    enquiry: 'enquiry',
+    feedback: 'feedback',
+    service_request: 'service request',
+    contact_request: 'contact request',
+    other: 'request'
+  };
+
+  const requestLabel = requestTypeLabels[request.request_type] || 'request';
+
+  const html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; background-color: #f4f4f4; margin: 0; padding: 0; }
+        .container { max-width: 600px; margin: 0 auto; padding: 40px 20px; }
+        .card { background: white; border-radius: 12px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); overflow: hidden; }
+        .header { background: linear-gradient(135deg, #8B5CF6, #6366F1); padding: 32px 24px; text-align: center; }
+        .header h1 { color: white; margin: 0; font-size: 24px; font-weight: 600; }
+        .header p { color: rgba(255,255,255,0.9); margin: 8px 0 0 0; font-size: 14px; }
+        .content { padding: 32px 24px; }
+        .content h2 { color: #1f2937; margin: 0 0 16px 0; font-size: 20px; }
+        .content p { color: #4b5563; margin: 0 0 16px 0; }
+        .reference-box { background: linear-gradient(135deg, #f3e8ff, #e0e7ff); padding: 20px; border-radius: 12px; margin: 24px 0; text-align: center; border: 2px solid #8B5CF6; }
+        .reference-label { font-size: 12px; color: #6b7280; text-transform: uppercase; font-weight: 600; margin-bottom: 8px; }
+        .reference-number { font-family: monospace; font-size: 28px; font-weight: 700; color: #8B5CF6; letter-spacing: 2px; }
+        .details-box { background: #f9fafb; padding: 16px; border-radius: 8px; margin: 16px 0; border-left: 4px solid #8B5CF6; }
+        .next-steps { background: #f0fdf4; padding: 16px; border-radius: 8px; margin: 24px 0; }
+        .next-steps h3 { color: #166534; margin: 0 0 12px 0; font-size: 16px; }
+        .next-steps ul { margin: 0; padding-left: 20px; color: #4b5563; }
+        .next-steps li { margin: 8px 0; }
+        .footer { background: #f9fafb; padding: 24px; text-align: center; border-top: 1px solid #e5e7eb; }
+        .footer p { color: #6b7280; font-size: 12px; margin: 0; }
+        .footer a { color: #8B5CF6; text-decoration: none; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <div class="card">
+          <div class="header">
+            <h1>Thank You for Contacting Us!</h1>
+            <p>We've received your ${requestLabel}</p>
+          </div>
+          <div class="content">
+            <h2>Hi ${escapeHtml(customerName)},</h2>
+            <p>Thank you for reaching out to ${escapeHtml(companyName)}. We've received your ${requestLabel} and our team will review it shortly.</p>
+
+            <div class="reference-box">
+              <div class="reference-label">Your Reference Number</div>
+              <div class="reference-number">${referenceId}</div>
+            </div>
+
+            <p style="font-size: 14px; color: #6b7280; text-align: center;">Please keep this reference number for your records. You can use it when following up on your request.</p>
+
+            <div class="details-box">
+              <strong>Summary of your ${requestLabel}:</strong>
+              <p style="margin: 8px 0 0 0; white-space: pre-wrap;">${escapeHtml(request.request_details ? request.request_details.substring(0, 300) + (request.request_details.length > 300 ? '...' : '') : 'No details provided')}</p>
+            </div>
+
+            <div class="next-steps">
+              <h3>What happens next?</h3>
+              <ul>
+                <li>Our team will review your ${requestLabel}</li>
+                <li>We aim to respond within 1-2 business days</li>
+                <li>You'll receive updates at this email address</li>
+              </ul>
+            </div>
+
+            <p>If you have any urgent matters, please don't hesitate to contact us directly.</p>
+          </div>
+          <div class="footer">
+            <p>
+              This is an automated confirmation from ${escapeHtml(companyName)}.<br>
+              Powered by <a href="https://aspireexecutive.ai">Aspire AI</a>
+            </p>
+          </div>
+        </div>
+      </div>
+    </body>
+    </html>
+  `;
+
+  try {
+    const result = await sendEmail({
+      to: request.email,
+      subject: `Thank you for contacting us - Reference: ${referenceId}`,
+      html
+    });
+
+    logger.info('Customer confirmation email sent', {
+      to: request.email,
+      referenceId,
+      requestType: request.request_type
+    });
+
+    return result;
+  } catch (error) {
+    logger.error('Failed to send customer confirmation email:', error);
+    // Don't throw - we don't want to fail the contact capture if confirmation email fails
+    return { failed: true, error: error.message };
+  }
+}
+
 export default {
   sendEmail,
   sendContactRequestNotification,
+  sendCustomerConfirmationEmail,
   sendInvitationEmail
 };
