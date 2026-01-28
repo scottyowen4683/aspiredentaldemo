@@ -300,9 +300,15 @@ router.post('/:id/contacts/upload', upload.single('file'), async (req, res) => {
           const { phone_number, first_name, last_name, email, ...customFields } = row;
 
           if (phone_number) {
+            // Normalize phone number - add + prefix if missing
+            let normalizedPhone = phone_number.trim();
+            if (normalizedPhone && !normalizedPhone.startsWith('+')) {
+              normalizedPhone = '+' + normalizedPhone;
+            }
+
             contacts.push({
               campaign_id: id,
-              phone_number: phone_number.trim(),
+              phone_number: normalizedPhone,
               first_name: first_name?.trim() || null,
               last_name: last_name?.trim() || null,
               email: email?.trim() || null,
