@@ -1,0 +1,57 @@
+name: Index Council Knowledge Base
+
+on:
+  push:
+    branches:
+      - moretonbaypilot
+    paths:
+      - "frontend/netlify/functions/kb/*.txt"
+      - "frontend/scripts/index_kb_txt.js"
+      - "frontend/netlify/functions/tenants/assistant-map.json"
+
+  workflow_dispatch:
+
+jobs:
+  index-kb:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # NOTE: npm ci requires a package-lock.json. You don’t have one, so we use npm install.
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm install
+
+      - name: Detect changed KB files
+        id: changed
+        run: |
+          echo "FILES<<EOF" >> $GITHUB_OUTPUT
+          git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep "^frontend/netlify/functions/kb/.*\.txt$" || true
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Index changed KB files
+        if: steps.changed.outputs.FILES != ''
+        working-directory: frontend
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          EMBED_MODEL: text-embedding-3-small
+        run: |
+          echo "${{ steps.changed.outputs.FILES }}" | while read -r f; do
+            if [ -n "$f" ]; then
+              echo "Indexing: $f"
+              node scripts/index_kb_txt.js "../$f"
+            fi
+          done
+
+      - name: No KB files changed
+        if: steps.changed.outputs.FILES == ''
+        run: echo "No KB files changed - nothing to index."

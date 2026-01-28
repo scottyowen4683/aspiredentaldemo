@@ -1,0 +1,675 @@
+import { useState, useEffect, useRef } from "react";
+import { DashboardLayout } from "@/components/layout/DashboardLayout";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Progress } from "@/components/ui/progress";
+import { useToast } from "@/hooks/use-toast";
+import { useUser } from "@/context/UserContext";
+import { fetchOrganizations } from "@/services/organizationService";
+import { fetchAssistants, AssistantRow } from "@/services/assistantService";
+import { cn } from "@/lib/utils";
+import {
+  Plus, Play, Pause, Trash2, Upload, Users, Phone, Calendar,
+  Clock, Target, TrendingUp, AlertCircle, CheckCircle, XCircle,
+  PhoneOff, Loader2, FileSpreadsheet, Settings, BarChart3
+} from "lucide-react";
+
+interface Campaign {
+  id: string;
+  org_id: string;
+  assistant_id: string;
+  name: string;
+  description?: string;
+  status: "draft" | "active" | "paused" | "completed";
+  start_date?: string;
+  end_date?: string;
+  call_hours_start?: string;
+  call_hours_end?: string;
+  timezone?: string;
+  max_concurrent_calls?: number;
+  calls_per_minute?: number;
+  total_contacts?: number;
+  contacted?: number;
+  successful?: number;
+  failed?: number;
+  created_at: string;
+}
+
+interface CampaignStats {
+  total_contacts: number;
+  contacted: number;
+  successful: number;
+  failed: number;
+  pending: number;
+  completed: number;
+  no_answer: number;
+  busy: number;
+  progress_percentage: number;
+}
+
+export default function Campaigns() {
+  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [assistants, setAssistants] = useState<AssistantRow[]>([]);
+  const [organizations, setOrganizations] = useState<{ id: string; name?: string | null }[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null);
+  const [campaignStats, setCampaignStats] = useState<Record<string, CampaignStats>>({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const { toast } = useToast();
+  const { user } = useUser();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const effectiveOrgId = user?.role === "org_admin" ? user?.org_id : null;
+
+  // Form state for new campaign
+  const [formData, setFormData] = useState({
+    name: "",
+    description: "",
+    assistant_id: "",
+    org_id: "",
+    start_date: "",
+    end_date: "",
+    call_hours_start: "09:00",
+    call_hours_end: "17:00",
+    timezone: "Australia/Sydney",
+    max_concurrent_calls: 5,
+    calls_per_minute: 2,
+  });
+
+  // Load data
+  useEffect(() => {
+    const loadData = async () => {
+      setLoading(true);
+      try {
+        // Load campaigns
+        const orgFilter = effectiveOrgId ? `?org_id=${effectiveOrgId}` : "";
+        const campaignsRes = await fetch(`/api/campaigns${orgFilter}`);
+        if (campaignsRes.ok) {
+          const data = await campaignsRes.json();
+          setCampaigns(data.campaigns || []);
+
+          // Load stats for each campaign
+          const statsPromises = (data.campaigns || []).map(async (c: Campaign) => {
+            try {
+              const statsRes = await fetch(`/api/campaigns/${c.id}/stats`);
+              if (statsRes.ok) {
+                const stats = await statsRes.json();
+                return { id: c.id, stats };
+              }
+            } catch (e) {
+              console.error(`Failed to load stats for campaign ${c.id}`, e);
+            }
+            return null;
+          });
+
+          const statsResults = await Promise.all(statsPromises);
+          const statsMap: Record<string, CampaignStats> = {};
+          statsResults.forEach((r) => {
+            if (r) statsMap[r.id] = r.stats;
+          });
+          setCampaignStats(statsMap);
+        }
+
+        // Load assistants (voice only for campaigns)
+        const assistantsData = await fetchAssistants();
+        const voiceAssistants = assistantsData.filter(a => a.assistant_type === "voice" || a.bot_type === "voice");
+        setAssistants(voiceAssistants);
+
+        // Load organizations for super admin
+        if (user?.role === "super_admin") {
+          const orgs = await fetchOrganizations();
+          setOrganizations(orgs);
+        }
+      } catch (err) {
+        console.error("Failed to load campaigns", err);
+        toast({ title: "Error", description: "Failed to load campaigns", variant: "destructive" });
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadData();
+  }, [user, effectiveOrgId]);
+
+  const handleCreateCampaign = async () => {
+    if (!formData.name || !formData.assistant_id) {
+      toast({ title: "Error", description: "Name and assistant are required", variant: "destructive" });
+      return;
+    }
+
+    const orgId = effectiveOrgId || formData.org_id;
+    if (!orgId) {
+      toast({ title: "Error", description: "Please select an organization", variant: "destructive" });
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const res = await fetch("/api/campaigns", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...formData, org_id: orgId }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setCampaigns((prev) => [data.campaign, ...prev]);
+        setIsCreateModalOpen(false);
+        setFormData({
+          name: "",
+          description: "",
+          assistant_id: "",
+          org_id: "",
+          start_date: "",
+          end_date: "",
+          call_hours_start: "09:00",
+          call_hours_end: "17:00",
+          timezone: "Australia/Sydney",
+          max_concurrent_calls: 5,
+          calls_per_minute: 2,
+        });
+        toast({ title: "Success", description: "Campaign created successfully" });
+      } else {
+        const error = await res.json();
+        toast({ title: "Error", description: error.error || "Failed to create campaign", variant: "destructive" });
+      }
+    } catch (err) {
+      toast({ title: "Error", description: "Failed to create campaign", variant: "destructive" });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleStartCampaign = async (campaignId: string) => {
+    try {
+      const res = await fetch(`/api/campaigns/${campaignId}/start`, { method: "POST" });
+      if (res.ok) {
+        setCampaigns((prev) => prev.map((c) => (c.id === campaignId ? { ...c, status: "active" } : c)));
+        toast({ title: "Success", description: "Campaign started" });
+      } else {
+        const error = await res.json();
+        toast({ title: "Error", description: error.error || "Failed to start campaign", variant: "destructive" });
+      }
+    } catch (err) {
+      toast({ title: "Error", description: "Failed to start campaign", variant: "destructive" });
+    }
+  };
+
+  const handlePauseCampaign = async (campaignId: string) => {
+    try {
+      const res = await fetch(`/api/campaigns/${campaignId}/pause`, { method: "POST" });
+      if (res.ok) {
+        setCampaigns((prev) => prev.map((c) => (c.id === campaignId ? { ...c, status: "paused" } : c)));
+        toast({ title: "Success", description: "Campaign paused" });
+      } else {
+        toast({ title: "Error", description: "Failed to pause campaign", variant: "destructive" });
+      }
+    } catch (err) {
+      toast({ title: "Error", description: "Failed to pause campaign", variant: "destructive" });
+    }
+  };
+
+  const handleDeleteCampaign = async (campaignId: string) => {
+    if (!confirm("Are you sure you want to delete this campaign?")) return;
+
+    try {
+      const res = await fetch(`/api/campaigns/${campaignId}`, { method: "DELETE" });
+      if (res.ok) {
+        setCampaigns((prev) => prev.filter((c) => c.id !== campaignId));
+        toast({ title: "Success", description: "Campaign deleted" });
+      } else {
+        const error = await res.json();
+        toast({ title: "Error", description: error.error || "Failed to delete campaign", variant: "destructive" });
+      }
+    } catch (err) {
+      toast({ title: "Error", description: "Failed to delete campaign", variant: "destructive" });
+    }
+  };
+
+  const handleUploadContacts = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !selectedCampaign) return;
+
+    const formDataUpload = new FormData();
+    formDataUpload.append("file", file);
+
+    setIsSubmitting(true);
+    try {
+      const res = await fetch(`/api/campaigns/${selectedCampaign.id}/contacts/upload`, {
+        method: "POST",
+        body: formDataUpload,
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        toast({ title: "Success", description: `Uploaded ${data.imported} contacts` });
+
+        // Refresh stats
+        const statsRes = await fetch(`/api/campaigns/${selectedCampaign.id}/stats`);
+        if (statsRes.ok) {
+          const stats = await statsRes.json();
+          setCampaignStats((prev) => ({ ...prev, [selectedCampaign.id]: stats }));
+        }
+
+        setIsUploadModalOpen(false);
+      } else {
+        const error = await res.json();
+        toast({ title: "Error", description: error.error || "Failed to upload contacts", variant: "destructive" });
+      }
+    } catch (err) {
+      toast({ title: "Error", description: "Failed to upload contacts", variant: "destructive" });
+    } finally {
+      setIsSubmitting(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  const getStatusBadge = (status: string) => {
+    const styles: Record<string, string> = {
+      draft: "bg-gray-100 text-gray-700 border-gray-200",
+      active: "bg-green-100 text-green-700 border-green-200",
+      paused: "bg-yellow-100 text-yellow-700 border-yellow-200",
+      completed: "bg-blue-100 text-blue-700 border-blue-200",
+    };
+    return <Badge className={cn("capitalize", styles[status] || "")}>{status}</Badge>;
+  };
+
+  const currentRole: "super_admin" | "org_admin" = user?.role === "super_admin" ? "super_admin" : "org_admin";
+
+  return (
+    <DashboardLayout userRole={currentRole} userName={user?.full_name || "Unknown User"}>
+      <div className="space-y-6">
+        {/* Header */}
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h1 className="text-2xl md:text-4xl font-bold text-foreground bg-gradient-primary bg-clip-text text-transparent">
+              Outbound Campaigns
+            </h1>
+            <p className="text-sm md:text-base text-muted-foreground mt-2">
+              Create and manage automated outbound calling campaigns
+            </p>
+          </div>
+          <Button
+            onClick={() => setIsCreateModalOpen(true)}
+            className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700"
+          >
+            <Plus className="mr-2 h-4 w-4" />
+            Create Campaign
+          </Button>
+        </div>
+
+        {/* Campaigns Grid */}
+        {loading ? (
+          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+            {[1, 2, 3].map((i) => (
+              <Card key={i} className="animate-pulse">
+                <CardHeader>
+                  <div className="h-6 bg-muted rounded w-3/4" />
+                  <div className="h-4 bg-muted rounded w-1/2 mt-2" />
+                </CardHeader>
+                <CardContent>
+                  <div className="h-20 bg-muted rounded" />
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        ) : campaigns.length === 0 ? (
+          <Card className="shadow-card">
+            <CardContent className="flex flex-col items-center justify-center py-16">
+              <Phone className="h-16 w-16 text-muted-foreground/50 mb-4" />
+              <h3 className="text-xl font-semibold text-foreground mb-2">No Campaigns Yet</h3>
+              <p className="text-muted-foreground text-center max-w-md mb-6">
+                Create your first outbound calling campaign to automatically reach out to contacts with your AI voice assistant.
+              </p>
+              <Button
+                onClick={() => setIsCreateModalOpen(true)}
+                className="bg-gradient-to-r from-blue-600 to-purple-600"
+              >
+                <Plus className="mr-2 h-4 w-4" />
+                Create Your First Campaign
+              </Button>
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+            {campaigns.map((campaign) => {
+              const stats = campaignStats[campaign.id];
+              const progress = stats?.progress_percentage || 0;
+
+              return (
+                <Card key={campaign.id} className="shadow-card hover:shadow-elegant transition-all">
+                  <CardHeader className="pb-2">
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <CardTitle className="text-lg">{campaign.name}</CardTitle>
+                        {campaign.description && (
+                          <CardDescription className="mt-1 line-clamp-2">
+                            {campaign.description}
+                          </CardDescription>
+                        )}
+                      </div>
+                      {getStatusBadge(campaign.status)}
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {/* Progress */}
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-sm">
+                        <span className="text-muted-foreground">Progress</span>
+                        <span className="font-medium">{progress.toFixed(0)}%</span>
+                      </div>
+                      <Progress value={progress} className="h-2" />
+                    </div>
+
+                    {/* Stats Grid */}
+                    {stats && (
+                      <div className="grid grid-cols-4 gap-2 text-center">
+                        <div className="p-2 bg-muted/50 rounded-lg">
+                          <Users className="h-4 w-4 mx-auto text-muted-foreground mb-1" />
+                          <p className="text-lg font-bold">{stats.total_contacts}</p>
+                          <p className="text-xs text-muted-foreground">Total</p>
+                        </div>
+                        <div className="p-2 bg-green-50 dark:bg-green-950/30 rounded-lg">
+                          <CheckCircle className="h-4 w-4 mx-auto text-green-600 mb-1" />
+                          <p className="text-lg font-bold text-green-600">{stats.successful}</p>
+                          <p className="text-xs text-muted-foreground">Success</p>
+                        </div>
+                        <div className="p-2 bg-red-50 dark:bg-red-950/30 rounded-lg">
+                          <XCircle className="h-4 w-4 mx-auto text-red-600 mb-1" />
+                          <p className="text-lg font-bold text-red-600">{stats.failed}</p>
+                          <p className="text-xs text-muted-foreground">Failed</p>
+                        </div>
+                        <div className="p-2 bg-yellow-50 dark:bg-yellow-950/30 rounded-lg">
+                          <PhoneOff className="h-4 w-4 mx-auto text-yellow-600 mb-1" />
+                          <p className="text-lg font-bold text-yellow-600">{stats.no_answer}</p>
+                          <p className="text-xs text-muted-foreground">No Answer</p>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Call Hours */}
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <Clock className="h-4 w-4" />
+                      <span>
+                        {campaign.call_hours_start || "09:00"} - {campaign.call_hours_end || "17:00"} ({campaign.timezone || "UTC"})
+                      </span>
+                    </div>
+
+                    {/* Actions */}
+                    <div className="flex gap-2 pt-2">
+                      {campaign.status === "draft" || campaign.status === "paused" ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="flex-1"
+                          onClick={() => handleStartCampaign(campaign.id)}
+                        >
+                          <Play className="h-3 w-3 mr-1" />
+                          Start
+                        </Button>
+                      ) : campaign.status === "active" ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="flex-1"
+                          onClick={() => handlePauseCampaign(campaign.id)}
+                        >
+                          <Pause className="h-3 w-3 mr-1" />
+                          Pause
+                        </Button>
+                      ) : null}
+
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          setSelectedCampaign(campaign);
+                          setIsUploadModalOpen(true);
+                        }}
+                      >
+                        <Upload className="h-3 w-3" />
+                      </Button>
+
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="text-destructive hover:text-destructive"
+                        onClick={() => handleDeleteCampaign(campaign.id)}
+                        disabled={campaign.status === "active"}
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Create Campaign Modal */}
+      <Dialog open={isCreateModalOpen} onOpenChange={setIsCreateModalOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Phone className="h-5 w-5 text-blue-500" />
+              Create Outbound Campaign
+            </DialogTitle>
+            <DialogDescription>
+              Set up an automated outbound calling campaign with your AI voice assistant.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Campaign Name *</Label>
+                <Input
+                  placeholder="e.g. Q1 Customer Outreach"
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                />
+              </div>
+
+              {user?.role === "super_admin" && (
+                <div className="space-y-2">
+                  <Label>Organization *</Label>
+                  <Select value={formData.org_id} onValueChange={(v) => setFormData({ ...formData, org_id: v })}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select organization" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {organizations.map((org) => (
+                        <SelectItem key={org.id} value={org.id}>
+                          {org.name || org.id}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <Label>Voice Assistant *</Label>
+              <Select value={formData.assistant_id} onValueChange={(v) => setFormData({ ...formData, assistant_id: v })}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select voice assistant" />
+                </SelectTrigger>
+                <SelectContent>
+                  {assistants.map((assistant) => (
+                    <SelectItem key={assistant.id} value={assistant.id}>
+                      {assistant.friendly_name || assistant.id}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {assistants.length === 0 && (
+                <p className="text-xs text-yellow-600">No voice assistants available. Create one first.</p>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <Label>Description</Label>
+              <Textarea
+                placeholder="Campaign description..."
+                value={formData.description}
+                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Start Date</Label>
+                <Input
+                  type="date"
+                  value={formData.start_date}
+                  onChange={(e) => setFormData({ ...formData, start_date: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>End Date</Label>
+                <Input
+                  type="date"
+                  value={formData.end_date}
+                  onChange={(e) => setFormData({ ...formData, end_date: e.target.value })}
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <Label>Call Hours Start</Label>
+                <Input
+                  type="time"
+                  value={formData.call_hours_start}
+                  onChange={(e) => setFormData({ ...formData, call_hours_start: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Call Hours End</Label>
+                <Input
+                  type="time"
+                  value={formData.call_hours_end}
+                  onChange={(e) => setFormData({ ...formData, call_hours_end: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Timezone</Label>
+                <Select value={formData.timezone} onValueChange={(v) => setFormData({ ...formData, timezone: v })}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Australia/Sydney">Sydney (AEST)</SelectItem>
+                    <SelectItem value="Australia/Melbourne">Melbourne (AEST)</SelectItem>
+                    <SelectItem value="Australia/Brisbane">Brisbane (AEST)</SelectItem>
+                    <SelectItem value="Australia/Perth">Perth (AWST)</SelectItem>
+                    <SelectItem value="UTC">UTC</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Max Concurrent Calls</Label>
+                <Input
+                  type="number"
+                  min="1"
+                  max="50"
+                  value={formData.max_concurrent_calls}
+                  onChange={(e) => setFormData({ ...formData, max_concurrent_calls: parseInt(e.target.value) })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Calls Per Minute</Label>
+                <Input
+                  type="number"
+                  min="1"
+                  max="10"
+                  value={formData.calls_per_minute}
+                  onChange={(e) => setFormData({ ...formData, calls_per_minute: parseInt(e.target.value) })}
+                />
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsCreateModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleCreateCampaign}
+              disabled={isSubmitting}
+              className="bg-gradient-to-r from-blue-600 to-purple-600"
+            >
+              {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Create Campaign
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Upload Contacts Modal */}
+      <Dialog open={isUploadModalOpen} onOpenChange={setIsUploadModalOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileSpreadsheet className="h-5 w-5 text-green-500" />
+              Upload Contacts
+            </DialogTitle>
+            <DialogDescription>
+              Upload a CSV file with contacts for "{selectedCampaign?.name}"
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="border-2 border-dashed border-muted-foreground/25 rounded-lg p-8 text-center">
+              <Upload className="h-10 w-10 mx-auto text-muted-foreground mb-4" />
+              <p className="text-sm text-muted-foreground mb-4">
+                Upload a CSV file with columns: phone_number, first_name, last_name, email
+              </p>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".csv"
+                onChange={handleUploadContacts}
+                className="hidden"
+              />
+              <Button variant="outline" onClick={() => fileInputRef.current?.click()} disabled={isSubmitting}>
+                {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Upload className="h-4 w-4 mr-2" />}
+                Choose CSV File
+              </Button>
+            </div>
+
+            <div className="bg-muted/50 p-4 rounded-lg">
+              <h4 className="font-medium mb-2 text-sm">CSV Format Example:</h4>
+              <code className="text-xs bg-background p-2 rounded block overflow-x-auto">
+                phone_number,first_name,last_name,email<br />
+                +61412345678,John,Smith,john@example.com<br />
+                +61423456789,Jane,Doe,jane@example.com
+              </code>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsUploadModalOpen(false)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </DashboardLayout>
+  );
+}

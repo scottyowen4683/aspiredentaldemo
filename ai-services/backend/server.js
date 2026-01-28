@@ -10,6 +10,9 @@ import twilio from 'twilio';
 
 dotenv.config();
 
+// Scott's cloned ElevenLabs voice ID (default for outbound calls)
+const CLONED_VOICE_ID = process.env.ELEVENLABS_VOICE_ID || 'UQVsQrmNGOENbsLCAH2g';
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
@@ -40,6 +43,69 @@ app.get('/health', (req, res) => {
     uptime: process.uptime(),
     environment: process.env.NODE_ENV
   });
+});
+
+// ============================================
+// ELEVENLABS TTS API
+// ============================================
+
+// Generate TTS audio from ElevenLabs and return as audio stream
+async function generateElevenLabsAudio(text, voiceId = CLONED_VOICE_ID) {
+  const apiKey = process.env.ELEVENLABS_API_KEY;
+  if (!apiKey) {
+    throw new Error('ELEVENLABS_API_KEY not configured');
+  }
+
+  const response = await fetch(
+    `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
+    {
+      method: 'POST',
+      headers: {
+        'Accept': 'audio/mpeg',
+        'Content-Type': 'application/json',
+        'xi-api-key': apiKey
+      },
+      body: JSON.stringify({
+        text: text,
+        model_id: 'eleven_monolingual_v1',
+        voice_settings: {
+          stability: 0.5,
+          similarity_boost: 0.75
+        }
+      })
+    }
+  );
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`ElevenLabs API error: ${error}`);
+  }
+
+  return response;
+}
+
+// Endpoint to serve ElevenLabs TTS audio (Twilio <Play> will call this)
+app.get('/api/tts/:message', async (req, res) => {
+  try {
+    const message = decodeURIComponent(req.params.message);
+    const voiceId = req.query.voice || CLONED_VOICE_ID;
+
+    console.log('Generating TTS audio:', { message: message.substring(0, 50) + '...', voiceId });
+
+    const audioResponse = await generateElevenLabsAudio(message, voiceId);
+    const audioBuffer = await audioResponse.arrayBuffer();
+
+    res.set({
+      'Content-Type': 'audio/mpeg',
+      'Content-Length': audioBuffer.byteLength,
+      'Cache-Control': 'public, max-age=3600'
+    });
+    res.send(Buffer.from(audioBuffer));
+
+  } catch (error) {
+    console.error('TTS generation error:', error);
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // ============================================
@@ -91,7 +157,7 @@ app.post('/api/outbound-call', async (req, res) => {
 
     const fromNumber = process.env.TWILIO_OUTBOUND_NUMBER || '+61731322220';
     const voiceWebhookUrl = process.env.VOICE_WEBHOOK_URL ||
-      `${process.env.BASE_URL || 'https://aspire-ai-platform.fly.dev'}/api/voice/outbound`;
+      `${process.env.BASE_URL || 'https://aspireexecutive.ai'}/api/voice/outbound`;
 
     console.log('Initiating outbound call:', {
       to,
@@ -106,7 +172,7 @@ app.post('/api/outbound-call', async (req, res) => {
       from: fromNumber,
       url: voiceWebhookUrl,
       method: 'POST',
-      statusCallback: `${process.env.BASE_URL || 'https://aspire-ai-platform.fly.dev'}/api/voice/status`,
+      statusCallback: `${process.env.BASE_URL || 'https://aspireexecutive.ai'}/api/voice/status`,
       statusCallbackMethod: 'POST',
       statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
       record: true,
@@ -137,14 +203,14 @@ app.post('/api/voice/outbound', (req, res) => {
   const VoiceResponse = twilio.twiml.VoiceResponse;
   const response = new VoiceResponse();
 
-  // Get ElevenLabs voice settings
-  const voiceId = process.env.ELEVENLABS_VOICE_ID || 'mWNaiDAPDAx080ro4nL5';
+  const baseUrl = process.env.BASE_URL || 'https://aspireexecutive.ai';
 
-  // Initial greeting using Twilio TTS (ElevenLabs stream would be via WebSocket in full implementation)
-  response.say({
-    voice: 'Polly.Amy', // UK English voice
-    language: 'en-AU'
-  }, "Hi! This is a call from Aspire AI. I'm calling to demonstrate our voice AI capabilities. How can I help you today?");
+  // Initial greeting using ElevenLabs cloned voice
+  const greetingText = "Hi! This is Scott from Aspire. I'm calling to demonstrate our voice AI capabilities. How can I help you today?";
+  const greetingUrl = `${baseUrl}/api/tts/${encodeURIComponent(greetingText)}`;
+
+  // Play ElevenLabs audio for greeting
+  response.play(greetingUrl);
 
   // Gather speech input
   response.gather({
@@ -155,10 +221,10 @@ app.post('/api/voice/outbound', (req, res) => {
     method: 'POST'
   });
 
-  // Fallback if no input
-  response.say({
-    voice: 'Polly.Amy'
-  }, "I didn't catch that. Please let me know if you have any questions about our AI services.");
+  // Fallback if no input (use ElevenLabs)
+  const fallbackText = "I didn't catch that. Please let me know if you have any questions about our AI services.";
+  const fallbackUrl = `${baseUrl}/api/tts/${encodeURIComponent(fallbackText)}`;
+  response.play(fallbackUrl);
 
   response.hangup();
 
@@ -171,14 +237,15 @@ app.post('/api/voice/respond', (req, res) => {
   const VoiceResponse = twilio.twiml.VoiceResponse;
   const response = new VoiceResponse();
 
+  const baseUrl = process.env.BASE_URL || 'https://aspireexecutive.ai';
   const speechResult = req.body.SpeechResult;
   console.log('Speech received:', speechResult);
 
-  // Simple response (in production, this would go to GPT-4/Claude)
-  response.say({
-    voice: 'Polly.Amy',
-    language: 'en-AU'
-  }, "Thanks for your interest! Our AI services include voice agents, chat bots, and outbound calling. For a full demonstration, please visit aspireexecutive.ai or speak with one of our team members. Is there anything specific you'd like to know?");
+  // Simple response using ElevenLabs cloned voice (in production, this would go to GPT-4/Claude)
+  const responseText = "Thanks for your interest! Our AI services include voice agents, chat bots, and outbound calling. For a full demonstration, please visit aspireexecutive.ai or speak with one of our team members. Is there anything specific you'd like to know?";
+  const responseUrl = `${baseUrl}/api/tts/${encodeURIComponent(responseText)}`;
+
+  response.play(responseUrl);
 
   response.gather({
     input: 'speech',
@@ -188,9 +255,10 @@ app.post('/api/voice/respond', (req, res) => {
     method: 'POST'
   });
 
-  response.say({
-    voice: 'Polly.Amy'
-  }, "Thank you for your time. Have a great day!");
+  // Goodbye using ElevenLabs cloned voice
+  const goodbyeText = "Thank you for your time. Have a great day!";
+  const goodbyeUrl = `${baseUrl}/api/tts/${encodeURIComponent(goodbyeText)}`;
+  response.play(goodbyeUrl);
 
   response.hangup();
 

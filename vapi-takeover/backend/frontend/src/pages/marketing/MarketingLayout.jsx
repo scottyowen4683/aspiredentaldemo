@@ -2,9 +2,6 @@ import React, { useEffect, useState } from "react";
 import { Outlet, Link, NavLink, useLocation } from "react-router-dom";
 import { LogIn } from "lucide-react";
 
-// AI Platform Portal URL (using custom domain)
-const AI_PLATFORM_URL = "https://aspireexecutive.ai";
-
 function NavItem({ to, children }) {
   return (
     <NavLink
@@ -27,12 +24,12 @@ export default function SiteLayout() {
 
   useEffect(() => setOpen(false), [location.pathname]);
 
-  // Always go to top on route change
+  // 1) Always go to top on route change (pathname change)
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: "auto" });
   }, [location.pathname]);
 
-  // If a hash exists, scroll to it with offset
+  // 2) If a hash exists (e.g. #contact), scroll to it with offset (sticky header)
   useEffect(() => {
     if (!location.hash) return;
 
@@ -40,8 +37,10 @@ export default function SiteLayout() {
     const el = document.getElementById(id);
     if (!el) return;
 
+    // Sticky header offset: adjust this if you change header height
     const HEADER_OFFSET = 96;
 
+    // Wait a tick so the new route has rendered its DOM
     requestAnimationFrame(() => {
       const rect = el.getBoundingClientRect();
       const absoluteTop = rect.top + window.pageYOffset;
@@ -70,17 +69,18 @@ export default function SiteLayout() {
             <div className="leading-tight">
               <div className="text-sm font-semibold tracking-wide">Aspire</div>
               <div className="text-xs text-white/60">
-                ASPIRE Enterprise AI Framework
+                ASPIRE™ Enterprise AI Framework
               </div>
             </div>
           </Link>
 
-          <nav className="hidden items-center gap-6 md:flex">
+          <nav className="hidden items-center gap-8 md:flex">
             <NavItem to="/agents">Agents</NavItem>
             <NavItem to="/framework">Framework</NavItem>
             <NavItem to="/government">Government</NavItem>
             <NavItem to="/business">Business</NavItem>
 
+            {/* Use Link so it stays SPA and works with hash scroll */}
             <Link
               to="/#contact"
               className="rounded-xl bg-white/10 px-4 py-2 text-sm font-semibold text-white hover:bg-white/15"
@@ -88,16 +88,14 @@ export default function SiteLayout() {
               Contact
             </Link>
 
-            {/* Login Button - Links to AI Platform Portal */}
-            <a
-              href={AI_PLATFORM_URL}
-              target="_blank"
-              rel="noreferrer"
+            {/* Login button - links to portal */}
+            <Link
+              to="/auth"
               className="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2 text-sm font-semibold text-black hover:bg-white/90"
             >
               <LogIn className="h-4 w-4" />
               Login
-            </a>
+            </Link>
           </nav>
 
           <button
@@ -124,6 +122,7 @@ export default function SiteLayout() {
                 Business
               </Link>
 
+              {/* Use Link here too */}
               <Link
                 to="/#contact"
                 className="rounded-xl bg-white/10 px-4 py-2 text-sm font-semibold text-white hover:bg-white/15 text-center"
@@ -131,16 +130,14 @@ export default function SiteLayout() {
                 Contact
               </Link>
 
-              {/* Mobile Login Button */}
-              <a
-                href={AI_PLATFORM_URL}
-                target="_blank"
-                rel="noreferrer"
+              {/* Mobile Login button */}
+              <Link
+                to="/auth"
                 className="inline-flex items-center justify-center gap-2 rounded-xl bg-white px-4 py-2 text-sm font-semibold text-black hover:bg-white/90"
               >
                 <LogIn className="h-4 w-4" />
                 Login to Portal
-              </a>
+              </Link>
             </div>
           </div>
         )}
@@ -155,7 +152,7 @@ export default function SiteLayout() {
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div>
               <div className="font-semibold text-white/85">
-                ASPIRE Enterprise AI Framework
+                ASPIRE™ Enterprise AI Framework
               </div>
               <div className="mt-1">
                 Premium-grade AI agents for Government and Business.
@@ -182,14 +179,6 @@ export default function SiteLayout() {
               <Link className="hover:text-white" to="/business">
                 Business
               </Link>
-              <a
-                href={AI_PLATFORM_URL}
-                className="hover:text-white"
-                target="_blank"
-                rel="noreferrer"
-              >
-                Portal Login
-              </a>
             </div>
           </div>
         </div>

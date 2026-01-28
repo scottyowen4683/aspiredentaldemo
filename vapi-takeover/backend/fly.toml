@@ -1,0 +1,70 @@
+# Fly.io Configuration - Aspire AI Platform
+# Deploy to Sydney, Australia for low latency
+
+app = "aspire-ai-platform"
+primary_region = "syd"  # Sydney, Australia
+
+# Build configuration
+[build]
+  dockerfile = "Dockerfile"
+
+  # Build arguments for React frontend (Supabase config)
+  # These are PUBLIC keys (safe to expose) - used in browser
+  [build.args]
+    VITE_SUPABASE_URL = "https://zykdlsvtofzojgojmkdg.supabase.co"
+    VITE_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp5a2Rsc3Z0b2Z6b2pnb2pta2RnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njg5OTkzMDksImV4cCI6MjA4NDU3NTMwOX0.J_xF_wrCo8S3E7NDKYJdHGNfgAAr7IJA9GGbQNdPaMQ"
+
+# Environment variables (non-secret)
+[env]
+  PORT = "8080"
+  NODE_ENV = "production"
+  BASE_URL = "https://aspireexecutive.ai"
+
+# HTTP service configuration
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = false  # Keep always running (important for voice calls)
+  auto_start_machines = true
+  min_machines_running = 1
+
+  # Concurrency limits
+  [http_service.concurrency]
+    type = "connections"
+    hard_limit = 1000
+    soft_limit = 500
+
+  # Health check
+  [[http_service.checks]]
+    interval = "15s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/health"
+
+# VM configuration - 512MB for Node.js + React serving
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
+
+# TCP service for WebSocket support (needed for Twilio Media Streams)
+[[services]]
+  protocol = "tcp"
+  internal_port = 8080
+
+  # HTTP port
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+    force_https = true
+
+  # HTTPS port
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]
+
+  # Concurrency
+  [services.concurrency]
+    type = "connections"
+    hard_limit = 1000
+    soft_limit = 500

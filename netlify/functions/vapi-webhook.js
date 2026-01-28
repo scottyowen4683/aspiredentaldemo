@@ -1,189 +1,191 @@
 // netlify/functions/vapi-webhook.js
-const crypto = require("crypto");
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-const SUPABASE_URL  = process.env.SUPABASE_URL;
-const SERVICE_KEY   = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const DISABLE_SIG   = process.env.DISABLE_SIGNATURE_CHECK === "1";
-const VAPI_SECRET   = process.env.VAPI_WEBHOOK_SECRET || "";
-const DEFAULT_RUBRIC_ID =
-  process.env.EVAL_DEFAULT_RUBRIC_ID || "43d9b1fe-570f-4c97-abdb-fbbb73ef3d08";
-
-const log = (...a) => { try { console.log(...a); } catch {} };
-
-// --- signature check ---------------------------------------------------------
-function verifySignature(raw, sig) {
-  if (DISABLE_SIG) return true;
-  if (!sig || !VAPI_SECRET) return false;
-  const h = crypto.createHmac("sha256", VAPI_SECRET);
-  h.update(raw, "utf8");
-  const digest = `sha256=${h.digest("hex")}`;
-  try { return crypto.timingSafeEqual(Buffer.from(digest), Buffer.from(sig)); }
-  catch { return false; }
+if (!SUPABASE_URL || !SERVICE_KEY) {
+  console.warn("[vapi-webhook] Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
 }
 
-// --- supabase helpers --------------------------------------------------------
-async function sbUpsertSession(row) {
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/sessions?on_conflict=id`, {
+const headers = {
+  "Content-Type": "application/json",
+  apikey: SERVICE_KEY,
+  Authorization: `Bearer ${SERVICE_KEY}`,
+};
+
+// ---------- Supabase REST helpers ----------
+async function sbInsert(table, rows) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
     method: "POST",
-    headers: {
-      apikey: SERVICE_KEY,
-      Authorization: `Bearer ${SERVICE_KEY}`,
-      "Content-Type": "application/json",
-      Prefer: "resolution=merge-duplicates,return=minimal",
-    },
-    body: JSON.stringify(row),
+    headers,
+    body: JSON.stringify(Array.isArray(rows) ? rows : [rows]),
   });
-  const text = await res.text();
-  log("sessions upsert ->", res.status, text || "(no body)");
-  return { ok: res.ok, status: res.status, text };
+  if (!res.ok) throw new Error(`Insert ${table} failed: ${res.status} ${await res.text()}`);
+  return res.json().catch(() => ({}));
 }
 
-async function sbUpsertEvalRun(session_id) {
-  const body = {
-    session_id,
-    rubric_id: DEFAULT_RUBRIC_ID,
-    status: "queued",
-    started_at: new Date().toISOString(),
-  };
-  const res = await fetch(
-    `${SUPABASE_URL}/rest/v1/eval_runs?on_conflict=session_id,rubric_id`,
-    {
-      method: "POST",
-      headers: {
-        apikey: SERVICE_KEY,
-        Authorization: `Bearer ${SERVICE_KEY}`,
-        "Content-Type": "application/json",
-        Prefer: "resolution=merge-duplicates,return=minimal",
-      },
-      body: JSON.stringify(body),
-    }
-  );
-  const text = await res.text();
-  log("eval_runs upsert ->", res.status, text || "(no body)");
-  return { ok: res.ok, status: res.status, text };
+async function sbUpsert(table, rows, onConflict) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?on_conflict=${encodeURIComponent(onConflict)}`, {
+    method: "POST",
+    headers: { ...headers, Prefer: "resolution=merge-duplicates" },
+    body: JSON.stringify(Array.isArray(rows) ? rows : [rows]),
+  });
+  if (!res.ok) throw new Error(`Upsert ${table} failed: ${res.status} ${await res.text()}`);
+  return res.json().catch(() => ({}));
 }
 
-// --- request parsing ---------------------------------------------------------
-function getMessage(payload) {
-  return payload?.message || null;
-}
-function extractSummaryFromMessage(msg) {
-  return (
-    msg?.analysis?.summary ||
-    msg?.artifact?.summary ||
-    null
-  );
-}
-function getTimesFromMessage(msg) {
-  // msg.timestamp is a unix ms stamp in your logs
-  const ts = typeof msg?.timestamp === "number"
-    ? new Date(msg.timestamp)
-    : new Date();
-  const ended_at = ts.toISOString();
-  const started_at = new Date(ts.getTime() - 2 * 60 * 1000).toISOString(); // 2 min earlier so UI sorts
-  return { started_at, ended_at };
+async function sbUpdate(table, matchQuery, patch) {
+  const qs = new URLSearchParams(matchQuery).toString();
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${qs}`, {
+    method: "PATCH",
+    headers,
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) throw new Error(`Update ${table} failed: ${res.status} ${await res.text()}`);
+  return res.json().catch(() => ({}));
 }
 
+async function sbSelectOne(table, query) {
+  const qs = new URLSearchParams({ ...query, limit: "1" }).toString();
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${qs}`, { headers });
+  if (!res.ok) throw new Error(`Select ${table} failed: ${res.status} ${await res.text()}`);
+  const data = await res.json();
+  return data?.[0] || null;
+}
+
+// URL-helpers for PostgREST filters
+const eq = (v) => `eq.${v}`;
+const ilike = (v) => `ilike.${v}`;
+
+// ---------- Resolve assistant/client from metadata or entrypoint ----------
+async function resolveClientAndAssistant({ providerAssistantId, clientId, fromNumber }) {
+  // If clientId is already supplied (metadata), we can still try to find assistant record.
+  let assistantRow = null;
+  if (providerAssistantId) {
+    assistantRow = await sbSelectOne("assistants", { select: "*", provider_assistant_id: eq(providerAssistantId) }).catch(() => null);
+  }
+
+  // If no assistant row yet and we have an inbound number, resolve via entrypoints
+  if (!assistantRow && fromNumber) {
+    const ep = await sbSelectOne("entrypoints", { select: "*,assistant:assistant_id(*)", value: eq(fromNumber) }).catch(() => null);
+    if (ep?.assistant) assistantRow = ep.assistant;
+  }
+
+  const resolvedClientId = clientId || assistantRow?.client_id || null;
+  const resolvedAssistantId = assistantRow?.id || null;
+
+  return { resolvedClientId, resolvedAssistantId };
+}
+
+// ---------- Netlify function ----------
 exports.handler = async (event) => {
-  try {
-    // --- DIAG
-    if (event.httpMethod === "GET") {
-      const q = event.queryStringParameters || {};
-      if (q.diag === "env") {
-        return {
-          statusCode: 200,
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            ok: true,
-            SUPABASE_URL: !!SUPABASE_URL,
-            SERVICE_KEY: !!SERVICE_KEY,
-            DEFAULT_RUBRIC_ID,
-            DISABLE_SIGNATURE_CHECK: DISABLE_SIG,
-          }),
-        };
-      }
-      if (q.diag === "write") {
-        // sanity write: create a synthetic session + queue eval
-        const id = crypto.randomUUID();
-        const row = {
-          id,
-          started_at: new Date(Date.now() - 60_000).toISOString(),
-          ended_at: new Date().toISOString(),
-          assistant_id: null,
-          channel: "voice",
-          outcome: "ended",
-          summary: "diagnostic insert from webhook",
-          hangup_reason: null,
-          cost_cents: null,
-        };
-        const up = await sbUpsertSession(row);
-        let evalRes = null;
-        if (up.ok) evalRes = await sbUpsertEvalRun(id);
-        return {
-          statusCode: up.ok ? 200 : 500,
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            ok: up.ok,
-            session_upsert: { status: up.status, text: up.text },
-            eval_upsert: evalRes ? { status: evalRes.status, text: evalRes.text } : null,
-            id,
-          }),
-        };
-      }
-      return { statusCode: 200, body: "vapi-webhook alive" };
-    }
-
-    if (event.httpMethod !== "POST") {
-      return { statusCode: 405, body: "Method Not Allowed" };
-    }
-
-    const raw = event.isBase64Encoded
-      ? Buffer.from(event.body || "", "base64").toString("utf8")
-      : (event.body || "");
-
-    const sig = event.headers["x-vapi-signature"] || event.headers["X-Vapi-Signature"] || "";
-    if (!verifySignature(raw, sig)) return { statusCode: 401, body: "bad sig" };
-
-    const payload = JSON.parse(raw);
-    const msg = getMessage(payload);
-
-    // IMPORTANT: only act on end-of-call-report; ignore all mid-call events
-    if (!msg || msg.type !== "end-of-call-report") {
-      // no DB writes for conversation/speech/status updates
-      return { statusCode: 200, body: "ignored" };
-    }
-
-    // Create a fresh UUID for our session row (do NOT use fallback-... strings)
-    const id = crypto.randomUUID();
-    const { started_at, ended_at } = getTimesFromMessage(msg);
-    const summary = extractSummaryFromMessage(msg);
-
-    const row = {
-      id,
-      assistant_id: null,                // unknown in this payload
-      started_at,
-      ended_at,
-      channel: "voice",
-      outcome: "ended",
-      summary,
-      hangup_reason: msg?.endedReason || null,
-      cost_cents: null,
+  // CORS preflight (optional)
+  if (event.httpMethod === "OPTIONS") {
+    return {
+      statusCode: 204,
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type",
+      },
+      body: "",
     };
+  }
 
-    log("UPSERT SESSION ROW:", row);
-    const up = await sbUpsertSession(row);
-    if (!up.ok) {
-      return {
-        statusCode: 500,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ok: false, where: "sessions", status: up.status, text: up.text }),
+  if (event.httpMethod !== "POST") {
+    return { statusCode: 405, body: "Method Not Allowed" };
+  }
+
+  try {
+    const body = JSON.parse(event.body || "{}");
+    const { type, data } = body;
+
+    // Pull common fields we may need from the event
+    const metadata = data?.metadata || {};
+    const providerSessionId = data?.sessionId || data?.callId || data?.id;
+    const providerAssistantId = data?.assistantId || metadata?.assistantId;
+    const channel = data?.channel || (data?.callType ? "voice" : "chat");
+    const fromNumber = data?.from || data?.callerNumber || null;
+
+    // Try to resolve client/assistant via metadata first, then DB lookups
+    const { resolvedClientId, resolvedAssistantId } = await resolveClientAndAssistant({
+      providerAssistantId,
+      clientId: metadata?.clientId || null,
+      fromNumber,
+    });
+
+    // ------- Event handlers -------
+    if (type === "call.started") {
+      const row = {
+        provider_session_id: providerSessionId,
+        client_id: resolvedClientId,
+        assistant_id: resolvedAssistantId,
+        channel: channel || "voice",
+        started_at: data?.startedAt || new Date().toISOString(),
+        prompt_version: metadata?.promptVersion || "v1",
+        kb_version: metadata?.kbVersion || "v1",
+        experiment: metadata?.experiment || null,
       };
+      await sbUpsert("sessions", row, "provider_session_id");
     }
 
-    await sbUpsertEvalRun(id);
-    return { statusCode: 200, body: "ok" };
+    if (type === "message.created") {
+      // Find session row to get internal UUID
+      const session = await sbSelectOne("sessions", { select: "id", provider_session_id: eq(providerSessionId) });
+      if (session?.id) {
+        const turn = {
+          session_id: session.id,
+          role: data?.role || "agent",
+          started_at: data?.createdAt || new Date().toISOString(),
+          latency_ms: data?.latencyMs ?? null,
+          text: data?.text || null,
+          tool_name: data?.toolName || null,
+          fallback: !!data?.fallback,
+          tokens_in: data?.tokensIn ?? null,
+          tokens_out: data?.tokensOut ?? null,
+        };
+        await sbInsert("turns", turn);
+      }
+    }
+
+    if (type === "intent.detected") {
+      const session = await sbSelectOne("sessions", { select: "id", provider_session_id: eq(providerSessionId) });
+      if (session?.id) {
+        const intent = {
+          session_id: session.id,
+          name: data?.name || data?.intent || "unknown",
+          detected_at: data?.detectedAt || new Date().toISOString(),
+          success: typeof data?.success === "boolean" ? data.success : null,
+          details: data?.details || null,
+        };
+        await sbInsert("intents", intent);
+      }
+    }
+
+    if (type === "call.ended") {
+      const outcome = data?.outcome || (data?.hangupReason ? "abandoned" : null);
+      const patch = {
+        ended_at: data?.endedAt || new Date().toISOString(),
+        hangup_reason: data?.hangupReason || null,
+        cost_cents: data?.costCents ?? null,
+        aht_seconds: data?.ahtSeconds ?? null,
+        outcome,
+        containment: outcome === "resolved" ? true : (typeof data?.containment === "boolean" ? data.containment : null),
+      };
+      await sbUpdate("sessions", { provider_session_id: eq(providerSessionId) }, patch);
+    }
+
+    // You can add more Vapi events here as needed.
+
+    return {
+      statusCode: 200,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ok: true }),
+    };
   } catch (err) {
-    console.error("webhook error", err);
-    return { statusCode: 500, body: "server error" };
+    console.error("[vapi-webhook] error", err);
+    return {
+      statusCode: 500,
+      body: JSON.stringify({ error: err.message || "internal error" }),
+    };
   }
 };
