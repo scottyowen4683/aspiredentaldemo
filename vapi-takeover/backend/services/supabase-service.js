@@ -415,8 +415,10 @@ class SupabaseService {
 
     logger.info('KB search results:', {
       count: results.length,
-      topSimilarity: results[0]?.similarity,
-      totalFromRPC: data?.length || 0
+      topSimilarity: data?.[0]?.similarity?.toFixed(3),
+      top3Similarities: data?.slice(0, 3).map(c => c.similarity?.toFixed(3)),
+      totalFromRPC: data?.length || 0,
+      threshold: similarityThreshold
     });
 
     return results;

@@ -948,12 +948,12 @@ class VoiceHandler {
         try {
           const embedding = embeddingResult.data[0].embedding;
 
-          // Search knowledge base - fetch 5 for voice with low threshold for better recall
+          // Search knowledge base - fetch 5 for voice with very low threshold for better recall
           const kbResults = await supabaseService.searchKnowledgeBase(
             this.assistant.org_id,
             embedding,
             5, // Fetch more results
-            0.2 // Low similarity threshold
+            0.1 // Very low threshold - voice needs better recall
           );
 
           if (kbResults && kbResults.length > 0) {
@@ -1281,7 +1281,7 @@ DO NOT make up or guess information like names, contact details, or specific fac
             this.assistant.org_id,
             embedding,
             this.assistant.kb_match_count || 5,
-            0.2 // Low threshold for voice - better recall
+            0.1 // Very low threshold for voice - better recall
           );
           if (kbResults && kbResults.length > 0) {
             kbContext = formatKBContext(kbResults);
