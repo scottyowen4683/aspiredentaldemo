@@ -186,13 +186,19 @@ app.post('/api/voice/outbound-twiml', (req, res) => {
 
   // Connect to our WebSocket for AI voice handling
   const connect = response.connect();
-  connect.stream({
-    url: `wss://${new URL(baseUrl).host}/voice/stream`,
-    parameters: {
-      assistantId: 'outbound-demo',
-      callerNumber: req.body.To || 'unknown',
-      isOutbound: 'true'
-    }
+  const stream = connect.stream({
+    url: `wss://${new URL(baseUrl).host}/voice/stream`
+  });
+
+  // Add custom parameters using the .parameter() method
+  // These will be available in data.start.customParameters on WebSocket
+  stream.parameter({ name: 'assistantId', value: 'outbound-demo' });
+  stream.parameter({ name: 'callerNumber', value: req.body.To || 'unknown' });
+  stream.parameter({ name: 'isOutbound', value: 'true' });
+
+  logger.info('Outbound TwiML generated', {
+    wsUrl: `wss://${new URL(baseUrl).host}/voice/stream`,
+    to: req.body.To
   });
 
   res.type('text/xml');
