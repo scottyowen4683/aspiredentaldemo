@@ -373,7 +373,12 @@ class VoiceHandler {
       if (!this.assistant) {
         // Check if this is the outbound demo - use special config
         if (this.assistantId === 'outbound-demo') {
-          logger.info('Using Aspire outbound demo configuration');
+          // Use Scott's cloned voice if env var set, otherwise use hardcoded ID
+          const outboundVoiceId = process.env.ELEVENLABS_OUTBOUND_VOICE_ID || 'UQVsQrmNGOENbsLCAH2g';
+          logger.info('Using Aspire outbound demo configuration', {
+            voiceId: outboundVoiceId,
+            hasApiKey: !!process.env.ELEVENLABS_API_KEY
+          });
           this.assistant = {
             id: 'outbound-demo',
             org_id: null,
@@ -384,7 +389,7 @@ class VoiceHandler {
             temperature: 0.7,
             max_tokens: 200,
             kb_enabled: false,
-            elevenlabs_voice_id: 'UQVsQrmNGOENbsLCAH2g' // Scott's cloned voice
+            elevenlabs_voice_id: outboundVoiceId
           };
         } else {
           // Create a minimal fallback assistant config so call can still work
