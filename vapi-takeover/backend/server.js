@@ -382,13 +382,17 @@ wss.on('connection', async (ws, req) => {
               try {
                 logger.info('Speech end detected, starting response', { useStreamingTranscript });
 
-                // INSTANT FILLER: Send filler audio IMMEDIATELY before any processing
-                // This plays while GPT is thinking (not buffered with response)
-                if (voiceHandler.assistant?.use_filler_audio !== false) {
-                  const fillerVoiceId = voiceHandler.assistant?.elevenlabs_voice_id || process.env.ELEVENLABS_VOICE_DEFAULT;
+                const fillerVoiceId = voiceHandler.assistant?.elevenlabs_voice_id || process.env.ELEVENLABS_VOICE_DEFAULT;
+                let fillersSent = 0;
+                let fillerInterval = null;
+
+                // Helper to send a filler audio
+                const sendFiller = () => {
+                  if (ws.readyState !== 1) return false;
                   const fillerAudio = getInstantFillerAudio(fillerVoiceId, 'none');
-                  if (fillerAudio && ws.readyState === 1) {
-                    logger.info('Sending instant filler audio (IMMEDIATE)', {
+                  if (fillerAudio) {
+                    fillersSent++;
+                    logger.info(`Sending filler audio #${fillersSent}`, {
                       bytes: fillerAudio.length,
                       durationMs: Math.round(fillerAudio.length / 8)
                     });
@@ -399,7 +403,29 @@ wss.on('connection', async (ws, req) => {
                         payload: fillerAudio.toString('base64')
                       }
                     }));
+                    return true;
                   }
+                  return false;
+                };
+
+                // INSTANT FILLER: Send filler audio IMMEDIATELY before any processing
+                // This plays while GPT is thinking (not buffered with response)
+                if (voiceHandler.assistant?.use_filler_audio !== false) {
+                  sendFiller();
+
+                  // ============================================
+                  // OPTIMIZATION 3: Chain multiple fillers if GPT takes >2.5s
+                  // Send additional fillers every 2.5s to mask long processing
+                  // ============================================
+                  fillerInterval = setInterval(() => {
+                    if (fillersSent < 3) { // Max 3 fillers (initial + 2 more)
+                      logger.info('GPT taking long, sending additional filler', { fillersSent });
+                      sendFiller();
+                    } else {
+                      clearInterval(fillerInterval);
+                      fillerInterval = null;
+                    }
+                  }, 2500); // Every 2.5 seconds
                 }
 
                 // Buffer response audio chunks (filler already sent above)
@@ -414,6 +440,13 @@ wss.on('connection', async (ws, req) => {
                   : await voiceHandler.onSpeechEndStreaming((audioChunk) => {
                       audioChunks.push(audioChunk);
                     });
+
+                // Stop filler interval now that GPT response is ready
+                if (fillerInterval) {
+                  clearInterval(fillerInterval);
+                  fillerInterval = null;
+                  logger.info('Filler interval stopped (GPT ready)', { totalFillersSent: fillersSent });
+                }
 
                 // Now send buffered audio as large smooth chunks (like greeting)
                 if (audioChunks.length > 0 && ws.readyState === 1) {
