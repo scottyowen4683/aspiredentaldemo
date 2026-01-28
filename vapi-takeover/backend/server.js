@@ -13,7 +13,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 import supabaseService from './services/supabase-service.js';
 import VoiceHandler from './ai/voice-handler.js';
-import { streamElevenLabsAudio, preGenerateFillerPhrases } from './ai/elevenlabs.js';
+import { streamElevenLabsAudio, preGenerateFillerPhrases, getInstantFillerAudio } from './ai/elevenlabs.js';
 
 // Routes
 import chatRouter from './routes/chat.js';
@@ -382,10 +382,31 @@ wss.on('connection', async (ws, req) => {
               try {
                 logger.info('Speech end detected, starting response', { useStreamingTranscript });
 
-                // Buffer all audio chunks, then send as smooth large chunks
+                // INSTANT FILLER: Send filler audio IMMEDIATELY before any processing
+                // This plays while GPT is thinking (not buffered with response)
+                if (voiceHandler.assistant?.use_filler_audio !== false) {
+                  const fillerVoiceId = voiceHandler.assistant?.elevenlabs_voice_id || process.env.ELEVENLABS_VOICE_DEFAULT;
+                  const fillerAudio = getInstantFillerAudio(fillerVoiceId, 'none');
+                  if (fillerAudio && ws.readyState === 1) {
+                    logger.info('Sending instant filler audio (IMMEDIATE)', {
+                      bytes: fillerAudio.length,
+                      durationMs: Math.round(fillerAudio.length / 8)
+                    });
+                    ws.send(JSON.stringify({
+                      event: 'media',
+                      streamSid: streamSid,
+                      media: {
+                        payload: fillerAudio.toString('base64')
+                      }
+                    }));
+                  }
+                }
+
+                // Buffer response audio chunks (filler already sent above)
                 const audioChunks = [];
 
                 // Use streaming transcription if available (MUCH faster!)
+                // Note: filler in voice-handler is now skipped since we sent it above
                 const result = useStreamingTranscript && voiceHandler.streamingTranscriber
                   ? await voiceHandler.onSpeechEndWithStreaming((audioChunk) => {
                       audioChunks.push(audioChunk);

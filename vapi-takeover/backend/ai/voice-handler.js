@@ -592,25 +592,8 @@ class VoiceHandler {
         transcript: transcript.substring(0, 50)
       });
 
-      // INSTANT FEEDBACK: Send pre-generated filler audio IMMEDIATELY (if enabled)
-      const voiceId = this.assistant.elevenlabs_voice_id || process.env.ELEVENLABS_VOICE_DEFAULT;
-      // HARDCODED: Synthetic noise disabled for ALL assistants (causes crackling on phone)
-      const backgroundSound = 'none';
-      const backgroundVolume = 0.40;
-
-      // Check if filler audio is enabled (default true for backwards compatibility)
-      if (this.assistant.use_filler_audio !== false) {
-        const fillerAudio = getInstantFillerAudio(voiceId, backgroundSound);
-        if (fillerAudio) {
-          logger.info('Sending instant filler audio', {
-            bytes: fillerAudio.length,
-            durationMs: Math.round(fillerAudio.length / 8)
-          });
-          onAudioChunk(fillerAudio);
-        }
-      } else {
-        logger.info('Filler audio disabled for this assistant');
-      }
+      // NOTE: Filler audio is now sent IMMEDIATELY from server.js before this function is called
+      // This ensures the filler plays instantly without being buffered with the response
 
       // Transcription already done! Log time saved
       const transcriptionLatency = 0; // Already had it from streaming!
