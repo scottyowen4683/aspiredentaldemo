@@ -1,7 +1,6 @@
 // frontend/src/pages/marketing/OutboundCTA.jsx
 // Self-hosted outbound calling via Twilio + ElevenLabs (no VAPI)
 import React, { useState } from "react";
-import axios from "axios";
 import { toast } from "sonner";
 import { Phone, CheckCircle, Megaphone, Sparkles } from "lucide-react";
 
@@ -56,18 +55,26 @@ export default function OutboundCTA({
 
       // Call self-hosted API (Twilio + ElevenLabs)
       // Uses phone +61731322220 and voice ID UQVsQrmNGOENbsLCAH2g (configured on backend)
-      await axios.post("/api/outbound-call", {
-        to,
-        context: { variant, path: window.location.pathname },
+      const res = await fetch("/api/outbound-call", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          to,
+          context: { variant, path: window.location.pathname },
+        }),
       });
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.message || "Couldn't trigger the call.");
+      }
 
       toast.success("All set - we're calling you now.");
       setPhone("");
       setConsent(false);
     } catch (e) {
       console.error(e);
-      const msg = e?.response?.data?.message || "Couldn't trigger the call.";
-      toast.error(msg);
+      toast.error(e.message || "Couldn't trigger the call.");
     } finally {
       setLoading(false);
     }
