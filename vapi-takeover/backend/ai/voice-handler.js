@@ -374,8 +374,8 @@ class VoiceHandler {
           id: 'outbound-demo',
           org_id: null,
           friendly_name: 'Aspire AI Demo',
-          // No first_message - wait for caller to speak first for smoother conversation
-          first_message: null,
+          // Short greeting so caller knows AI is there
+          first_message: 'Hi there!',
           prompt: ASPIRE_OUTBOUND_DEMO_PROMPT,
           model: 'gpt-4o-mini',
           temperature: 0.7,
@@ -386,7 +386,9 @@ class VoiceHandler {
           call_transfer_enabled: true,
           call_transfer_number: '+61408062129',
           // Enable contact capture (uses Brevo email)
-          capture_contact_enabled: true
+          capture_contact_enabled: true,
+          // Disable filler audio ("mhm") - sounds dismissive
+          use_filler_audio: false
         };
         // Still get universal prompt for potential use
         this.universalPrompt = await supabaseService.getUniversalPrompt();
@@ -559,19 +561,24 @@ class VoiceHandler {
         transcript: transcript.substring(0, 50)
       });
 
-      // INSTANT FEEDBACK: Send pre-generated filler audio IMMEDIATELY
+      // INSTANT FEEDBACK: Send pre-generated filler audio IMMEDIATELY (if enabled)
       const voiceId = this.assistant.elevenlabs_voice_id || process.env.ELEVENLABS_VOICE_DEFAULT;
       // HARDCODED: Synthetic noise disabled for ALL assistants (causes crackling on phone)
       const backgroundSound = 'none';
       const backgroundVolume = 0.40;
-      const fillerAudio = getInstantFillerAudio(voiceId, backgroundSound);
 
-      if (fillerAudio) {
-        logger.info('Sending instant filler audio', {
-          bytes: fillerAudio.length,
-          durationMs: Math.round(fillerAudio.length / 8)
-        });
-        onAudioChunk(fillerAudio);
+      // Check if filler audio is enabled (default true for backwards compatibility)
+      if (this.assistant.use_filler_audio !== false) {
+        const fillerAudio = getInstantFillerAudio(voiceId, backgroundSound);
+        if (fillerAudio) {
+          logger.info('Sending instant filler audio', {
+            bytes: fillerAudio.length,
+            durationMs: Math.round(fillerAudio.length / 8)
+          });
+          onAudioChunk(fillerAudio);
+        }
+      } else {
+        logger.info('Filler audio disabled for this assistant');
       }
 
       // Transcription already done! Log time saved
@@ -1597,25 +1604,30 @@ DO NOT make up or guess information like names, contact details, or specific fac
         audioSizeKB: (audioBuffer.length / 1024).toFixed(2)
       });
 
-      // INSTANT FEEDBACK: Send pre-generated filler audio IMMEDIATELY
+      // INSTANT FEEDBACK: Send pre-generated filler audio IMMEDIATELY (if enabled)
       // This plays while transcription and GPT process (eliminates perceived silence)
       const voiceId = this.assistant.elevenlabs_voice_id || process.env.ELEVENLABS_VOICE_DEFAULT;
       const backgroundSound = this.assistant.background_sound || 'none';
       // Enforce minimum 0.40 volume - lower values are inaudible on phone
       const backgroundVolume = Math.max(this.assistant.background_volume || 0.40, 0.40);
-      const fillerAudio = getInstantFillerAudio(voiceId, backgroundSound);
 
-      if (fillerAudio) {
-        logger.info('Sending instant filler audio', {
-          bytes: fillerAudio.length,
-          durationMs: Math.round(fillerAudio.length / 8), // 8 bytes per ms at 8kHz
-          voiceId,
-          backgroundSound
-        });
-        // Send as one chunk - Twilio handles buffering
-        onAudioChunk(fillerAudio);
+      // Check if filler audio is enabled (default true for backwards compatibility)
+      if (this.assistant.use_filler_audio !== false) {
+        const fillerAudio = getInstantFillerAudio(voiceId, backgroundSound);
+        if (fillerAudio) {
+          logger.info('Sending instant filler audio', {
+            bytes: fillerAudio.length,
+            durationMs: Math.round(fillerAudio.length / 8), // 8 bytes per ms at 8kHz
+            voiceId,
+            backgroundSound
+          });
+          // Send as one chunk - Twilio handles buffering
+          onAudioChunk(fillerAudio);
+        } else {
+          logger.warn('No filler audio available', { voiceId, backgroundSound });
+        }
       } else {
-        logger.warn('No filler audio available', { voiceId, backgroundSound });
+        logger.info('Filler audio disabled for this assistant');
       }
 
       // Step 1: Transcribe (filler audio plays during this)
