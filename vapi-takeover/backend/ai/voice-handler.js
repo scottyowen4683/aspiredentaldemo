@@ -199,6 +199,65 @@ If a user wants to lodge a request or complaint:
 
 Remember: You're speaking on a phone call - be brief, clear, and helpful.`;
 
+// Aspire outbound demo prompt - THIS IS AN OUTBOUND CALL (AI calling customer)
+const ASPIRE_OUTBOUND_DEMO_PROMPT = `You are an AI assistant making an OUTBOUND call on behalf of Aspire Executive Solutions.
+
+CRITICAL - THIS IS AN OUTBOUND CALL:
+- YOU called THEM because they requested a demo callback from the Aspire website
+- NEVER ask "how can I help you" - YOU are calling to help THEM learn about Aspire
+- Your opening greeting already introduced you - now answer their questions and educate them
+
+YOUR GOALS (in priority order):
+1. Answer any questions they have about Aspire's AI services
+2. Educate them on how Aspire can help their business or council
+3. If they want to speak to Scott directly, transfer the call immediately
+4. If they prefer a callback, capture their name and preferred callback time
+
+RESPONSE STYLE:
+- Brief and conversational (under 40 words per response)
+- Warm, professional, enthusiastic
+- Australian English
+- This call is DEMONSTRATING what Aspire's AI can do - be impressive!
+
+WHAT ASPIRE OFFERS:
+- AI voice agents that answer calls 24/7 (exactly like this demo call!)
+- AI chat assistants for websites
+- Handles enquiries, complaints, service requests automatically
+- SMS and email follow-ups
+- CRM integrations (TechnologyOne, Civica, Salesforce)
+- Analytics dashboard
+
+KEY SELLING POINTS:
+- Over 50% cheaper than hiring a customer service officer
+- 24/7 operation - never misses a call, no sick days, no breaks
+- Up to 5,000 interactions per month included
+- Go live in 7-14 days
+- Australian-hosted, privacy compliant
+- Custom knowledge base trained on YOUR business
+
+PRICING:
+- Fixed monthly fee, no surprises, no per-call charges
+- Everything included: setup, training, after-hours, analytics
+
+FOR COUNCILS:
+- After-hours ratepayer support
+- Handles complaints, bin enquiries, rates questions
+- Reduces frontline staff workload
+
+FOR BUSINESSES:
+- Never miss a lead
+- Instant callbacks on missed calls
+- Reactivate dormant customers
+
+TRANSFER TO SCOTT:
+If they ask to speak to Scott or a real person, say "Sure, let me transfer you to Scott now" and use the transfer function.
+
+CALLBACK SCHEDULING:
+If Scott isn't available or they prefer a callback, ask: "No problem! Can I get your name and a good time for Scott to call you back?"
+
+ENDING THE CALL:
+When done, say something like "Thanks so much for your time today. Goodbye!" - always include "goodbye".`;
+
 /**
  * Format KB results like moretonbaypilot for better context
  */
@@ -296,28 +355,63 @@ class VoiceHandler {
 
   async initialize() {
     try {
-      // Get assistant configuration and universal prompt in parallel
-      const [assistant, universalPrompt] = await Promise.all([
-        supabaseService.getAssistant(this.assistantId),
-        supabaseService.getUniversalPrompt()
-      ]);
+      // SPECIAL CASE: Marketing demo - can use portal assistant or fallback to hardcoded
+      if (this.assistantId === 'outbound-demo') {
+        // Check if a portal assistant is configured for outbound demo
+        const portalAssistantId = process.env.OUTBOUND_DEMO_ASSISTANT_ID;
 
-      this.assistant = assistant;
-      this.universalPrompt = universalPrompt;
-      if (!this.assistant) {
-        // Create a minimal fallback assistant config so call can still work
-        logger.warn(`Assistant not found: ${this.assistantId}, using defaults`);
-        this.assistant = {
-          id: this.assistantId,
-          org_id: null,
-          friendly_name: 'Default Assistant',
-          prompt: DEFAULT_SYSTEM_PROMPT,
-          model: 'gpt-4o-mini',
-          temperature: 0.7,
-          max_tokens: 150,
-          kb_enabled: false,
-          elevenlabs_voice_id: process.env.ELEVENLABS_VOICE_ID || 'EXAVITQu4vr4xnSDxMaL'
-        };
+        if (portalAssistantId) {
+          // Use portal assistant - full KB, tracking, editable prompt
+          logger.info('Outbound demo using portal assistant', { portalAssistantId });
+          const [assistant, universalPrompt] = await Promise.all([
+            supabaseService.getAssistant(portalAssistantId),
+            supabaseService.getUniversalPrompt()
+          ]);
+
+          if (assistant) {
+            this.assistant = assistant;
+            this.universalPrompt = universalPrompt;
+            // Override the ID for conversation tracking
+            this.assistantId = portalAssistantId;
+            logger.info('Loaded portal assistant for outbound demo', {
+              assistantId: portalAssistantId,
+              name: assistant.friendly_name,
+              hasKB: assistant.kb_enabled
+            });
+          } else {
+            logger.warn('Portal assistant not found, falling back to hardcoded', { portalAssistantId });
+            this._useHardcodedOutboundConfig();
+          }
+        } else {
+          // No portal assistant configured - use hardcoded fallback
+          logger.info('No OUTBOUND_DEMO_ASSISTANT_ID set, using hardcoded config');
+          this._useHardcodedOutboundConfig();
+        }
+      } else {
+        // Regular assistant - query database
+        const [assistant, universalPrompt] = await Promise.all([
+          supabaseService.getAssistant(this.assistantId),
+          supabaseService.getUniversalPrompt()
+        ]);
+
+        this.assistant = assistant;
+        this.universalPrompt = universalPrompt;
+
+        if (!this.assistant) {
+          // Create a minimal fallback assistant config so call can still work
+          logger.warn(`Assistant not found: ${this.assistantId}, using defaults`);
+          this.assistant = {
+            id: this.assistantId,
+            org_id: null,
+            friendly_name: 'Default Assistant',
+            prompt: DEFAULT_SYSTEM_PROMPT,
+            model: 'gpt-4o-mini',
+            temperature: 0.7,
+            max_tokens: 150,
+            kb_enabled: false,
+            elevenlabs_voice_id: process.env.ELEVENLABS_VOICE_ID || 'EXAVITQu4vr4xnSDxMaL'
+          };
+        }
       }
 
       // Try to create conversation - but don't fail if it errors
@@ -379,6 +473,34 @@ class VoiceHandler {
       logger.error('Voice handler initialization failed:', error);
       throw error;
     }
+  }
+
+  /**
+   * Fallback hardcoded config for outbound demo (when no portal assistant configured)
+   */
+  async _useHardcodedOutboundConfig() {
+    const outboundVoiceId = process.env.ELEVENLABS_OUTBOUND_VOICE_ID || 'UQVsQrmNGOENbsLCAH2g';
+    logger.info('Using hardcoded Aspire outbound demo configuration', {
+      voiceId: outboundVoiceId,
+      hasApiKey: !!process.env.ELEVENLABS_API_KEY
+    });
+    this.assistant = {
+      id: 'outbound-demo',
+      org_id: null,
+      friendly_name: 'Aspire AI Demo',
+      first_message: "Hi there! I'm calling from Aspire Executive Solutions. You requested a demo of our AI services, so I wanted to give you a quick call back. What questions can I answer for you about our AI voice and chat solutions?",
+      prompt: ASPIRE_OUTBOUND_DEMO_PROMPT,
+      model: 'gpt-4o-mini',
+      temperature: 0.7,
+      max_tokens: 200,
+      kb_enabled: false,
+      elevenlabs_voice_id: outboundVoiceId,
+      call_transfer_enabled: true,
+      call_transfer_number: '+61408062129',
+      capture_contact_enabled: true
+      // Note: filler audio enabled by default for portal assistants
+    };
+    this.universalPrompt = await supabaseService.getUniversalPrompt();
   }
 
   /**
@@ -462,19 +584,24 @@ class VoiceHandler {
         transcript: transcript.substring(0, 50)
       });
 
-      // INSTANT FEEDBACK: Send pre-generated filler audio IMMEDIATELY
+      // INSTANT FEEDBACK: Send pre-generated filler audio IMMEDIATELY (if enabled)
       const voiceId = this.assistant.elevenlabs_voice_id || process.env.ELEVENLABS_VOICE_DEFAULT;
       // HARDCODED: Synthetic noise disabled for ALL assistants (causes crackling on phone)
       const backgroundSound = 'none';
       const backgroundVolume = 0.40;
-      const fillerAudio = getInstantFillerAudio(voiceId, backgroundSound);
 
-      if (fillerAudio) {
-        logger.info('Sending instant filler audio', {
-          bytes: fillerAudio.length,
-          durationMs: Math.round(fillerAudio.length / 8)
-        });
-        onAudioChunk(fillerAudio);
+      // Check if filler audio is enabled (default true for backwards compatibility)
+      if (this.assistant.use_filler_audio !== false) {
+        const fillerAudio = getInstantFillerAudio(voiceId, backgroundSound);
+        if (fillerAudio) {
+          logger.info('Sending instant filler audio', {
+            bytes: fillerAudio.length,
+            durationMs: Math.round(fillerAudio.length / 8)
+          });
+          onAudioChunk(fillerAudio);
+        }
+      } else {
+        logger.info('Filler audio disabled for this assistant');
       }
 
       // Transcription already done! Log time saved
@@ -821,12 +948,12 @@ class VoiceHandler {
         try {
           const embedding = embeddingResult.data[0].embedding;
 
-          // Search knowledge base - fetch 5 for voice with low threshold for better recall
+          // Search knowledge base - fetch 5 for voice with very low threshold for better recall
           const kbResults = await supabaseService.searchKnowledgeBase(
             this.assistant.org_id,
             embedding,
             5, // Fetch more results
-            0.2 // Low similarity threshold
+            0.1 // Very low threshold - voice needs better recall
           );
 
           if (kbResults && kbResults.length > 0) {
@@ -1154,7 +1281,7 @@ DO NOT make up or guess information like names, contact details, or specific fac
             this.assistant.org_id,
             embedding,
             this.assistant.kb_match_count || 5,
-            0.2 // Low threshold for voice - better recall
+            0.1 // Very low threshold for voice - better recall
           );
           if (kbResults && kbResults.length > 0) {
             kbContext = formatKBContext(kbResults);
@@ -1500,25 +1627,30 @@ DO NOT make up or guess information like names, contact details, or specific fac
         audioSizeKB: (audioBuffer.length / 1024).toFixed(2)
       });
 
-      // INSTANT FEEDBACK: Send pre-generated filler audio IMMEDIATELY
+      // INSTANT FEEDBACK: Send pre-generated filler audio IMMEDIATELY (if enabled)
       // This plays while transcription and GPT process (eliminates perceived silence)
       const voiceId = this.assistant.elevenlabs_voice_id || process.env.ELEVENLABS_VOICE_DEFAULT;
       const backgroundSound = this.assistant.background_sound || 'none';
       // Enforce minimum 0.40 volume - lower values are inaudible on phone
       const backgroundVolume = Math.max(this.assistant.background_volume || 0.40, 0.40);
-      const fillerAudio = getInstantFillerAudio(voiceId, backgroundSound);
 
-      if (fillerAudio) {
-        logger.info('Sending instant filler audio', {
-          bytes: fillerAudio.length,
-          durationMs: Math.round(fillerAudio.length / 8), // 8 bytes per ms at 8kHz
-          voiceId,
-          backgroundSound
-        });
-        // Send as one chunk - Twilio handles buffering
-        onAudioChunk(fillerAudio);
+      // Check if filler audio is enabled (default true for backwards compatibility)
+      if (this.assistant.use_filler_audio !== false) {
+        const fillerAudio = getInstantFillerAudio(voiceId, backgroundSound);
+        if (fillerAudio) {
+          logger.info('Sending instant filler audio', {
+            bytes: fillerAudio.length,
+            durationMs: Math.round(fillerAudio.length / 8), // 8 bytes per ms at 8kHz
+            voiceId,
+            backgroundSound
+          });
+          // Send as one chunk - Twilio handles buffering
+          onAudioChunk(fillerAudio);
+        } else {
+          logger.warn('No filler audio available', { voiceId, backgroundSound });
+        }
       } else {
-        logger.warn('No filler audio available', { voiceId, backgroundSound });
+        logger.info('Filler audio disabled for this assistant');
       }
 
       // Step 1: Transcribe (filler audio plays during this)

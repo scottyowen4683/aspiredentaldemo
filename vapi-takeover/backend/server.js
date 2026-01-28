@@ -79,6 +79,139 @@ app.use('/api/campaigns', campaignsRouter);
 app.use('/api/invitations', invitationsRouter);
 app.use('/api/users', usersRouter);
 
+// ============================================
+// MARKETING SITE API ENDPOINTS
+// ============================================
+
+// Import email service for contact form
+import { sendContactRequestNotification } from './services/email-service.js';
+
+// Contact form endpoint
+app.post('/api/contact', async (req, res) => {
+  try {
+    const { name, email, phone, message, org } = req.body;
+
+    if (!name || !email || !message) {
+      return res.status(400).json({ status: 'error', message: 'Name, email and message are required' });
+    }
+
+    // Send notification via Brevo
+    await sendContactRequestNotification({
+      name,
+      email,
+      phone: phone || 'Not provided',
+      request_type: 'Contact Form',
+      request_details: org ? `Organisation: ${org}\n\n${message}` : message
+    });
+
+    logger.info('Contact form submission received', { name, email });
+    res.json({ status: 'success' });
+  } catch (error) {
+    logger.error('Contact form error:', error);
+    res.status(500).json({ status: 'error', message: 'Failed to send message' });
+  }
+});
+
+// Outbound call endpoint (self-hosted Twilio + ElevenLabs)
+// Uses phone +61731322220 and voice ID UQVsQrmNGOENbsLCAH2g
+const OUTBOUND_FROM_NUMBER = process.env.TWILIO_OUTBOUND_NUMBER || '+61731322220';
+const OUTBOUND_VOICE_ID = process.env.ELEVENLABS_OUTBOUND_VOICE_ID || 'UQVsQrmNGOENbsLCAH2g';
+
+// Simple rate limiter for outbound calls
+const callLimiter = {};
+const MAX_DAILY_CALLS = 3;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+app.post('/api/outbound-call', async (req, res) => {
+  const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
+  const now = Date.now();
+
+  // Rate limiting
+  if (!callLimiter[ip] || now - callLimiter[ip].ts > DAY_MS) {
+    callLimiter[ip] = { count: 1, ts: now };
+  } else if (callLimiter[ip].count >= MAX_DAILY_CALLS) {
+    return res.status(429).json({ message: 'Daily call limit reached. Try again tomorrow.' });
+  } else {
+    callLimiter[ip].count++;
+  }
+
+  try {
+    const { to, context } = req.body;
+
+    if (!to) {
+      return res.status(400).json({ message: 'Missing phone number (to)' });
+    }
+
+    // Validate Australian number format
+    if (!/^\+61\d{9}$/.test(to)) {
+      return res.status(400).json({ message: 'Enter a valid Australian number (e.g. 0412 345 678)' });
+    }
+
+    const baseUrl = process.env.BASE_URL || `https://${process.env.FLY_APP_NAME}.fly.dev`;
+
+    logger.info('Initiating outbound call', { to, from: OUTBOUND_FROM_NUMBER, voiceId: OUTBOUND_VOICE_ID });
+
+    // Create outbound call via Twilio - connects to our voice WebSocket
+    // IMPORTANT: Uses dedicated demo TwiML endpoint, separate from portal campaigns
+    const call = await twilioClient.calls.create({
+      to: to,
+      from: OUTBOUND_FROM_NUMBER,
+      url: `${baseUrl}/api/marketing/demo-twiml`,
+      method: 'POST',
+      statusCallback: `${baseUrl}/api/voice/status`,
+      statusCallbackMethod: 'POST',
+      statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
+      record: true,
+      recordingChannels: 'dual'
+    });
+
+    logger.info('Outbound call created', { callSid: call.sid, status: call.status });
+
+    res.status(201).json({
+      success: true,
+      callSid: call.sid,
+      status: call.status
+    });
+
+  } catch (error) {
+    logger.error('Outbound call error:', error);
+    res.status(500).json({ message: 'Failed to initiate call', error: error.message });
+  }
+});
+
+// ============================================
+// MARKETING DEMO TwiML ENDPOINT
+// Completely separate from portal voice routes
+// Only used by /api/outbound-call for website demos
+// ============================================
+app.post('/api/marketing/demo-twiml', (req, res) => {
+  const VoiceResponse = twilio.twiml.VoiceResponse;
+  const response = new VoiceResponse();
+  const baseUrl = process.env.BASE_URL || `https://${process.env.FLY_APP_NAME}.fly.dev`;
+
+  // Connect to our WebSocket for AI voice handling
+  const connect = response.connect();
+  const stream = connect.stream({
+    url: `wss://${new URL(baseUrl).host}/voice/stream`
+  });
+
+  // MARKETING DEMO ONLY: Hardcode 'outbound-demo' assistant ID
+  // This is completely separate from portal campaigns which use /api/voice/incoming
+  stream.parameter({ name: 'assistantId', value: 'outbound-demo' });
+  stream.parameter({ name: 'callerNumber', value: req.body.To || 'unknown' });
+  stream.parameter({ name: 'isOutbound', value: 'true' });
+  stream.parameter({ name: 'isMarketingDemo', value: 'true' });
+
+  logger.info('Marketing demo TwiML generated', {
+    wsUrl: `wss://${new URL(baseUrl).host}/voice/stream`,
+    to: req.body.To,
+    assistantId: 'outbound-demo'
+  });
+
+  res.type('text/xml');
+  res.send(response.toString());
+});
+
 // SPA catch-all: serve index.html for all non-API routes (React Router handles client-side routing)
 app.get('*', (req, res, next) => {
   // Skip API routes, voice routes, and static widget files
@@ -146,38 +279,36 @@ wss.on('connection', async (ws, req) => {
           try {
             await voiceHandler.initialize();
 
-            // Send initial greeting with ElevenLabs voice IMMEDIATELY
-            // This is what makes it feel like VAPI - instant AI voice response
-            const greeting = voiceHandler.assistant.first_message ||
-              `Hi! How can I help you today?`;
-
-            logger.info('Sending ElevenLabs greeting', { greeting });
-
             const voiceId = voiceHandler.assistant.elevenlabs_voice_id ||
               process.env.ELEVENLABS_VOICE_ID ||
               'EXAVITQu4vr4xnSDxMaL'; // Default: "Sarah" voice
 
-            try {
-              // DISABLED: Synthetic background noise causes crackling on phone audio
-              // TODO: Re-enable when we have proper pre-recorded ambient audio files
-              // const backgroundSound = voiceHandler.assistant.background_sound || 'office';
-              const backgroundSound = 'none'; // Force disable synthetic noise
-              const backgroundVolume = 0.40; // Not used when backgroundSound is 'none'
+            // Only send greeting if first_message is configured
+            // If null/empty, wait for caller to speak first (smoother for outbound)
+            const greeting = voiceHandler.assistant.first_message;
 
-              // Debug logging for background sound
-              logger.info('Background sound settings', {
-                assistantId: voiceHandler.assistant.id,
-                background_sound_raw: voiceHandler.assistant.background_sound,
-                background_volume_raw: voiceHandler.assistant.background_volume,
-                effectiveSound: backgroundSound,
-                effectiveVolume: backgroundVolume,
-                note: 'Synthetic noise disabled - causes crackling'
-              });
+            if (greeting) {
+              logger.info('Sending ElevenLabs greeting', { greeting, voiceId });
 
-              const greetingAudio = await streamElevenLabsAudio(greeting, voiceId, {
-                backgroundSound,
-                backgroundVolume
-              });
+              try {
+                // DISABLED: Synthetic background noise causes crackling on phone audio
+                const backgroundSound = 'none';
+                const backgroundVolume = 0.40;
+
+                // Debug logging for background sound
+                logger.info('Background sound settings', {
+                  assistantId: voiceHandler.assistant.id,
+                  background_sound_raw: voiceHandler.assistant.background_sound,
+                  background_volume_raw: voiceHandler.assistant.background_volume,
+                  effectiveSound: backgroundSound,
+                  effectiveVolume: backgroundVolume,
+                  note: 'Synthetic noise disabled - causes crackling'
+                });
+
+                const greetingAudio = await streamElevenLabsAudio(greeting, voiceId, {
+                  backgroundSound,
+                  backgroundVolume
+                });
 
               logger.info('ElevenLabs greeting received', {
                 audioSizeKB: (greetingAudio.length / 1024).toFixed(2),
@@ -228,9 +359,16 @@ wss.on('connection', async (ws, req) => {
 
               logger.info('ElevenLabs greeting fully sent');
 
-            } catch (greetingError) {
-              logger.error('Failed to send ElevenLabs greeting:', greetingError);
-              // Continue anyway - conversation can still work
+              } catch (greetingError) {
+                logger.error('Failed to send ElevenLabs greeting:', greetingError);
+                // Continue anyway - conversation can still work
+              }
+            } else {
+              // No greeting - wait for caller to speak first (outbound demo mode)
+              logger.info('No first_message configured, waiting for caller to speak first', {
+                assistantId: voiceHandler.assistant.id,
+                voiceId
+              });
             }
 
             // Helper function to process speech and send audio
