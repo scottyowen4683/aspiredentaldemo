@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - claude/fix-flyio-deployment-hKWQC
     paths:
       - 'vapi-takeover/backend/**'
       - '.github/workflows/fly-deploy.yml'
@@ -25,6 +24,6 @@ jobs:
       - name: Deploy to Fly.io
         run: |
           cd vapi-takeover/backend
-          flyctl deploy --remote-only
+          flyctl deploy --remote-only --app aspire-ai-platform
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
