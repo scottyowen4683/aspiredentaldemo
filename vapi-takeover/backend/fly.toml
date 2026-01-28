@@ -46,25 +46,3 @@ primary_region = "syd"  # Sydney, Australia
 [[vm]]
   size = "shared-cpu-1x"
   memory = "512mb"
-
-# TCP service for WebSocket support (needed for Twilio Media Streams)
-[[services]]
-  protocol = "tcp"
-  internal_port = 8080
-
-  # HTTP port
-  [[services.ports]]
-    port = 80
-    handlers = ["http"]
-    force_https = true
-
-  # HTTPS port
-  [[services.ports]]
-    port = 443
-    handlers = ["tls", "http"]
-
-  # Concurrency
-  [services.concurrency]
-    type = "connections"
-    hard_limit = 1000
-    soft_limit = 500
