@@ -1,6 +1,5 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Outlet, Link, NavLink, useLocation } from "react-router-dom";
-import VapiWidget from "./Vapi-Widget.jsx";
 
 function NavItem({ to, children }) {
   return (
@@ -49,27 +48,8 @@ export default function SiteLayout() {
     });
   }, [location.hash, location.pathname]);
 
-  // Choose assistant by section (Gov vs Business)
-  const assistantId = useMemo(() => {
-    const path = location.pathname || "/";
-    const isGov = path.startsWith("/government");
-
-    const GOV =
-      import.meta.env.VITE_VAPI_ASSISTANT_ID_GOV ||
-      import.meta.env.VITE_VAPI_ASSISTANT_ID_GOVERNMENT;
-
-    const BIZ =
-      import.meta.env.VITE_VAPI_ASSISTANT_ID_BIZ ||
-      import.meta.env.VITE_VAPI_ASSISTANT_ID_BUSINESS;
-
-    return isGov ? GOV : BIZ;
-  }, [location.pathname]);
-
   // Logo preference
   const [logoSrc, setLogoSrc] = useState("/aspire-mark.png");
-
-  // Optional: hide widget on admin
-  const showWidget = !location.pathname.startsWith("/admin");
 
   return (
     <div className="min-h-screen text-white bg-gradient-to-b from-[#0B1224] via-[#070A12] to-[#070A12]">
@@ -184,9 +164,6 @@ export default function SiteLayout() {
           </div>
         </div>
       </footer>
-
-      {/* Aspire-built chat widget */}
-      {showWidget && <VapiWidget assistantId={assistantId} />}
     </div>
   );
 }
