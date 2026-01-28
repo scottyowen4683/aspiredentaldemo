@@ -287,14 +287,38 @@ router.post('/:id/contacts/upload', upload.single('file'), async (req, res) => {
       size: file.size
     });
 
-    // Parse CSV
+    // Parse CSV - strip BOM and normalize
     const contacts = [];
-    const stream = Readable.from(file.buffer.toString());
+    let csvContent = file.buffer.toString('utf8');
+    // Remove BOM if present (Excel often adds this)
+    if (csvContent.charCodeAt(0) === 0xFEFF) {
+      csvContent = csvContent.slice(1);
+    }
+    // Also handle UTF-8 BOM bytes
+    if (csvContent.startsWith('\uFEFF')) {
+      csvContent = csvContent.slice(1);
+    }
 
+    logger.info('CSV content preview:', {
+      first100chars: csvContent.substring(0, 100),
+      length: csvContent.length
+    });
+
+    const stream = Readable.from(csvContent);
+
+    let headerLogged = false;
     await new Promise((resolve, reject) => {
       stream
-        .pipe(csv())
+        .pipe(csv({
+          mapHeaders: ({ header }) => header.trim().toLowerCase().replace(/\s+/g, '_')
+        }))
         .on('data', (row) => {
+          // Log headers on first row
+          if (!headerLogged) {
+            logger.info('CSV columns found:', { columns: Object.keys(row) });
+            headerLogged = true;
+          }
+
           // Expected columns: phone_number, first_name, last_name, email, ...
           // Store extra columns in custom_fields
           const { phone_number, first_name, last_name, email, ...customFields } = row;
