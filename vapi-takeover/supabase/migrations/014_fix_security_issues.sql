@@ -344,6 +344,11 @@ ORDER BY month DESC, council_name;
 -- PART 6: FIX FUNCTIONS - Set search_path
 -- ============================================================================
 
+-- Drop functions that return tables (can't change return type with CREATE OR REPLACE)
+DROP FUNCTION IF EXISTS get_expired_conversations();
+DROP FUNCTION IF EXISTS match_knowledge_chunks(vector, TEXT, INT, FLOAT);
+DROP FUNCTION IF EXISTS match_knowledge_chunks(vector(1536), TEXT, INT, FLOAT);
+
 -- Recreate functions with immutable search_path for security
 CREATE OR REPLACE FUNCTION update_updated_at()
 RETURNS TRIGGER
