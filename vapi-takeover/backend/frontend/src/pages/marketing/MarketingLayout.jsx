@@ -24,6 +24,16 @@ export default function SiteLayout() {
 
   useEffect(() => setOpen(false), [location.pathname]);
 
+  // Enable dark mode for marketing pages
+  useEffect(() => {
+    document.documentElement.classList.add("dark");
+    document.body.style.backgroundColor = "#070A12";
+    return () => {
+      document.documentElement.classList.remove("dark");
+      document.body.style.backgroundColor = "";
+    };
+  }, []);
+
   // 1) Always go to top on route change (pathname change)
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: "auto" });
