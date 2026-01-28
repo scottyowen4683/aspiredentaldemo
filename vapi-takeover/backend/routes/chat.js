@@ -5,7 +5,7 @@ import { v4 as uuidv4 } from 'uuid';
 import supabaseService from '../services/supabase-service.js';
 import logger from '../services/logger.js';
 import { scoreConversation } from '../ai/rubric-scorer.js';
-import { sendContactRequestNotification } from '../services/email-service.js';
+import { sendContactRequestNotification, sendCustomerConfirmationEmail } from '../services/email-service.js';
 
 const router = express.Router();
 
@@ -379,6 +379,15 @@ After capturing, confirm what you've recorded and let them know someone will fol
               });
               referenceId = emailResult?.referenceId;
               logger.info('Contact request email sent', { referenceId });
+
+              // Send confirmation email to customer (if they provided email)
+              if (args.email && referenceId) {
+                await sendCustomerConfirmationEmail(args, referenceId, {
+                  assistantName: assistant.friendly_name || assistant.name,
+                  companyName: assistant.friendly_name || 'our team'
+                });
+                logger.info('Customer confirmation email sent', { to: args.email, referenceId });
+              }
             } catch (emailErr) {
               logger.error('Failed to send contact request email:', emailErr);
             }

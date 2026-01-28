@@ -8,7 +8,7 @@ import supabaseService from '../services/supabase-service.js';
 import { streamElevenLabsAudio, streamElevenLabsTTS, preGenerateFillerPhrases, getInstantFillerAudio, hasFillerPhrasesReady } from './elevenlabs.js';
 import { BufferManager, ulawToWav } from '../audio/buffer-manager.js';
 import { scoreConversation } from './rubric-scorer.js';
-import { sendContactRequestNotification } from '../services/email-service.js';
+import { sendContactRequestNotification, sendCustomerConfirmationEmail } from '../services/email-service.js';
 import { createStreamingTranscriber } from '../services/deepgram-streaming.js';
 import { transferCall, sendSMS } from '../services/twilio-service.js';
 
@@ -1168,6 +1168,15 @@ DO NOT make up or guess information like names, contact details, or specific fac
                 });
                 referenceId = emailResult?.referenceId;
                 logger.info('Voice: Contact request email sent', { referenceId });
+
+                // Send confirmation email to customer (if they provided email)
+                if (args.email && referenceId) {
+                  await sendCustomerConfirmationEmail(args, referenceId, {
+                    assistantName: this.assistant.friendly_name || 'Voice Assistant',
+                    companyName: this.assistant.friendly_name || 'our team'
+                  });
+                  logger.info('Voice: Customer confirmation email sent', { to: args.email, referenceId });
+                }
               } catch (emailErr) {
                 logger.error('Voice: Failed to send contact request email:', emailErr);
               }
@@ -1532,6 +1541,15 @@ DO NOT make up or guess information like names, contact details, or specific fac
                 });
                 referenceId = emailResult?.referenceId;
                 logger.info('Voice streaming: Contact request email sent', { referenceId });
+
+                // Send confirmation email to customer (if they provided email)
+                if (args.email && referenceId) {
+                  await sendCustomerConfirmationEmail(args, referenceId, {
+                    assistantName: this.assistant.friendly_name || 'Voice Assistant',
+                    companyName: this.assistant.friendly_name || 'our team'
+                  });
+                  logger.info('Voice streaming: Customer confirmation email sent', { to: args.email, referenceId });
+                }
               } catch (emailErr) {
                 logger.error('Voice streaming: Failed to send contact request email:', emailErr);
               }
