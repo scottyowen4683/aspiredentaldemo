@@ -595,6 +595,11 @@ class VoiceHandler {
       // NOTE: Filler audio is now sent IMMEDIATELY from server.js before this function is called
       // This ensures the filler plays instantly without being buffered with the response
 
+      // Voice settings for TTS
+      const voiceId = this.assistant.elevenlabs_voice_id || process.env.ELEVENLABS_VOICE_DEFAULT;
+      const backgroundSound = 'none'; // Synthetic noise disabled
+      const backgroundVolume = 0.40;
+
       // Transcription already done! Log time saved
       const transcriptionLatency = 0; // Already had it from streaming!
       logger.info('🚀 Transcription INSTANT (streaming)', { transcript });
