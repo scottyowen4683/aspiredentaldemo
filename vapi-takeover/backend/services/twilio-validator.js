@@ -19,10 +19,10 @@ export async function validateTwilioNumber(phoneNumber) {
   try {
     // Check if Twilio is configured
     if (!twilioClient) {
-      logger.warn('Twilio not configured, skipping validation');
+      logger.error('Twilio not configured - cannot validate phone number');
       return {
-        valid: true, // Allow in development
-        warning: 'Twilio validation skipped - credentials not configured',
+        valid: false,
+        error: 'Twilio credentials not configured. Please set TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN environment variables.',
         number: phoneNumber
       };
     }
@@ -193,8 +193,139 @@ export async function configureTwilioWebhooks(phoneNumber, options) {
   }
 }
 
+/**
+ * Get full details about a Twilio phone number (all settings)
+ */
+export async function getPhoneNumberDetails(phoneNumber) {
+  try {
+    if (!twilioClient) {
+      return { success: false, error: 'Twilio not configured' };
+    }
+
+    const normalizedNumber = phoneNumber.startsWith('+') ? phoneNumber : `+${phoneNumber}`;
+
+    // Find the phone number
+    const numbers = await twilioClient.incomingPhoneNumbers.list({
+      phoneNumber: normalizedNumber
+    });
+
+    if (numbers.length === 0) {
+      return {
+        success: false,
+        error: `Phone number ${normalizedNumber} not found in your Twilio account`
+      };
+    }
+
+    const number = numbers[0];
+
+    // Return ALL configuration details
+    return {
+      success: true,
+      number: {
+        sid: number.sid,
+        phoneNumber: number.phoneNumber,
+        friendlyName: number.friendlyName,
+        accountSid: number.accountSid,
+        // Voice configuration
+        voiceUrl: number.voiceUrl,
+        voiceMethod: number.voiceMethod,
+        voiceFallbackUrl: number.voiceFallbackUrl,
+        voiceFallbackMethod: number.voiceFallbackMethod,
+        voiceCallerIdLookup: number.voiceCallerIdLookup,
+        voiceApplicationSid: number.voiceApplicationSid, // Important! If set, overrides voiceUrl
+        // Status callbacks
+        statusCallback: number.statusCallback,
+        statusCallbackMethod: number.statusCallbackMethod,
+        // SMS configuration
+        smsUrl: number.smsUrl,
+        smsMethod: number.smsMethod,
+        smsFallbackUrl: number.smsFallbackUrl,
+        smsFallbackMethod: number.smsFallbackMethod,
+        smsApplicationSid: number.smsApplicationSid,
+        // Capabilities
+        capabilities: number.capabilities,
+        // Trunk/SIP
+        trunkSid: number.trunkSid, // Important! If set, routes to SIP trunk instead of webhook
+        // Other
+        apiVersion: number.apiVersion,
+        emergencyStatus: number.emergencyStatus,
+        emergencyAddressSid: number.emergencyAddressSid,
+        bundleSid: number.bundleSid,
+        addressRequirements: number.addressRequirements,
+        beta: number.beta,
+        origin: number.origin,
+        dateCreated: number.dateCreated,
+        dateUpdated: number.dateUpdated
+      }
+    };
+  } catch (error) {
+    logger.error('Get phone number details error:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Clear any SIP trunk or TwiML app association and set direct webhook
+ */
+export async function resetPhoneNumberToWebhook(phoneNumber, webhookUrl, statusCallbackUrl) {
+  try {
+    if (!twilioClient) {
+      return { success: false, error: 'Twilio not configured' };
+    }
+
+    const normalizedNumber = phoneNumber.startsWith('+') ? phoneNumber : `+${phoneNumber}`;
+
+    // Find the phone number
+    const numbers = await twilioClient.incomingPhoneNumbers.list({
+      phoneNumber: normalizedNumber
+    });
+
+    if (numbers.length === 0) {
+      return {
+        success: false,
+        error: `Phone number ${normalizedNumber} not found in your Twilio account`
+      };
+    }
+
+    const numberSid = numbers[0].sid;
+
+    // Update with explicit null for trunkSid and applicationSid to clear any associations
+    const updated = await twilioClient.incomingPhoneNumbers(numberSid).update({
+      voiceUrl: webhookUrl,
+      voiceMethod: 'POST',
+      voiceApplicationSid: '', // Clear TwiML app association
+      trunkSid: '', // Clear SIP trunk association
+      voiceFallbackUrl: '',
+      voiceFallbackMethod: 'POST',
+      statusCallback: statusCallbackUrl,
+      statusCallbackMethod: 'POST'
+    });
+
+    logger.info('Phone number reset to webhook:', {
+      number: normalizedNumber,
+      voiceUrl: updated.voiceUrl,
+      clearedTrunk: !updated.trunkSid,
+      clearedApp: !updated.voiceApplicationSid
+    });
+
+    return {
+      success: true,
+      number: normalizedNumber,
+      voiceUrl: updated.voiceUrl,
+      statusCallback: updated.statusCallback,
+      trunkSid: updated.trunkSid || null,
+      voiceApplicationSid: updated.voiceApplicationSid || null
+    };
+  } catch (error) {
+    logger.error('Reset phone number error:', error);
+    return { success: false, error: error.message };
+  }
+}
+
 export default {
   validateTwilioNumber,
   listTwilioNumbers,
-  configureTwilioWebhooks
+  configureTwilioWebhooks,
+  getPhoneNumberDetails,
+  resetPhoneNumberToWebhook
 };

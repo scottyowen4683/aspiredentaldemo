@@ -31,46 +31,53 @@ export function useConversationScore(conversationId: string) {
       if (!conversationId) return null;
 
       try {
-        // First check if scores table exists and what columns it has
-        let query = supabase
-          .from('scores')
-          .select('*')
-          .eq('conversation_id', conversationId)
-          .eq('is_used', true)
-          .order('created_at', { ascending: false })
-          .limit(1);
-
-        // Apply role-based filtering
-        if (user?.role !== 'super_admin' && user?.org_id) {
-          query = query.eq('org_id', user.org_id);
-        }
-
-        const { data, error } = await query;
+        // Get score_details from conversations table (our schema stores scoring inline)
+        const { data: conversation, error } = await supabase
+          .from('conversations')
+          .select('id, org_id, overall_score, scored, score_details, created_at')
+          .eq('id', conversationId)
+          .single();
 
         if (error) {
           console.error('Error fetching conversation score:', error);
-          // If the table doesn't exist or there's a column mismatch, return null gracefully
-          if ((error as any).code === 'PGRST106' || (error as any).code === '42P01' || error.message?.includes('does not exist')) {
-            console.warn('Scores table not found or columns do not match, returning null');
-            return null;
-          }
-          throw error;
+          return null;
         }
 
-        return data && data.length > 0 ? (data[0] as ConversationScore) : null;
+        // If no score_details, return null
+        if (!conversation?.score_details || !conversation.scored) {
+          return null;
+        }
+
+        // Map score_details to ConversationScore format expected by UI
+        const scoreDetails = typeof conversation.score_details === 'string'
+          ? JSON.parse(conversation.score_details)
+          : conversation.score_details;
+
+        return {
+          id: conversation.id,
+          conversation_id: conversation.id,
+          org_id: conversation.org_id,
+          rubric_version: 1,
+          scores: scoreDetails.scores || {},
+          sentiments: scoreDetails.sentiments || {},
+          flags: scoreDetails.flags || {},
+          is_provider: false,
+          is_used: true,
+          created_at: conversation.created_at,
+          rubric_source: scoreDetails.model_used || 'gpt-4o-mini',
+          // Include additional fields from score_details
+          summary: scoreDetails.summary,
+          strengths: scoreDetails.strengths,
+          improvements: scoreDetails.improvements,
+          success_evaluation: scoreDetails.success_evaluation,
+          resident_intents: scoreDetails.resident_intents,
+          grade: scoreDetails.grade
+        } as ConversationScore;
       } catch (error) {
         console.error('Failed to fetch conversation score:', error);
         return null;
       }
     },
     enabled: !!user && !!conversationId,
-    // Add error handling to prevent crashes
-    retry: (failureCount, error) => {
-      // Don't retry if it's a schema/table issue
-      if (error?.message?.includes('does not exist') || (error as any)?.code === 'PGRST106') {
-        return false;
-      }
-      return failureCount < 3;
-    },
   });
 }

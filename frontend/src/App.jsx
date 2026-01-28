@@ -1,31 +1,47 @@
 import React from "react";
-import { BrowserRouter, Routes, Route, Link } from "react-router-dom";
+import { Routes, Route, Navigate } from "react-router-dom";
+
+import SiteLayout from "./components/SiteLayout.jsx";
+
 import Home from "./pages/Home.jsx";
-import AiReceptionist from "./pages/AiReceptionist.jsx";
-import { Toaster } from "sonner";
+import Government from "./pages/government.jsx";
+import Business from "./pages/business.jsx";
+import Admin from "./pages/admin.jsx";
+import Framework from "./pages/framework.jsx";
+
+// Agents
+import Agents from "./pages/agents.jsx";
+import AgentsVoice from "./pages/agents-voice.jsx";
+import AgentsChat from "./pages/agents-chat.jsx";
+import AgentsOutbound from "./pages/agents-outbound.jsx";
 
 export default function App() {
   return (
-    <BrowserRouter>
-      {/* Simple top nav */}
-      <nav style={{ padding: "12px 16px", borderBottom: "1px solid #eee" }}>
-        <Link to="/" style={{ marginRight: 16 }}>Home</Link>
-        <Link to="/ai-receptionist" style={{ marginRight: 16 }}>AI Receptionist</Link>
-        <a
-          href="https://calendly.com/scott-owen-aspire/ai-receptionist-demo"
-          style={{ fontWeight: 700 }}
-        >
-          Book Demo
-        </a>
-      </nav>
+    <Routes>
+      {/* ✅ Layout ALWAYS wraps */}
+      <Route path="/" element={<SiteLayout />}>
+        <Route index element={<Home />} />
 
-      {/* Route handling */}
-      <Routes>
-        <Route path="/" element={<Home />} />
-        <Route path="/ai-receptionist" element={<AiReceptionist />} />
-      </Routes>
+        {/* Core */}
+        <Route path="framework" element={<Framework />} />
+        <Route path="government" element={<Government />} />
+        <Route path="business" element={<Business />} />
 
-      <Toaster position="top-right" richColors />
-    </BrowserRouter>
+        {/* Agents */}
+        <Route path="agents" element={<Agents />} />
+        <Route path="agents/voice" element={<AgentsVoice />} />
+        <Route path="agents/chat" element={<AgentsChat />} />
+        <Route path="agents/outbound" element={<AgentsOutbound />} />
+
+        {/* Old demo path -> business */}
+        <Route path="ai-receptionist" element={<Navigate to="/business" replace />} />
+
+        {/* Admin */}
+        <Route path="admin" element={<Admin />} />
+
+        {/* Fallback */}
+        <Route path="*" element={<Home />} />
+      </Route>
+    </Routes>
   );
 }

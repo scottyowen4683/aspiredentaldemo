@@ -6,27 +6,13 @@ export interface Conversation {
   id: string;
   org_id: string;
   assistant_id: string;
-  provider: string;
-  transcript: any;
-  transcript_source: 'provider' | 'asr';
-  final_ai_summary: string | null;
-  confidence_score: number | null;
-  scored: boolean;
-  prompt_version: number | null;
-  kb_version: number | null;
-  success_evaluation: boolean;
-  total_cost: number | null;
-  call_duration: number | null;
-  cost_breakdown: any;
-  recording_url: string | null;
-  stereo_recording_url: string | null;
-  log_url: string | null;
+  session_id: string;
+  channel: string;
+  overall_score: number | null;
+  started_at: string;
+  ended_at: string | null;
   end_reason: string | null;
   created_at: string;
-  updated_at: string;
-  escalation: string | null;
-  is_voice: boolean | null;
-  sentiment: string | null;
   // Relations
   organizations?: {
     name: string;
@@ -99,10 +85,10 @@ export function useConversations(filters: ConversationsFilters = {}) {
         countQuery = countQuery.eq('provider', filters.provider);
       }
       if (filters.flagged) {
-        countQuery = countQuery.or('confidence_score.lt.70,success_evaluation.eq.false');
+        countQuery = countQuery.lt('overall_score', 70);
       }
       if (filters.low_confidence) {
-        countQuery = countQuery.lt('confidence_score', 70);
+        countQuery = countQuery.lt('overall_score', 70);
       }
       if (filters.date_from) {
         countQuery = countQuery.gte('created_at', filters.date_from);
@@ -111,10 +97,10 @@ export function useConversations(filters: ConversationsFilters = {}) {
         countQuery = countQuery.lte('created_at', filters.date_to);
       }
       if (filters.score_min !== undefined) {
-        countQuery = countQuery.gte('confidence_score', filters.score_min);
+        countQuery = countQuery.gte('overall_score', filters.score_min);
       }
       if (filters.score_max !== undefined) {
-        countQuery = countQuery.lte('confidence_score', filters.score_max);
+        countQuery = countQuery.lte('overall_score', filters.score_max);
       }
 
       // Get total count
@@ -161,11 +147,11 @@ export function useConversations(filters: ConversationsFilters = {}) {
 
       // Apply status filters
       if (filters.flagged) {
-        query = query.or('confidence_score.lt.70,success_evaluation.eq.false');
+        query = query.lt('overall_score', 70);
       }
 
       if (filters.low_confidence) {
-        query = query.lt('confidence_score', 70);
+        query = query.lt('overall_score', 70);
       }
 
       // Apply new enhanced filters
@@ -178,15 +164,11 @@ export function useConversations(filters: ConversationsFilters = {}) {
       }
 
       if (filters.score_min !== undefined) {
-        query = query.gte('confidence_score', filters.score_min);
+        query = query.gte('overall_score', filters.score_min);
       }
 
       if (filters.score_max !== undefined) {
-        query = query.lte('confidence_score', filters.score_max);
-      }
-
-      if (filters.sentiment && filters.sentiment !== 'all') {
-        query = query.eq('sentiment', filters.sentiment);
+        query = query.lte('overall_score', filters.score_max);
       }
 
       // Escalation status would require additional database fields

@@ -193,9 +193,9 @@ export default function ConversationDetails() {
   };
 
   const getStatusText = (conversation: any) => {
-
-    if (conversation.confidence_score > 0 && conversation.scored === true) {
-
+    // Use overall_score (our schema) or confidence_score (legacy)
+    const score = conversation.overall_score || conversation.confidence_score;
+    if (score > 0 && conversation.scored === true) {
       if (conversation.success_evaluation === true) return "Success";
       if (conversation.success_evaluation === false) return "Failed";
       return "Evaluated";
@@ -204,7 +204,9 @@ export default function ConversationDetails() {
   };
 
   const getStatusVariant = (conversation: any) => {
-    if (conversation.confidence_score > 0 && conversation.scored === true) {
+    // Use overall_score (our schema) or confidence_score (legacy)
+    const score = conversation.overall_score || conversation.confidence_score;
+    if (score > 0 && conversation.scored === true) {
       if (conversation.success_evaluation === true) return "default";
       if (conversation.success_evaluation === false) return "destructive";
       return "outline";
@@ -470,14 +472,25 @@ export default function ConversationDetails() {
               </p>
             </div>
           </div>
-          <div className="flex flex-col space-y-2 sm:flex-row sm:space-y-0 sm:space-x-3">
+          <div className="flex flex-col space-y-2 sm:flex-row sm:space-y-0 sm:space-x-3 items-start">
             {conversation.recording_url && (
-              <Button variant="outline" asChild className="w-full sm:w-auto">
-                <a href={conversation.recording_url} target="_blank" rel="noopener noreferrer">
-                  <Play className="mr-2 h-4 w-4" />
-                  Play Recording
-                </a>
-              </Button>
+              <div className="flex flex-col space-y-2 w-full sm:w-auto">
+                <audio
+                  controls
+                  className="w-full sm:w-80"
+                  src={conversation.recording_url.endsWith('.mp3') || conversation.recording_url.endsWith('.wav')
+                    ? conversation.recording_url
+                    : `${conversation.recording_url}.mp3`}
+                >
+                  Your browser does not support audio playback.
+                </audio>
+                <Button variant="outline" asChild size="sm" className="w-full sm:w-auto">
+                  <a href={`${conversation.recording_url}.mp3`} download>
+                    <Play className="mr-2 h-4 w-4" />
+                    Download Recording
+                  </a>
+                </Button>
+              </div>
             )}
             {conversation.log_url && (
               <Button variant="outline" asChild className="w-full sm:w-auto">
@@ -498,7 +511,7 @@ export default function ConversationDetails() {
                 <Clock className="h-5 w-5 text-muted-foreground" />
                 <div>
                   <div className="text-2xl font-bold text-foreground">
-                    {formatDuration(conversation.call_duration)}
+                    {formatDuration(conversation.duration_seconds || conversation.call_duration)}
                   </div>
                   <div className="text-sm text-muted-foreground">Duration</div>
                 </div>
@@ -528,15 +541,15 @@ export default function ConversationDetails() {
                 <AlertCircle className="h-5 w-5 text-muted-foreground" />
                 <div>
                   <div className="text-2xl font-bold text-foreground">
-                    {conversation.confidence_score ? (
-                      <Badge variant={conversation.confidence_score >= 80 ? "default" : conversation.confidence_score >= 60 ? "secondary" : "destructive"}>
-                        {conversation.confidence_score}%
+                    {(conversation.overall_score || conversation.confidence_score) ? (
+                      <Badge variant={(conversation.overall_score || conversation.confidence_score) >= 80 ? "default" : (conversation.overall_score || conversation.confidence_score) >= 60 ? "secondary" : "destructive"}>
+                        {conversation.overall_score || conversation.confidence_score}%
                       </Badge>
                     ) : (
                       <Badge variant="secondary">N/A</Badge>
                     )}
                   </div>
-                  <div className="text-sm text-muted-foreground">Confidence Score</div>
+                  <div className="text-sm text-muted-foreground">Overall Score</div>
                 </div>
               </div>
             </CardContent>

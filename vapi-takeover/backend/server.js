@@ -6,24 +6,34 @@ import { WebSocketServer } from 'ws';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import dotenv from 'dotenv';
+import twilio from 'twilio';
 import logger from './services/logger.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 import supabaseService from './services/supabase-service.js';
 import VoiceHandler from './ai/voice-handler.js';
+import { streamElevenLabsAudio } from './ai/elevenlabs.js';
 
 // Routes
 import chatRouter from './routes/chat.js';
 import voiceRouter from './routes/voice.js';
 import adminRouter from './routes/admin.js';
 import campaignsRouter from './routes/campaigns.js';
+import invitationsRouter from './routes/invitations.js';
+import usersRouter from './routes/users.js';
 
 dotenv.config();
 
 const app = express();
 const server = createServer(app);
 const wss = new WebSocketServer({ server, path: '/voice/stream' });
+
+// Initialize Twilio client for recording
+const twilioClient = twilio(
+  process.env.TWILIO_ACCOUNT_SID,
+  process.env.TWILIO_AUTH_TOKEN
+);
 
 // Middleware
 app.use(cors());
@@ -66,11 +76,13 @@ app.use('/api/chat', chatRouter);
 app.use('/api/voice', voiceRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/campaigns', campaignsRouter);
+app.use('/api/invitations', invitationsRouter);
+app.use('/api/users', usersRouter);
 
 // SPA catch-all: serve index.html for all non-API routes (React Router handles client-side routing)
 app.get('*', (req, res, next) => {
-  // Skip API routes and static files
-  if (req.path.startsWith('/api/') || req.path.startsWith('/voice/')) {
+  // Skip API routes, voice routes, and static widget files
+  if (req.path.startsWith('/api/') || req.path.startsWith('/voice/') || req.path.startsWith('/widget/')) {
     return next();
   }
   res.sendFile(join(__dirname, 'public', 'index.html'));
@@ -81,6 +93,7 @@ wss.on('connection', async (ws, req) => {
   logger.info('WebSocket connection established');
 
   let voiceHandler = null;
+  let mediaChunkCount = 0;
 
   ws.on('message', async (message) => {
     try {
@@ -93,8 +106,10 @@ wss.on('connection', async (ws, req) => {
             callSid: data.start.callSid
           });
 
-          // Get assistant ID from custom parameters (set by Twilio webhook)
+          // Get assistant ID and caller number from custom parameters (set by Twilio webhook)
           const assistantId = data.start.customParameters?.assistantId;
+          const callerNumber = data.start.customParameters?.callerNumber;
+          const callSid = data.start.callSid;
 
           if (!assistantId) {
             logger.error('No assistantId in call parameters');
@@ -102,35 +117,245 @@ wss.on('connection', async (ws, req) => {
             return;
           }
 
-          // Initialize voice handler
-          voiceHandler = new VoiceHandler(data.start.callSid, assistantId);
+          // Start recording for this call via Twilio REST API
+          // This records both sides of the conversation (dual-channel)
+          try {
+            const baseUrl = process.env.BASE_URL || `https://${process.env.FLY_APP_NAME}.fly.dev`;
+            const recordingCallbackUrl = `${baseUrl}/api/voice/recording`;
+            logger.info('Starting recording with callback URL', { callSid, recordingCallbackUrl });
+
+            const recording = await twilioClient.calls(callSid).recordings.create({
+              recordingChannels: 'dual',
+              recordingStatusCallback: recordingCallbackUrl,
+              recordingStatusCallbackMethod: 'POST'
+            });
+            logger.info('Recording started successfully', { callSid, recordingSid: recording.sid });
+          } catch (recordError) {
+            // Don't fail the call if recording fails
+            logger.error('Failed to start recording:', {
+              error: recordError.message,
+              code: recordError.code,
+              callSid
+            });
+          }
+
+          // Initialize voice handler with caller number
+          voiceHandler = new VoiceHandler(callSid, assistantId, callerNumber);
+          const streamSid = data.streamSid; // Capture for use in callbacks
 
           try {
             await voiceHandler.initialize();
 
-            // Set speech end callback
-            voiceHandler.audioBuffer.onSpeechEnd(async () => {
-              try {
-                const result = await voiceHandler.onSpeechEnd();
+            // Send initial greeting with ElevenLabs voice IMMEDIATELY
+            // This is what makes it feel like VAPI - instant AI voice response
+            const greeting = voiceHandler.assistant.first_message ||
+              `Hi! How can I help you today?`;
 
-                if (result) {
-                  // Send audio response back to Twilio
-                  const audioBase64 = result.audioStream.toString('base64');
+            logger.info('Sending ElevenLabs greeting', { greeting });
 
+            const voiceId = voiceHandler.assistant.elevenlabs_voice_id ||
+              process.env.ELEVENLABS_VOICE_ID ||
+              'EXAVITQu4vr4xnSDxMaL'; // Default: "Sarah" voice
+
+            try {
+              // DISABLED: Synthetic background noise causes crackling on phone audio
+              // TODO: Re-enable when we have proper pre-recorded ambient audio files
+              // const backgroundSound = voiceHandler.assistant.background_sound || 'office';
+              const backgroundSound = 'none'; // Force disable synthetic noise
+              const backgroundVolume = 0.40; // Not used when backgroundSound is 'none'
+
+              // Debug logging for background sound
+              logger.info('Background sound settings', {
+                assistantId: voiceHandler.assistant.id,
+                background_sound_raw: voiceHandler.assistant.background_sound,
+                background_volume_raw: voiceHandler.assistant.background_volume,
+                effectiveSound: backgroundSound,
+                effectiveVolume: backgroundVolume,
+                note: 'Synthetic noise disabled - causes crackling'
+              });
+
+              const greetingAudio = await streamElevenLabsAudio(greeting, voiceId, {
+                backgroundSound,
+                backgroundVolume
+              });
+
+              logger.info('ElevenLabs greeting received', {
+                audioSizeKB: (greetingAudio.length / 1024).toFixed(2),
+                audioBytes: greetingAudio.length,
+                durationMs: Math.round(greetingAudio.length / 8) // 8 samples per ms at 8kHz
+              });
+
+              // Send entire greeting as one large chunk for smooth playback
+              // Twilio buffers internally and this prevents stuttering from chunk boundaries
+              // For very long greetings (>16KB), split into larger chunks
+              const MAX_CHUNK_SIZE = 16000; // 16KB = 2 seconds of smooth audio
+
+              if (greetingAudio.length <= MAX_CHUNK_SIZE) {
+                // Send as single chunk for best quality
+                if (ws.readyState === 1) {
                   ws.send(JSON.stringify({
                     event: 'media',
-                    streamSid: data.streamSid,
+                    streamSid: streamSid,
                     media: {
-                      payload: audioBase64
+                      payload: greetingAudio.toString('base64')
                     }
                   }));
+                }
+              } else {
+                // For longer greetings, use larger chunks with small delays
+                for (let offset = 0; offset < greetingAudio.length; offset += MAX_CHUNK_SIZE) {
+                  const chunk = greetingAudio.slice(offset, Math.min(offset + MAX_CHUNK_SIZE, greetingAudio.length));
+
+                  if (ws.readyState === 1) {
+                    ws.send(JSON.stringify({
+                      event: 'media',
+                      streamSid: streamSid,
+                      media: {
+                        payload: chunk.toString('base64')
+                      }
+                    }));
+
+                    // Small delay between large chunks to prevent buffer overflow
+                    if (offset + MAX_CHUNK_SIZE < greetingAudio.length) {
+                      await new Promise(resolve => setTimeout(resolve, 50));
+                    }
+                  } else {
+                    logger.warn('WebSocket not open, cannot send audio', { readyState: ws.readyState });
+                    break;
+                  }
+                }
+              }
+
+              logger.info('ElevenLabs greeting fully sent');
+
+            } catch (greetingError) {
+              logger.error('Failed to send ElevenLabs greeting:', greetingError);
+              // Continue anyway - conversation can still work
+            }
+
+            // Helper function to process speech and send audio
+            const processSpeechAndRespond = async (useStreamingTranscript = false) => {
+              try {
+                logger.info('Speech end detected, starting response', { useStreamingTranscript });
+
+                // Buffer all audio chunks, then send as smooth large chunks
+                const audioChunks = [];
+
+                // Use streaming transcription if available (MUCH faster!)
+                const result = useStreamingTranscript && voiceHandler.streamingTranscriber
+                  ? await voiceHandler.onSpeechEndWithStreaming((audioChunk) => {
+                      audioChunks.push(audioChunk);
+                    })
+                  : await voiceHandler.onSpeechEndStreaming((audioChunk) => {
+                      audioChunks.push(audioChunk);
+                    });
+
+                // Now send buffered audio as large smooth chunks (like greeting)
+                if (audioChunks.length > 0 && ws.readyState === 1) {
+                  const fullAudio = Buffer.concat(audioChunks);
+                  const MAX_CHUNK_SIZE = 16000; // 16KB = 2 seconds of smooth audio
+
+                  logger.info('Sending buffered audio', {
+                    totalBytes: fullAudio.length,
+                    chunks: Math.ceil(fullAudio.length / MAX_CHUNK_SIZE)
+                  });
+
+                  for (let offset = 0; offset < fullAudio.length; offset += MAX_CHUNK_SIZE) {
+                    const chunk = fullAudio.slice(offset, Math.min(offset + MAX_CHUNK_SIZE, fullAudio.length));
+
+                    if (ws.readyState === 1) {
+                      ws.send(JSON.stringify({
+                        event: 'media',
+                        streamSid: streamSid,
+                        media: {
+                          payload: chunk.toString('base64')
+                        }
+                      }));
+
+                      // Small delay between chunks to prevent buffer issues
+                      if (offset + MAX_CHUNK_SIZE < fullAudio.length) {
+                        await new Promise(resolve => setTimeout(resolve, 20));
+                      }
+                    }
+                  }
+                }
+
+                if (result) {
+                  logger.info('Streaming response complete', {
+                    transcription: result.transcription,
+                    responsePreview: result.responseText?.substring(0, 50) + '...',
+                    latencyMs: result.latency,
+                    shouldEndCall: result.shouldEndCall
+                  });
+
+                  // If AI said goodbye or user ended conversation, hang up after audio plays
+                  if (result.shouldEndCall) {
+                    logger.info('End call detected, hanging up after audio completes', {
+                      callSid,
+                      transcription: result.transcription
+                    });
+
+                    // Wait for audio to finish playing (estimate based on response length)
+                    // ~150 chars per second at normal speaking pace
+                    const audioPlaybackMs = Math.max(2000, (result.responseText?.length || 0) * 7);
+
+                    setTimeout(async () => {
+                      try {
+                        // End the call gracefully via Twilio REST API
+                        await twilioClient.calls(callSid).update({ status: 'completed' });
+                        logger.info('Call ended successfully via Twilio API', { callSid });
+                      } catch (hangupError) {
+                        // Twilio REST API may fail for Media Stream calls - that's OK
+                        // Closing the WebSocket will end the stream and call
+                        logger.warn('Twilio API hangup failed (expected for Media Streams), closing WebSocket', {
+                          error: hangupError.message,
+                          callSid
+                        });
+                      }
+
+                      // Clean up voice handler
+                      if (voiceHandler) {
+                        await voiceHandler.endCall('completed');
+                        voiceHandler = null;
+                      }
+
+                      // Close WebSocket to end the media stream (this will end the call)
+                      if (ws.readyState === ws.OPEN) {
+                        ws.close(1000, 'Call ended gracefully');
+                        logger.info('WebSocket closed to end call', { callSid });
+                      }
+                    }, audioPlaybackMs);
+                  }
                 }
               } catch (error) {
                 logger.error('Error processing speech:', error);
               }
-            });
+            };
 
-            logger.info('Voice handler initialized');
+            // Set up speech end callbacks
+            // When streaming is available, use it exclusively (no VAD race condition)
+            // VAD is only used as fallback when streaming is NOT available
+
+            if (voiceHandler.streamingTranscriber) {
+              // Use Deepgram streaming ONLY - it has built-in VAD
+              // This avoids race condition between VAD and streaming
+              voiceHandler.onStreamingSpeechEnd = async (transcript) => {
+                logger.info('🚀 Using STREAMING transcription', { transcript: transcript.substring(0, 30) });
+                await processSpeechAndRespond(true);
+              };
+
+              // Don't set up VAD callback - streaming handles everything
+              logger.info('Using Deepgram streaming exclusively (VAD disabled)');
+            } else {
+              // No streaming transcriber - use VAD only
+              voiceHandler.audioBuffer.onSpeechEnd(async () => {
+                await processSpeechAndRespond(false);
+              });
+            }
+
+            logger.info('Voice handler initialized with ElevenLabs', {
+              streamingTranscriber: !!voiceHandler.streamingTranscriber
+            });
           } catch (error) {
             logger.error('Failed to initialize voice handler:', error);
             ws.close();
@@ -139,6 +364,13 @@ wss.on('connection', async (ws, req) => {
 
         case 'media':
           // Incoming audio from user
+          mediaChunkCount++;
+          if (mediaChunkCount === 1 || mediaChunkCount % 100 === 0) {
+            logger.info('Receiving audio', {
+              chunkNumber: mediaChunkCount,
+              payloadLength: data.media?.payload?.length || 0
+            });
+          }
           if (voiceHandler && data.media?.payload) {
             await voiceHandler.processAudioChunk(data.media.payload);
           }

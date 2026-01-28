@@ -28,7 +28,6 @@ export function AddOrganizationModal({ open, onOpenChange, onSuccess }: AddOrgan
     servicePlanName: "",
     monthlyServiceFee: 0,
     baselineHumanCostPerCall: 0,
-    coverageHours: "12hr",
     timeZone: "",
   });
   const [isLoading, setIsLoading] = useState(false);
@@ -47,7 +46,6 @@ export function AddOrganizationModal({ open, onOpenChange, onSuccess }: AddOrgan
     servicePlanName: "",
     monthlyServiceFee: 0,
     baselineHumanCostPerCall: 0,
-    coverageHours: "12hr" as const,
     timeZone: "",
   });
 
@@ -79,42 +77,6 @@ export function AddOrganizationModal({ open, onOpenChange, onSuccess }: AddOrgan
       toast({
         title: "Validation Error",
         description: "Please enter a valid email address.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    if (!formData.servicePlanName.trim()) {
-      toast({
-        title: "Validation Error",
-        description: "Service plan name is required.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    if (formData.monthlyServiceFee <= 0) {
-      toast({
-        title: "Validation Error",
-        description: "Monthly service fee must be greater than 0.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    if (formData.baselineHumanCostPerCall <= 0) {
-      toast({
-        title: "Validation Error",
-        description: "Baseline human cost per call must be greater than 0.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    if (!formData.timeZone.trim()) {
-      toast({
-        title: "Validation Error",
-        description: "Time zone is required.",
         variant: "destructive",
       });
       return;
@@ -259,7 +221,7 @@ export function AddOrganizationModal({ open, onOpenChange, onSuccess }: AddOrgan
               </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="monthlyServiceFee">Monthly Service Fee ($)</Label>
                 <Input
@@ -288,23 +250,6 @@ export function AddOrganizationModal({ open, onOpenChange, onSuccess }: AddOrgan
                   disabled={isLoading}
                   className="w-full"
                 />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="coverageHours">Coverage Hours</Label>
-                <Select
-                  value={formData.coverageHours}
-                  onValueChange={(value: "12hr" | "24hr") => handleInputChange("coverageHours", value)}
-                  disabled={isLoading}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select coverage" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="12hr">12 Hours</SelectItem>
-                    <SelectItem value="24hr">24 Hours</SelectItem>
-                  </SelectContent>
-                </Select>
               </div>
             </div>
           </div>

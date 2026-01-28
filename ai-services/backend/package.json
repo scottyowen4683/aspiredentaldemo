@@ -1,0 +1,22 @@
+{
+  "name": "aspire-ai-services",
+  "version": "1.0.0",
+  "description": "Aspire AI Services - Self-hosted voice AI platform",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "build": "cd frontend && npm run build"
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "twilio": "^4.21.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

@@ -12,6 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useUser } from "@/context/UserContext";
 import {
   Copy,
   Code,
@@ -30,6 +31,8 @@ interface IntegrationModalProps {
   assistantId: string;
   assistantName: string;
   assistantType: "voice" | "chat" | "both";
+  pilotEnabled?: boolean;
+  pilotSlug?: string | null;
 }
 
 interface EmbedCodeData {
@@ -81,8 +84,11 @@ export default function IntegrationModal({
   assistantId,
   assistantName,
   assistantType,
+  pilotEnabled,
+  pilotSlug,
 }: IntegrationModalProps) {
   const { toast } = useToast();
+  const { user } = useUser();
   const [loading, setLoading] = useState(false);
   const [embedData, setEmbedData] = useState<EmbedCodeData | null>(null);
   const [copiedField, setCopiedField] = useState<string | null>(null);
@@ -182,8 +188,18 @@ export default function IntegrationModal({
             <Skeleton className="h-48 w-full" />
           </div>
         ) : embedData ? (
-          <Tabs defaultValue={assistantType === "voice" ? "voice" : "chat"} className="mt-4">
-            <TabsList className="grid w-full grid-cols-2">
+          // Only show pilot tab for super_admin users
+          (() => {
+            const showPilotTab = pilotEnabled && pilotSlug && user?.role === "super_admin";
+            return (
+          <Tabs defaultValue={showPilotTab ? "pilot" : (assistantType === "voice" ? "voice" : "chat")} className="mt-4">
+            <TabsList className={`grid w-full ${showPilotTab ? 'grid-cols-3' : 'grid-cols-2'}`}>
+              {showPilotTab && (
+                <TabsTrigger value="pilot" className="flex items-center gap-2">
+                  <Globe className="h-4 w-4" />
+                  Pilot Page
+                </TabsTrigger>
+              )}
               {(assistantType === "chat" || assistantType === "both") && (
                 <TabsTrigger value="chat" className="flex items-center gap-2">
                   <MessageSquare className="h-4 w-4" />
@@ -197,6 +213,76 @@ export default function IntegrationModal({
                 </TabsTrigger>
               )}
             </TabsList>
+
+            {/* Pilot Page Integration - Super admin only */}
+            {showPilotTab && (
+              <TabsContent value="pilot" className="space-y-6 mt-4">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <Globe className="h-4 w-4" />
+                      Pilot Demo Page
+                    </CardTitle>
+                    <CardDescription>
+                      A standalone demo page for this chatbot with your client's branding.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {/* Direct URL */}
+                    <div>
+                      <p className="text-sm font-medium mb-2">Direct URL</p>
+                      <div className="flex items-center gap-2">
+                        <code className="flex-1 text-sm bg-slate-950 text-slate-50 px-4 py-3 rounded-lg">
+                          {window.location.origin}/pilot/{pilotSlug}
+                        </code>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => copyToClipboard(`${window.location.origin}/pilot/${pilotSlug}`, "Pilot URL")}
+                        >
+                          {copiedField === "Pilot URL" ? (
+                            <CheckCircle className="h-4 w-4 text-green-500" />
+                          ) : (
+                            <Copy className="h-4 w-4" />
+                          )}
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => window.open(`/pilot/${pilotSlug}`, '_blank')}
+                        >
+                          <ExternalLink className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+
+                    {/* QR Code placeholder */}
+                    <div className="p-4 bg-green-50 dark:bg-green-950/30 rounded-lg border border-green-200 dark:border-green-900">
+                      <p className="text-sm text-green-800 dark:text-green-200">
+                        <strong>Perfect for:</strong> Pilot deployments, stakeholder demos, and evaluation periods.
+                        Share this URL with reviewers to test the AI assistant.
+                      </p>
+                    </div>
+
+                    {/* Iframe Embed */}
+                    <div>
+                      <p className="text-sm font-medium mb-2">Embed as iframe</p>
+                      <CodeBlock
+                        code={`<iframe
+  src="${window.location.origin}/pilot/${pilotSlug}"
+  width="100%"
+  height="800"
+  frameborder="0"
+  allow="microphone"
+></iframe>`}
+                        language="html"
+                        fieldName="Pilot Iframe"
+                      />
+                    </div>
+                  </CardContent>
+                </Card>
+              </TabsContent>
+            )}
 
             {/* Chat Integration */}
             {embedData.embedCodes.chat && (
@@ -427,6 +513,8 @@ export default function IntegrationModal({
               </TabsContent>
             )}
           </Tabs>
+            );
+          })()
         ) : (
           <div className="py-8 text-center text-muted-foreground">
             <p>No integration data available</p>

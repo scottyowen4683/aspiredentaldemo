@@ -156,55 +156,48 @@ export default function Auth() {
         sessionStorage.clear();
         console.log("✅ Local storage cleared");
 
-        // Query the invite using the public anon key (this should work without auth)
-        const { data, error } = await supabase
-          .from("invites")
-          .select("*")
-          .eq("token", inviteToken)
-          .maybeSingle(); // returns null if not found
+        // Use backend API to validate invite (bypasses RLS)
+        const apiBaseUrl = import.meta.env.VITE_API_URL || '';
+        const response = await fetch(`${apiBaseUrl}/api/invitations/validate/${inviteToken}`);
+        const result = await response.json();
 
-        if (error) {
-          console.error("❌ Error fetching invite:", error);
-          toast({
-            title: "Invalid Invitation",
-            description: "Could not find this invitation. It may have expired.",
-            variant: "destructive",
-          });
-        } else if (data) {
-          console.log("✅ Invite found:", data);
+        if (!response.ok) {
+          console.error("❌ Invite validation failed:", result.message);
 
-          // Check if invite is expired
-          const expiresAt = new Date(data.expires_at);
-          if (expiresAt < new Date()) {
-            console.log("❌ Invite expired on:", expiresAt);
+          if (result.expired) {
             toast({
               title: "Invitation Expired",
-              description: "This invitation has expired. Please contact your administrator.",
+              description: result.message,
               variant: "destructive",
             });
-            return;
-          }
-
-          // Check if invite already accepted
-          if (data.accepted) {
-            console.log("❌ Invite already accepted");
+          } else if (result.accepted) {
             toast({
               title: "Invitation Already Used",
-              description: "This invitation has already been accepted.",
+              description: result.message,
               variant: "destructive",
             });
-            return;
+          } else {
+            toast({
+              title: "Invalid Invitation",
+              description: result.message || "This invitation link is not valid.",
+              variant: "destructive",
+            });
           }
+          return;
+        }
+
+        if (result.success && result.invitation) {
+          console.log("✅ Invite validated:", result.invitation);
 
           setIsInviteFlow(true);
-          setSignupData((prev) => ({ ...prev, email: data.email }));
+          setSignupData((prev) => ({ ...prev, email: result.invitation.email }));
 
           toast({
             title: "Welcome!",
-            description: `Create your account to join the organization.`,
+            description: `Create your account to join ${result.invitation.organizationName || 'the organization'}.`,
           });
         } else {
-          console.log("❌ No invite found for token:", inviteToken);
+          console.log("❌ Unexpected response:", result);
           toast({
             title: "Invalid Invitation",
             description: "This invitation link is not valid.",
@@ -215,7 +208,7 @@ export default function Auth() {
         console.error("💥 Error in checkInvite:", err);
         toast({
           title: "Error",
-          description: "An error occurred while processing the invitation.",
+          description: "An error occurred while processing the invitation. Please try again.",
           variant: "destructive",
         });
       }
@@ -353,69 +346,110 @@ export default function Auth() {
       return;
     }
 
-    try {
+    // Ensure email is set from invitation
+    if (!signupData.email) {
+      toast({
+        title: "Missing email",
+        description: "Could not retrieve email from invitation. Please refresh the page and try again.",
+        variant: "destructive",
+      });
+      setIsLoading(false);
+      return;
+    }
 
+    try {
       await signupValidationSchema.validate(signupData, { abortEarly: false });
       setSignupErrors({});
 
-      const { data, error } = await supabase.auth.signUp({
-        email: signupData.email,
-        password: signupData.password,
-        options: {
-          data: { full_name: signupData.fullName },
+      // Use backend signup endpoint (creates user with email already confirmed)
+      const apiBaseUrl = import.meta.env.VITE_API_URL || '';
+      const response = await fetch(`${apiBaseUrl}/api/invitations/signup`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
         },
+        body: JSON.stringify({
+          token: inviteToken,
+          email: signupData.email,
+          password: signupData.password,
+          fullName: signupData.fullName
+        })
       });
 
-      if (error) {
+      const result = await response.json();
+
+      if (!response.ok) {
         toast({
           title: "Signup failed",
-          description: error.message,
+          description: result.message || "Failed to create account",
           variant: "destructive",
         });
         return;
       }
 
-      if (data.user) {
-        console.log('User signed up successfully with invitation:', data.user.id);
-        console.log('Signup with invitation token:', inviteToken);
+      if (result.success) {
+        console.log('User created via backend API:', result.userId);
 
         toast({
           title: "Account created!",
-          description: "Processing your invitation...",
+          description: "Signing you in...",
         });
 
-        // Process invitation immediately after signup
-        try {
-          const result = await processInvitation(inviteToken, data.user.id);
+        // Sign in with the credentials just created
+        const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+          email: signupData.email,
+          password: signupData.password,
+        });
 
-          if (result.success) {
-            // Force refresh user data to get the updated org_id
-            await refreshUser();
-
-            toast({
-              title: "Welcome!",
-              description: result.message,
-            });
-
-            // Redirect to dashboard after successful invitation processing
-            navigate("/dashboard", { replace: true });
-          } else {
-            toast({
-              title: "Invitation Error",
-              description: result.message,
-              variant: "destructive",
-            });
-          }
-        } catch (inviteError) {
-          console.error('Error processing invitation:', inviteError);
+        if (signInError) {
+          console.error('Sign in after signup failed:', signInError);
           toast({
-            title: "Invitation Error",
-            description: "There was an issue processing your invitation. Please contact support.",
+            title: "Sign-in Error",
+            description: "Account created but couldn't sign in automatically. Please use the login page.",
             variant: "destructive",
           });
+          // Navigate to login instead
+          navigate("/auth", { replace: true });
+          return;
+        }
+
+        if (signInData.session) {
+          // Force refresh user data
+          await refreshUser();
+
+          toast({
+            title: "Welcome!",
+            description: result.message,
+          });
+
+          // Check MFA status and redirect appropriately
+          const { data: aalData, error: aalError } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+
+          if (aalError) {
+            console.error('MFA check error:', aalError);
+            // Default to MFA enrollment for new users
+            window.location.href = "/emf";
+            return;
+          }
+
+          if (aalData.currentLevel === 'aal1' && aalData.nextLevel === 'aal2') {
+            // User has enrolled MFA but not verified yet
+            window.location.href = "/vmf";
+          } else if (aalData.currentLevel === 'aal1' && aalData.nextLevel === 'aal1') {
+            // User has not enrolled MFA yet - this is expected for new users
+            window.location.href = "/emf";
+          } else {
+            // User has already verified MFA (unlikely for new signup)
+            window.location.href = "/dashboard";
+          }
         }
       }
     } catch (error) {
+      if (error.inner) {
+        const formErrors = {};
+        error.inner.forEach((e) => (formErrors[e.path] = e.message));
+        setSignupErrors(formErrors);
+      }
       console.error('Signup error:', error);
       toast({
         title: "Signup failed",
@@ -619,6 +653,21 @@ export default function Auth() {
                 {/* SIGNUP FORM - Only for invite flow */}
                 <TabsContent value="signup">
                   <form onSubmit={handleSignup} className="space-y-4">
+                    {/* Email - auto-filled from invite or manual entry */}
+                    <div className="space-y-2">
+                      <Label htmlFor="signup-email">Email</Label>
+                      <Input
+                        id="signup-email"
+                        type="email"
+                        placeholder="Enter the email your invitation was sent to"
+                        value={signupData.email}
+                        onChange={(e) => setSignupData({ ...signupData, email: e.target.value })}
+                        required
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Enter the email address where you received the invitation.
+                      </p>
+                    </div>
                     <div className="space-y-2">
                       <Label htmlFor="signup-name">Full Name</Label>
                       <Input
@@ -640,17 +689,6 @@ export default function Auth() {
                         <p className="text-red-500 text-sm mt-1">{signupErrors.fullName}</p>
                       )}
                     </div>
-                    {/* <div className="space-y-2">
-                      <Label htmlFor="signup-email">Email</Label>
-                      <Input
-                        id="signup-email"
-                        type="email"
-                        placeholder="you@example.com"
-                        value={signupData.email}
-                        onChange={(e) => setSignupData({ ...signupData, email: e.target.value })}
-                        required
-                      />
-                    </div> */}
                     {/* <div className="space-y-2">
                       <Label htmlFor="signup-password">Password</Label>
                       <Input

@@ -7,23 +7,88 @@ import supabaseService from '../services/supabase-service.js';
 const router = express.Router();
 const VoiceResponse = twilio.twiml.VoiceResponse;
 
+// Debug: echo what we receive
+router.post('/echo', (req, res) => {
+  logger.info('Echo endpoint hit:', {
+    body: req.body,
+    headers: req.headers,
+    contentType: req.get('content-type')
+  });
+  res.json({ received: req.body });
+});
+
+// Debug: Test TwiML generation without a real call
+router.get('/test-twiml', async (req, res) => {
+  try {
+    const response = new VoiceResponse();
+    response.say({ voice: 'Polly.Joanna' }, 'Hi, how can I help you?');
+    const connect = response.connect();
+    const stream = connect.stream({
+      url: `wss://${req.headers.host}/voice/stream`
+    });
+    stream.parameter({ name: 'assistantId', value: 'test-123' });
+    stream.parameter({ name: 'callerNumber', value: '+1234567890' });
+
+    res.type('text/xml');
+    res.send(response.toString());
+  } catch (error) {
+    logger.error('TwiML test error:', error);
+    res.status(500).json({ error: error.message, stack: error.stack });
+  }
+});
+
 // POST /api/voice/incoming
 // Twilio webhook for incoming calls
 router.post('/incoming', async (req, res) => {
   try {
-    const { From, To, CallSid } = req.body;
+    // Extract and normalize phone numbers (trim whitespace, handle URL encoding)
+    const From = (req.body.From || '').trim();
+    const To = (req.body.To || '').trim();
+    const CallSid = req.body.CallSid;
 
-    logger.info('Incoming voice call', {
+    // Ensure + prefix is present (URL encoding can turn + into space)
+    const normalizedTo = To.startsWith('+') ? To : (To ? `+${To}` : '');
+    const normalizedFrom = From.startsWith('+') ? From : (From ? `+${From}` : '');
+
+    // Detect call direction (outbound-api for outbound calls)
+    const direction = req.body.Direction || 'inbound';
+    const isOutbound = direction.includes('outbound');
+
+    logger.info('Voice call received', {
       from: From,
       to: To,
-      callSid: CallSid
+      normalizedTo,
+      normalizedFrom,
+      callSid: CallSid,
+      direction
     });
 
-    // Look up assistant by phone number
-    const assistant = await supabaseService.getAssistantByPhoneNumber(To);
+    // For inbound calls: look up by To (the Twilio number being called)
+    // For outbound calls: look up by From (the Twilio number making the call)
+    const lookupNumber = isOutbound ? normalizedFrom : normalizedTo;
+
+    if (!lookupNumber) {
+      logger.error('No phone number to look up!', { body: req.body });
+      const response = new VoiceResponse();
+      response.say({ voice: 'Polly.Joanna' }, 'Error: No phone number provided.');
+      response.hangup();
+      res.type('text/xml');
+      return res.send(response.toString());
+    }
+
+    // Look up assistant by the appropriate phone number
+    logger.info('Looking up assistant by:', { lookupNumber, isOutbound });
+    let assistant = await supabaseService.getAssistantByPhoneNumber(lookupNumber);
+
+    // Fallback: if not found, try the other number
+    if (!assistant) {
+      const fallbackNumber = isOutbound ? normalizedTo : normalizedFrom;
+      logger.info('Not found, trying fallback:', fallbackNumber);
+      assistant = await supabaseService.getAssistantByPhoneNumber(fallbackNumber);
+    }
 
     if (!assistant) {
-      logger.warn('No assistant found for phone number:', To);
+      logger.warn('No assistant found for phone numbers:', { To, From });
 
       const response = new VoiceResponse();
       response.say({
@@ -41,30 +106,23 @@ router.post('/incoming', async (req, res) => {
       assistantName: assistant.friendly_name
     });
 
-    // Create TwiML response
+    // Create TwiML response - optimized for low latency voice AI
+    // NO Polly greeting - the AI will greet with ElevenLabs voice through WebSocket
     const response = new VoiceResponse();
 
-    // Optional: Play greeting (first_message from assistant)
-    if (assistant.first_message) {
-      response.say({
-        voice: 'Polly.Joanna'
-      }, assistant.first_message);
-    }
+    // Connect to WebSocket Media Stream IMMEDIATELY for real-time bidirectional voice AI
+    // The AI greeting will be sent through ElevenLabs via WebSocket, not Twilio TTS
+    // Use explicit host or fall back to request host header
+    const wsHost = process.env.BASE_URL
+      ? process.env.BASE_URL.replace('https://', '').replace('http://', '')
+      : req.headers.host;
 
-    // Enable call recording
-    response.record({
-      recordingStatusCallback: `https://${req.headers.host}/api/voice/recording`,
-      recordingStatusCallbackMethod: 'POST',
-      recordingStatusCallbackEvent: ['completed'],
-      transcribe: false, // We use Whisper instead
-      trim: 'trim-silence'
-    });
-
-    // Connect to WebSocket Media Stream
     const connect = response.connect();
     const stream = connect.stream({
-      url: `wss://${req.headers.host}/voice/stream`
+      url: `wss://${wsHost}/voice/stream`
     });
+
+    logger.info('WebSocket URL configured', { wsUrl: `wss://${wsHost}/voice/stream` });
 
     // Pass assistant ID and caller number as custom parameters
     stream.parameter({
@@ -77,11 +135,8 @@ router.post('/incoming', async (req, res) => {
       value: From
     });
 
-    // Set status callback for call completion
-    response.on('callCompleted', {
-      url: `https://${req.headers.host}/api/voice/status`,
-      method: 'POST'
-    });
+    // Note: Status callbacks are configured in Twilio console or when making outbound calls
+    // The /api/voice/status endpoint receives status updates via Twilio's configured webhook
 
     res.type('text/xml');
     res.send(response.toString());
@@ -92,7 +147,11 @@ router.post('/incoming', async (req, res) => {
     });
 
   } catch (error) {
-    logger.error('Voice incoming error:', error);
+    logger.error('Voice incoming error:', {
+      message: error.message,
+      stack: error.stack,
+      name: error.name
+    });
 
     const response = new VoiceResponse();
     response.say({
@@ -147,19 +206,58 @@ router.post('/recording', async (req, res) => {
 
     if (RecordingStatus === 'completed' && RecordingUrl) {
       // Save recording URL to conversation
-      await supabaseService.client
-        .from('chat_conversations')
-        .update({
-          recording_url: RecordingUrl,
-          recording_sid: RecordingSid,
-          recording_duration: parseInt(RecordingDuration)
-        })
-        .eq('session_id', CallSid);
+      // Schema uses duration_seconds (not call_duration) and recording_url
+      const updateData = {
+        recording_url: RecordingUrl,
+        duration_seconds: parseInt(RecordingDuration) || 0,
+        updated_at: new Date().toISOString()
+      };
 
-      logger.info('Recording URL saved to conversation', {
+      logger.info('Attempting to save recording URL', {
         callSid: CallSid,
-        recordingUrl: RecordingUrl
+        recordingUrl: RecordingUrl,
+        updateData
       });
+
+      const { data, error } = await supabaseService.client
+        .from('conversations')
+        .update(updateData)
+        .eq('session_id', CallSid)
+        .select();
+
+      if (error) {
+        // If recording_url column doesn't exist, try without it
+        logger.warn('Failed to save recording (trying without recording_url):', error.message);
+        const { data: retryData, error: retryError } = await supabaseService.client
+          .from('conversations')
+          .update({
+            duration_seconds: parseInt(RecordingDuration) || 0,
+            updated_at: new Date().toISOString()
+          })
+          .eq('session_id', CallSid)
+          .select();
+
+        if (retryError) {
+          logger.error('Failed to save recording duration:', retryError);
+        } else {
+          logger.info('Recording duration saved (recording_url column may not exist)', {
+            callSid: CallSid,
+            duration: RecordingDuration,
+            rowsUpdated: retryData?.length || 0
+          });
+        }
+      } else {
+        logger.info('Recording saved to conversation', {
+          callSid: CallSid,
+          recordingUrl: RecordingUrl,
+          duration: RecordingDuration,
+          rowsUpdated: data?.length || 0
+        });
+
+        if (!data || data.length === 0) {
+          logger.warn('No conversation found with session_id', { callSid: CallSid });
+        }
+      }
     }
 
     res.sendStatus(200);

@@ -108,21 +108,32 @@ export function useSuperAdminMetrics() {
           .eq('auto_score', true)
           .eq('pause_auto_score', false);
 
-        // Get average confidence score
-        const { data: avgConfidenceData } = await supabase
-          .from('conversations')
-          .select('confidence_score')
-          .not('confidence_score', 'is', null);
-        
-        const avgConfidenceScore = avgConfidenceData?.length > 0
-          ? avgConfidenceData.reduce((sum, c) => sum + (c.confidence_score || 0), 0) / avgConfidenceData.length
-          : 0;
+        // Get average confidence score - use overall_score as fallback
+        let avgConfidenceScore = 0;
+        try {
+          const { data: avgConfidenceData } = await supabase
+            .from('conversations')
+            .select('overall_score')
+            .not('overall_score', 'is', null);
 
-        // Get flagged conversations (confidence < 70 or success_evaluation = false)
-        const { count: totalFlaggedConversations } = await supabase
-          .from('conversations')
-          .select('*', { count: 'exact', head: true })
-          .or('confidence_score.lt.70,success_evaluation.eq.false');
+          avgConfidenceScore = avgConfidenceData?.length > 0
+            ? avgConfidenceData.reduce((sum, c) => sum + (c.overall_score || 0), 0) / avgConfidenceData.length
+            : 0;
+        } catch (e) {
+          console.log('Could not fetch confidence scores:', e);
+        }
+
+        // Get flagged conversations from review_queue instead (more reliable)
+        let totalFlaggedConversations = 0;
+        try {
+          const { count } = await supabase
+            .from('review_queue')
+            .select('*', { count: 'exact', head: true })
+            .eq('reviewed', false);
+          totalFlaggedConversations = count || 0;
+        } catch (e) {
+          console.log('Could not fetch flagged conversations:', e);
+        }
 
         // Get review queue size
         const { count: reviewQueueSize } = await supabase
@@ -130,23 +141,28 @@ export function useSuperAdminMetrics() {
           .select('*', { count: 'exact', head: true })
           .eq('reviewed', false);
 
-        // Get cost usage for current month
-        const { data: costData } = await supabase
-          .from('cost_usage')
-          .select('tokens_used, minutes_processed')
-          .gte('period_start', startOfMonth.toISOString());
-
-        const totalTokensUsed = costData?.reduce((sum, usage) => sum + (usage.tokens_used || 0), 0) || 0;
-        const totalMinutesProcessed = costData?.reduce((sum, usage) => sum + (usage.minutes_processed || 0), 0) || 0;
-
-        // Get total cost from conversations this month
-        const { data: conversationsThisMonth } = await supabase
+        // Cost usage - derive from conversations (no separate cost_usage table)
+        const { data: conversationCosts } = await supabase
           .from('conversations')
-          .select('total_cost')
-          .gte('created_at', startOfMonth.toISOString())
-          .not('total_cost', 'is', null);
+          .select('tokens_in, tokens_out, duration_seconds')
+          .gte('created_at', startOfMonth.toISOString());
 
-        const totalCostThisMonth = conversationsThisMonth?.reduce((sum, c) => sum + (c.total_cost || 0), 0) || 0;
+        const totalTokensUsed = conversationCosts?.reduce((sum, c) => sum + (c.tokens_in || 0) + (c.tokens_out || 0), 0) || 0;
+        const totalMinutesProcessed = conversationCosts?.reduce((sum, c) => sum + ((c.duration_seconds || 0) / 60), 0) || 0;
+
+        // Get total cost from conversations this month - gracefully handle if column doesn't exist
+        let totalCostThisMonth = 0;
+        try {
+          const { data: conversationsThisMonth } = await supabase
+            .from('conversations')
+            .select('id')
+            .gte('created_at', startOfMonth.toISOString());
+
+          // Cost tracking not available in current schema - would need to be added
+          totalCostThisMonth = 0;
+        } catch (e) {
+          console.log('Could not fetch cost data:', e);
+        }
 
         // Calculate average processing time (mock for now - would need actual timing data)
         const avgProcessingTime = 2.4; // seconds
@@ -196,7 +212,7 @@ export function useOrganizationSummaries() {
           .select(`
             id,
             name,
-            status,
+            active,
             created_at
           `)
           .order('created_at', { ascending: false });
@@ -225,25 +241,35 @@ export function useOrganizationSummaries() {
             .select('*', { count: 'exact', head: true })
             .eq('org_id', org.id);
 
-          // Get flagged conversations count
-          const { count: flaggedCount } = await supabase
-            .from('conversations')
-            .select('*', { count: 'exact', head: true })
-            .eq('org_id', org.id)
-            .or('confidence_score.lt.70,success_evaluation.eq.false');
+          // Get flagged conversations count from review_queue
+          let flaggedCount = 0;
+          try {
+            const { count } = await supabase
+              .from('review_queue')
+              .select('*', { count: 'exact', head: true })
+              .eq('org_id', org.id)
+              .eq('reviewed', false);
+            flaggedCount = count || 0;
+          } catch (e) {
+            console.log('Could not fetch flagged count:', e);
+          }
 
-          // Get average score and total cost
-          const { data: orgConversations } = await supabase
-            .from('conversations')
-            .select('confidence_score, total_cost')
-            .eq('org_id', org.id)
-            .not('confidence_score', 'is', null);
+          // Get average score using overall_score
+          let avgScore = 0;
+          let totalCost = 0;
+          try {
+            const { data: orgConversations } = await supabase
+              .from('conversations')
+              .select('overall_score')
+              .eq('org_id', org.id)
+              .not('overall_score', 'is', null);
 
-          const avgScore = orgConversations?.length > 0
-            ? orgConversations.reduce((sum, c) => sum + (c.confidence_score || 0), 0) / orgConversations.length
-            : 0;
-
-          const totalCost = orgConversations?.reduce((sum, c) => sum + (c.total_cost || 0), 0) || 0;
+            avgScore = orgConversations?.length > 0
+              ? orgConversations.reduce((sum, c) => sum + (c.overall_score || 0), 0) / orgConversations.length
+              : 0;
+          } catch (e) {
+            console.log('Could not fetch org scores:', e);
+          }
 
           summaries.push({
             id: org.id,
@@ -254,7 +280,7 @@ export function useOrganizationSummaries() {
             assistantCount: assistantCount || 0,
             userCount: userCount || 0,
             flaggedCount: flaggedCount || 0,
-            status: org.status || 'active',
+            status: org.active === false ? 'inactive' : 'active',
             created_at: org.created_at
           });
         }

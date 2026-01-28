@@ -19,7 +19,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { createOrganizationAndInvite, inviteUserToOrganization } from "@/services/organizationInvitations";
+import { createOrganizationAndInvite, inviteUserToOrganization, resendInvitation } from "@/services/organizationInvitations";
 import { useToast } from "@/hooks/use-toast";
 import { Plus, Mail } from "lucide-react";
 
@@ -178,10 +178,8 @@ export default function Invites() {
 
   const handleReinvite = async (invite: Invite) => {
     try {
-      const result = await inviteUserToOrganization({
-        organizationId: invite.org_id,
-        userEmail: invite.email
-      });
+      // Use resendInvitation which extends expiration and resends email
+      const result = await resendInvitation(invite.id);
 
       if (result.success) {
         console.log(`✅ Re-invite sent successfully to ${invite.email}`);

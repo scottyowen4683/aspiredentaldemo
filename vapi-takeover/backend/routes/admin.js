@@ -5,6 +5,7 @@ import supabaseService from '../services/supabase-service.js';
 import { processKnowledgeBase } from '../services/kb-processor.js';
 import { validateTwilioNumber } from '../services/twilio-validator.js';
 import logger from '../services/logger.js';
+import emailService from '../services/email-service.js';
 
 const router = express.Router();
 
@@ -31,7 +32,7 @@ const upload = multer({
 // POST /api/admin/organizations - Create new organization
 router.post('/organizations', async (req, res) => {
   try {
-    const { name, slug, flat_rate_fee, included_interactions, overage_rate_per_1000, default_rubric } = req.body;
+    const { name, slug, flat_rate_fee, included_interactions, overage_rate_per_1000 } = req.body;
 
     // Validation
     if (!name || !slug) {
@@ -49,8 +50,7 @@ router.post('/organizations', async (req, res) => {
         slug,
         flat_rate_fee: flat_rate_fee || 500.00,
         included_interactions: included_interactions || 5000,
-        overage_rate_per_1000: overage_rate_per_1000 || 50.00,
-        default_rubric: default_rubric || null
+        overage_rate_per_1000: overage_rate_per_1000 || 50.00
       })
       .select()
       .single();
@@ -219,11 +219,11 @@ router.post('/assistants', async (req, res) => {
       rubric // Optional: assistant-specific rubric
     } = req.body;
 
-    // Validation
-    if (!org_id || !friendly_name || !bot_type || !prompt) {
+    // Validation - prompt is now optional (uses default if not provided)
+    if (!org_id || !friendly_name || !bot_type) {
       return res.status(400).json({
         success: false,
-        error: 'org_id, friendly_name, bot_type, and prompt are required'
+        error: 'org_id, friendly_name, and bot_type are required'
       });
     }
 
@@ -253,7 +253,7 @@ router.post('/assistants', async (req, res) => {
       }
     }
 
-    // Create assistant
+    // Create assistant - prompt is optional, voice-handler uses default if empty
     const { data, error } = await supabaseService.client
       .from('assistants')
       .insert({
@@ -262,7 +262,7 @@ router.post('/assistants', async (req, res) => {
         bot_type,
         phone_number: bot_type === 'voice' ? phone_number : null,
         elevenlabs_voice_id: bot_type === 'voice' ? (elevenlabs_voice_id || process.env.ELEVENLABS_VOICE_DEFAULT) : null,
-        prompt,
+        prompt: prompt || null, // Optional - voice-handler uses DEFAULT_SYSTEM_PROMPT if empty
         model: model || 'gpt-4o-mini',
         rubric: rubric || null
       })
@@ -453,15 +453,20 @@ router.post('/knowledge-base/text', async (req, res) => {
 // GET /api/admin/knowledge-base - List knowledge chunks (by org or assistant)
 router.get('/knowledge-base', async (req, res) => {
   try {
-    const { org_id, assistant_id } = req.query;
+    const { org_id, assistant_id, tenant_id } = req.query;
 
+    // Use correct column names matching kb-processor.js
     let query = supabaseService.client
       .from('knowledge_chunks')
-      .select('id, source, chunk_text, created_at')
-      .order('created_at', { ascending: false });
+      .select('id, source, content, tenant_id, org_id, assistant_id, created_at')
+      .order('created_at', { ascending: false })
+      .limit(100);
 
-    if (org_id) {
-      query = query.eq('org_id', org_id);
+    // Filter by tenant_id (primary), org_id, or assistant_id
+    if (tenant_id) {
+      query = query.eq('tenant_id', tenant_id);
+    } else if (org_id) {
+      query = query.eq('tenant_id', org_id); // tenant_id = org_id.toString()
     }
 
     if (assistant_id) {
@@ -470,18 +475,29 @@ router.get('/knowledge-base', async (req, res) => {
 
     const { data, error } = await query;
 
-    if (error) throw error;
+    if (error) {
+      logger.error('KB query error:', error);
+      throw error;
+    }
+
+    logger.info('KB list query result:', {
+      org_id,
+      assistant_id,
+      tenant_id,
+      chunksFound: data?.length || 0
+    });
 
     res.json({
       success: true,
-      chunks: data
+      chunks: data || [],
+      count: data?.length || 0
     });
 
   } catch (error) {
     logger.error('Knowledge base list error:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to fetch knowledge base'
+      error: error.message || 'Failed to fetch knowledge base'
     });
   }
 });
@@ -489,6 +505,135 @@ router.get('/knowledge-base', async (req, res) => {
 // =============================================================================
 // TWILIO VALIDATION
 // =============================================================================
+
+// GET /api/admin/twilio-status - Check if Twilio is configured (for debugging)
+router.get('/twilio-status', async (req, res) => {
+  const hasAccountSid = !!process.env.TWILIO_ACCOUNT_SID;
+  const hasAuthToken = !!process.env.TWILIO_AUTH_TOKEN;
+
+  res.json({
+    configured: hasAccountSid && hasAuthToken,
+    hasAccountSid,
+    hasAuthToken,
+    accountSidPrefix: hasAccountSid ? process.env.TWILIO_ACCOUNT_SID.substring(0, 8) + '...' : null,
+    message: hasAccountSid && hasAuthToken
+      ? 'Twilio is configured'
+      : 'Twilio credentials missing - set TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN'
+  });
+});
+
+// GET /api/admin/twilio-numbers - List all Twilio phone numbers and their webhook config
+router.get('/twilio-numbers', async (req, res) => {
+  try {
+    const { listTwilioNumbers } = await import('../services/twilio-validator.js');
+    const result = await listTwilioNumbers();
+    res.json(result);
+  } catch (error) {
+    logger.error('List Twilio numbers error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// GET /api/admin/twilio-number-details - Get full details about a specific Twilio number
+router.get('/twilio-number-details', async (req, res) => {
+  try {
+    const { phone } = req.query;
+
+    if (!phone) {
+      return res.status(400).json({ success: false, error: 'phone query param required' });
+    }
+
+    const { getPhoneNumberDetails } = await import('../services/twilio-validator.js');
+    const result = await getPhoneNumberDetails(phone);
+
+    // Highlight potential issues
+    if (result.success && result.number) {
+      const issues = [];
+
+      if (result.number.trunkSid) {
+        issues.push(`⚠️ TRUNK_SID is set (${result.number.trunkSid}) - calls route to SIP trunk, not webhook`);
+      }
+
+      if (result.number.voiceApplicationSid) {
+        issues.push(`⚠️ VOICE_APPLICATION_SID is set (${result.number.voiceApplicationSid}) - TwiML app overrides webhook URL`);
+      }
+
+      if (!result.number.voiceUrl) {
+        issues.push('⚠️ NO VOICE_URL configured');
+      }
+
+      if (!result.number.capabilities?.voice) {
+        issues.push('⚠️ Voice capability NOT enabled for this number');
+      }
+
+      result.issues = issues;
+      result.hasIssues = issues.length > 0;
+    }
+
+    res.json(result);
+  } catch (error) {
+    logger.error('Get Twilio number details error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// POST /api/admin/reset-twilio-number - Clear trunk/app associations and set webhook directly
+router.post('/reset-twilio-number', async (req, res) => {
+  try {
+    const { phone_number } = req.body;
+
+    if (!phone_number) {
+      return res.status(400).json({ success: false, error: 'phone_number is required' });
+    }
+
+    const { resetPhoneNumberToWebhook } = await import('../services/twilio-validator.js');
+
+    // Get the base URL for webhooks
+    const baseUrl = process.env.BASE_URL || `https://${req.get('host')}`;
+
+    const result = await resetPhoneNumberToWebhook(
+      phone_number,
+      `${baseUrl}/api/voice/incoming`,
+      `${baseUrl}/api/voice/status`
+    );
+
+    if (!result.success) {
+      return res.status(400).json(result);
+    }
+
+    logger.info('Twilio number reset:', result);
+
+    res.json({
+      success: true,
+      message: `Number ${phone_number} has been reset - trunk and app associations cleared, webhook set directly`,
+      ...result
+    });
+  } catch (error) {
+    logger.error('Reset Twilio number error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// GET /api/admin/ai-status - Check if AI services are configured (OpenAI, ElevenLabs)
+router.get('/ai-status', async (req, res) => {
+  const hasOpenAI = !!process.env.OPENAI_API_KEY;
+  const hasElevenLabs = !!process.env.ELEVENLABS_API_KEY;
+
+  res.json({
+    openai: {
+      configured: hasOpenAI,
+      keyPrefix: hasOpenAI ? process.env.OPENAI_API_KEY.substring(0, 7) + '...' : null
+    },
+    elevenlabs: {
+      configured: hasElevenLabs,
+      keyPrefix: hasElevenLabs ? process.env.ELEVENLABS_API_KEY.substring(0, 8) + '...' : null
+    },
+    allConfigured: hasOpenAI && hasElevenLabs,
+    message: hasOpenAI && hasElevenLabs
+      ? 'All AI services configured'
+      : `Missing: ${!hasOpenAI ? 'OPENAI_API_KEY ' : ''}${!hasElevenLabs ? 'ELEVENLABS_API_KEY' : ''}`.trim()
+  });
+});
 
 // POST /api/admin/validate-twilio-number - Validate Twilio phone number
 router.post('/validate-twilio-number', async (req, res) => {
@@ -512,6 +657,149 @@ router.post('/validate-twilio-number', async (req, res) => {
       success: false,
       error: 'Failed to validate phone number'
     });
+  }
+});
+
+// POST /api/admin/configure-twilio-webhook - Configure Twilio webhook for a phone number
+router.post('/configure-twilio-webhook', async (req, res) => {
+  try {
+    const { phone_number } = req.body;
+
+    if (!phone_number) {
+      return res.status(400).json({
+        success: false,
+        error: 'phone_number is required'
+      });
+    }
+
+    const { configureTwilioWebhooks } = await import('../services/twilio-validator.js');
+
+    // Get the base URL for webhooks
+    const baseUrl = process.env.BASE_URL || `https://${req.get('host')}`;
+
+    const result = await configureTwilioWebhooks(phone_number, {
+      voiceUrl: `${baseUrl}/api/voice/incoming`,
+      statusCallbackUrl: `${baseUrl}/api/voice/status`
+    });
+
+    if (!result.success) {
+      return res.status(400).json(result);
+    }
+
+    logger.info('Twilio webhooks configured:', result);
+
+    res.json({
+      success: true,
+      message: `Webhooks configured for ${phone_number}`,
+      voiceUrl: result.voiceUrl,
+      statusCallback: result.statusCallback
+    });
+
+  } catch (error) {
+    logger.error('Configure webhook error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to configure webhooks'
+    });
+  }
+});
+
+// =============================================================================
+// DEBUG ENDPOINTS
+// =============================================================================
+
+// GET /api/admin/debug/assistants-by-phone - List all assistants with phone numbers (for debugging)
+router.get('/debug/assistants-by-phone', async (req, res) => {
+  try {
+    const { data, error } = await supabaseService.client
+      .from('assistants')
+      .select('id, friendly_name, phone_number, active, bot_type, org_id, created_at')
+      .not('phone_number', 'is', null)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    res.json({
+      success: true,
+      count: data?.length || 0,
+      assistants: data?.map(a => ({
+        id: a.id,
+        name: a.friendly_name,
+        phone: a.phone_number,
+        active: a.active,
+        bot_type: a.bot_type,
+        org_id: a.org_id
+      })) || []
+    });
+  } catch (error) {
+    logger.error('Debug assistants error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// POST /api/admin/debug/activate-assistant - Activate an assistant for voice routing
+router.post('/debug/activate-assistant', async (req, res) => {
+  try {
+    const { assistant_id } = req.body;
+
+    if (!assistant_id) {
+      return res.status(400).json({ success: false, error: 'assistant_id is required' });
+    }
+
+    const { data, error } = await supabaseService.client
+      .from('assistants')
+      .update({ active: true })
+      .eq('id', assistant_id)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    logger.info('Assistant activated:', { id: assistant_id, name: data.friendly_name });
+
+    res.json({
+      success: true,
+      message: `Assistant "${data.friendly_name}" is now active`,
+      assistant: {
+        id: data.id,
+        name: data.friendly_name,
+        phone: data.phone_number,
+        active: data.active
+      }
+    });
+  } catch (error) {
+    logger.error('Activate assistant error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// GET /api/admin/debug/test-phone-lookup - Test phone lookup function directly
+router.get('/debug/test-phone-lookup', async (req, res) => {
+  try {
+    const { phone } = req.query;
+
+    if (!phone) {
+      return res.status(400).json({ success: false, error: 'phone query param required' });
+    }
+
+    logger.info('Testing phone lookup for:', phone);
+
+    const assistant = await supabaseService.getAssistantByPhoneNumber(phone);
+
+    res.json({
+      success: true,
+      phoneSearched: phone,
+      found: !!assistant,
+      assistant: assistant ? {
+        id: assistant.id,
+        name: assistant.friendly_name,
+        phone: assistant.phone_number,
+        active: assistant.active
+      } : null
+    });
+  } catch (error) {
+    logger.error('Test phone lookup error:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
@@ -716,5 +1004,193 @@ router.get('/stats', async (req, res) => {
     });
   }
 });
+
+// =============================================================================
+// SERVICE REQUESTS
+// =============================================================================
+
+// POST /api/admin/service-request - Submit a service request (for org users to contact Aspire)
+router.post('/service-request', async (req, res) => {
+  try {
+    const { subject, message, requestType, urgency, organizationId, organizationName, userName, userEmail } = req.body;
+
+    // Validation
+    if (!subject || !message) {
+      return res.status(400).json({
+        success: false,
+        error: 'Subject and message are required'
+      });
+    }
+
+    // Build email content
+    const urgencyColors = {
+      high: '#dc2626',
+      medium: '#f59e0b',
+      low: '#22c55e'
+    };
+
+    const requestTypeLabels = {
+      general: 'General Inquiry',
+      technical: 'Technical Support',
+      billing: 'Billing Question',
+      feature: 'Feature Request',
+      bug: 'Bug Report',
+      other: 'Other'
+    };
+
+    const urgencyColor = urgencyColors[urgency] || urgencyColors.medium;
+    const requestLabel = requestTypeLabels[requestType] || 'Service Request';
+    const referenceId = `SR-${Date.now().toString(36).toUpperCase()}`;
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <style>
+          body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; }
+          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+          .header { background: linear-gradient(135deg, #8B5CF6, #6366F1); padding: 20px; border-radius: 8px 8px 0 0; }
+          .header h1 { color: white; margin: 0; font-size: 20px; }
+          .content { background: #f9fafb; padding: 20px; border: 1px solid #e5e7eb; border-top: none; }
+          .field { margin-bottom: 12px; }
+          .label { font-weight: 600; color: #6b7280; font-size: 12px; text-transform: uppercase; }
+          .value { color: #111827; margin-top: 4px; }
+          .urgency { display: inline-block; padding: 4px 12px; border-radius: 999px; font-size: 12px; font-weight: 600; color: white; }
+          .details-box { background: white; padding: 16px; border-radius: 8px; border: 1px solid #e5e7eb; margin-top: 16px; }
+          .footer { padding: 16px 20px; background: #f3f4f6; border-radius: 0 0 8px 8px; font-size: 12px; color: #6b7280; border: 1px solid #e5e7eb; border-top: none; }
+          .reference { font-family: monospace; font-size: 14px; font-weight: 600; color: #8B5CF6; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1>Service Request - ${requestLabel}</h1>
+          </div>
+          <div class="content">
+            <div class="field">
+              <div class="label">Reference</div>
+              <div class="value reference">${referenceId}</div>
+            </div>
+
+            <div class="field">
+              <div class="label">Urgency</div>
+              <div class="value">
+                <span class="urgency" style="background-color: ${urgencyColor}">
+                  ${(urgency || 'medium').toUpperCase()}
+                </span>
+              </div>
+            </div>
+
+            <div class="field">
+              <div class="label">Subject</div>
+              <div class="value">${escapeHtml(subject)}</div>
+            </div>
+
+            ${organizationName ? `
+            <div class="field">
+              <div class="label">Organization</div>
+              <div class="value">${escapeHtml(organizationName)}</div>
+            </div>
+            ` : ''}
+
+            ${userName ? `
+            <div class="field">
+              <div class="label">Submitted By</div>
+              <div class="value">${escapeHtml(userName)}</div>
+            </div>
+            ` : ''}
+
+            ${userEmail ? `
+            <div class="field">
+              <div class="label">Contact Email</div>
+              <div class="value"><a href="mailto:${userEmail}">${escapeHtml(userEmail)}</a></div>
+            </div>
+            ` : ''}
+
+            <div class="details-box">
+              <div class="label">Message</div>
+              <div class="value" style="white-space: pre-wrap; margin-top: 8px;">${escapeHtml(message)}</div>
+            </div>
+          </div>
+          <div class="footer">
+            <p style="margin: 0;">
+              Organization ID: ${organizationId || 'N/A'}
+            </p>
+            <p style="margin: 8px 0 0 0;">
+              Submitted via <a href="https://portal.aspireexecutive.ai" style="color: #8B5CF6;">Aspire Portal</a>
+            </p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    // Send email to Aspire support
+    const aspireEmail = process.env.ASPIRE_SUPPORT_EMAIL || process.env.NOTIFICATION_EMAIL || 'support@aspireexecutive.ai';
+
+    const result = await emailService.sendEmail({
+      to: aspireEmail,
+      subject: `[${(urgency || 'MEDIUM').toUpperCase()}] Service Request: ${subject}`,
+      html
+    });
+
+    if (result.skipped) {
+      logger.warn('Service request email skipped:', result.reason);
+      return res.json({
+        success: true,
+        message: 'Service request received but email not sent (email service not configured)',
+        referenceId,
+        emailSkipped: true
+      });
+    }
+
+    // Log to audit
+    try {
+      if (organizationId) {
+        await supabaseService.client.from('audit_logs').insert({
+          org_id: organizationId,
+          action: 'service_request_submitted',
+          details: JSON.stringify({
+            referenceId,
+            subject,
+            requestType,
+            urgency,
+            userName,
+            userEmail
+          }),
+          created_at: new Date().toISOString()
+        });
+      }
+    } catch (auditError) {
+      logger.warn('Failed to create audit log:', auditError.message);
+    }
+
+    logger.info('Service request submitted', { referenceId, subject, organizationId });
+
+    return res.json({
+      success: true,
+      message: 'Service request submitted successfully. Our team will respond shortly.',
+      referenceId
+    });
+
+  } catch (error) {
+    logger.error('Service request error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to submit service request'
+    });
+  }
+});
+
+// Helper function to escape HTML
+function escapeHtml(text) {
+  if (!text) return '';
+  return String(text)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
 
 export default router;

@@ -1,6 +1,6 @@
 /**
  * Aspire AI Chat Widget
- * Embeddable chat widget for client websites
+ * Dark theme matching moretonbaypilot style
  *
  * Usage:
  * <script src="https://your-domain.com/widget/aspire-chat.js"
@@ -27,11 +27,11 @@
     primaryColor: scriptTag?.getAttribute('data-primary-color') || '#8B5CF6',
     position: scriptTag?.getAttribute('data-position') || 'bottom-right',
     greeting: scriptTag?.getAttribute('data-greeting') || 'Hello! How can I help you today?',
-    title: scriptTag?.getAttribute('data-title') || 'Chat with us',
-    subtitle: scriptTag?.getAttribute('data-subtitle') || 'AI Assistant',
+    title: scriptTag?.getAttribute('data-title') || 'Aspire AI Chat',
+    subtitle: scriptTag?.getAttribute('data-subtitle') || 'Online',
     placeholder: scriptTag?.getAttribute('data-placeholder') || 'Type your message...',
-    buttonText: scriptTag?.getAttribute('data-button-text') || '',
-    zIndex: parseInt(scriptTag?.getAttribute('data-z-index')) || 9999,
+    buttonText: scriptTag?.getAttribute('data-button-text') || 'Chat With Me',
+    zIndex: parseInt(scriptTag?.getAttribute('data-z-index')) || 2147483647,
     autoOpen: scriptTag?.getAttribute('data-auto-open') === 'true',
     showPoweredBy: scriptTag?.getAttribute('data-show-powered-by') !== 'false',
   };
@@ -43,82 +43,78 @@
 
   // Get or create session ID from storage
   const getSessionId = () => {
-    let sessionId = sessionStorage.getItem('aspire_chat_session');
+    const key = `aspire_chat_session_${config.assistantId}`;
+    let sessionId = localStorage.getItem(key);
     if (!sessionId) {
       sessionId = generateSessionId();
-      sessionStorage.setItem('aspire_chat_session', sessionId);
+      localStorage.setItem(key, sessionId);
     }
     return sessionId;
   };
 
-  // CSS Styles
+  // CSS Styles - Dark theme matching moretonbaypilot
   const styles = `
     .aspire-chat-widget * {
       box-sizing: border-box;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
     }
 
+    /* Chat Button - Pill style with text */
     .aspire-chat-button {
       position: fixed;
-      ${config.position.includes('right') ? 'right: 20px;' : 'left: 20px;'}
-      ${config.position.includes('bottom') ? 'bottom: 20px;' : 'top: 20px;'}
-      width: 60px;
-      height: 60px;
-      border-radius: 50%;
-      background: ${config.primaryColor};
+      ${config.position.includes('right') ? 'right: 16px;' : 'left: 16px;'}
+      ${config.position.includes('bottom') ? 'bottom: 16px;' : 'top: 16px;'}
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 20px;
+      border-radius: 16px;
+      background: white;
       border: none;
       cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+      box-shadow: 0 14px 45px rgba(0, 0, 0, 0.35);
+      ring: 1px solid rgba(255, 255, 255, 0.1);
       transition: transform 0.2s, box-shadow 0.2s;
       z-index: ${config.zIndex};
+      font-size: 14px;
+      font-weight: 600;
+      color: #111;
     }
 
     .aspire-chat-button:hover {
-      transform: scale(1.05);
-      box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
+      transform: translateY(-1px);
+      background: rgba(255, 255, 255, 0.95);
     }
 
-    .aspire-chat-button svg {
-      width: 28px;
-      height: 28px;
-      fill: white;
+    .aspire-chat-button-icon {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 36px;
+      height: 36px;
+      border-radius: 12px;
+      background: #111;
+      color: white;
+      font-size: 18px;
     }
 
     .aspire-chat-button-text {
-      position: absolute;
-      right: 70px;
-      background: white;
-      padding: 8px 16px;
-      border-radius: 20px;
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-      white-space: nowrap;
-      font-size: 14px;
-      color: #333;
-      opacity: 0;
-      transform: translateX(10px);
-      transition: opacity 0.2s, transform 0.2s;
-      pointer-events: none;
+      letter-spacing: 0.02em;
     }
 
-    .aspire-chat-button:hover .aspire-chat-button-text {
-      opacity: 1;
-      transform: translateX(0);
-    }
-
+    /* Chat Window - Dark theme */
     .aspire-chat-window {
       position: fixed;
-      ${config.position.includes('right') ? 'right: 20px;' : 'left: 20px;'}
-      ${config.position.includes('bottom') ? 'bottom: 90px;' : 'top: 90px;'}
+      ${config.position.includes('right') ? 'right: 16px;' : 'left: 16px;'}
+      ${config.position.includes('bottom') ? 'bottom: 16px;' : 'top: 16px;'}
       width: 380px;
-      max-width: calc(100vw - 40px);
-      height: 550px;
-      max-height: calc(100vh - 120px);
-      background: white;
+      max-width: calc(100vw - 32px);
+      height: 540px;
+      max-height: calc(100vh - 32px);
+      background: #0A1020;
       border-radius: 16px;
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      box-shadow: 0 18px 70px rgba(0, 0, 0, 0.55);
       display: none;
       flex-direction: column;
       overflow: hidden;
@@ -141,13 +137,16 @@
       display: flex;
     }
 
+    /* Header */
     .aspire-chat-header {
-      background: ${config.primaryColor};
-      color: white;
-      padding: 16px 20px;
       display: flex;
       align-items: center;
       justify-content: space-between;
+      gap: 12px;
+      padding: 12px 16px;
+      background: rgba(10, 16, 32, 0.9);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(12px);
     }
 
     .aspire-chat-header-info {
@@ -159,62 +158,60 @@
     .aspire-chat-avatar {
       width: 40px;
       height: 40px;
-      border-radius: 50%;
-      background: rgba(255, 255, 255, 0.2);
+      border-radius: 16px;
+      background: white;
       display: flex;
       align-items: center;
       justify-content: center;
-    }
-
-    .aspire-chat-avatar svg {
-      width: 24px;
-      height: 24px;
-      fill: white;
+      font-size: 20px;
     }
 
     .aspire-chat-header-text h3 {
       margin: 0;
-      font-size: 16px;
+      font-size: 14px;
       font-weight: 600;
+      color: white;
+      line-height: 1.4;
     }
 
     .aspire-chat-header-text p {
-      margin: 2px 0 0;
+      margin: 0;
       font-size: 12px;
-      opacity: 0.8;
+      color: rgba(255, 255, 255, 0.6);
     }
 
-    .aspire-chat-close {
-      background: none;
-      border: none;
-      color: white;
-      cursor: pointer;
-      padding: 8px;
-      border-radius: 50%;
+    .aspire-chat-header-actions {
       display: flex;
       align-items: center;
-      justify-content: center;
-      transition: background 0.2s;
+      gap: 8px;
     }
 
-    .aspire-chat-close:hover {
+    .aspire-chat-btn {
+      padding: 8px 12px;
+      border-radius: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      background: rgba(255, 255, 255, 0.05);
+      color: rgba(255, 255, 255, 0.8);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s, color 0.2s;
+    }
+
+    .aspire-chat-btn:hover {
       background: rgba(255, 255, 255, 0.1);
+      color: white;
     }
 
-    .aspire-chat-close svg {
-      width: 20px;
-      height: 20px;
-      fill: white;
-    }
-
+    /* Messages */
     .aspire-chat-messages {
       flex: 1;
       overflow-y: auto;
-      padding: 20px;
+      padding: 16px;
       display: flex;
       flex-direction: column;
       gap: 12px;
-      background: #f9fafb;
+      background: linear-gradient(180deg, #0A1020 0%, #070A12 100%);
     }
 
     .aspire-chat-message {
@@ -224,21 +221,20 @@
       font-size: 14px;
       line-height: 1.5;
       word-wrap: break-word;
+      white-space: pre-wrap;
     }
 
     .aspire-chat-message.user {
       align-self: flex-end;
-      background: ${config.primaryColor};
-      color: white;
-      border-bottom-right-radius: 4px;
+      background: white;
+      color: #111;
     }
 
     .aspire-chat-message.assistant {
       align-self: flex-start;
-      background: white;
-      color: #333;
-      border-bottom-left-radius: 4px;
-      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+      background: rgba(255, 255, 255, 0.05);
+      color: white;
+      border: 1px solid rgba(255, 255, 255, 0.1);
     }
 
     .aspire-chat-message.typing {
@@ -250,7 +246,7 @@
     .aspire-chat-message.typing span {
       width: 8px;
       height: 8px;
-      background: #ccc;
+      background: rgba(255, 255, 255, 0.4);
       border-radius: 50%;
       animation: aspire-typing 1.4s infinite ease-in-out;
     }
@@ -264,10 +260,15 @@
       40% { transform: scale(1); opacity: 1; }
     }
 
+    /* Input Area */
     .aspire-chat-input-area {
-      padding: 16px;
-      background: white;
-      border-top: 1px solid #e5e7eb;
+      padding: 12px;
+      background: rgba(10, 16, 32, 0.9);
+      border-top: 1px solid rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(12px);
+    }
+
+    .aspire-chat-input-row {
       display: flex;
       gap: 8px;
       align-items: flex-end;
@@ -275,25 +276,31 @@
 
     .aspire-chat-input {
       flex: 1;
-      border: 1px solid #e5e7eb;
-      border-radius: 24px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 16px;
       padding: 12px 16px;
       font-size: 14px;
+      background: rgba(255, 255, 255, 0.05);
+      color: white;
       resize: none;
       max-height: 120px;
       outline: none;
       transition: border-color 0.2s;
     }
 
+    .aspire-chat-input::placeholder {
+      color: rgba(255, 255, 255, 0.4);
+    }
+
     .aspire-chat-input:focus {
-      border-color: ${config.primaryColor};
+      border-color: rgba(255, 255, 255, 0.2);
     }
 
     .aspire-chat-send {
       width: 44px;
       height: 44px;
-      border-radius: 50%;
-      background: ${config.primaryColor};
+      border-radius: 16px;
+      background: white;
       border: none;
       cursor: pointer;
       display: flex;
@@ -303,44 +310,52 @@
       flex-shrink: 0;
     }
 
-    .aspire-chat-send:hover {
-      transform: scale(1.05);
+    .aspire-chat-send:hover:not(:disabled) {
+      background: rgba(255, 255, 255, 0.95);
     }
 
     .aspire-chat-send:disabled {
       opacity: 0.5;
       cursor: not-allowed;
-      transform: none;
     }
 
     .aspire-chat-send svg {
       width: 20px;
       height: 20px;
-      fill: white;
+      fill: #111;
     }
 
+    /* Powered By */
     .aspire-chat-powered {
-      text-align: center;
-      padding: 8px;
+      padding: 8px 12px;
       font-size: 11px;
-      color: #9ca3af;
-      background: white;
+      color: rgba(255, 255, 255, 0.5);
+      text-align: center;
     }
 
     .aspire-chat-powered a {
       color: ${config.primaryColor};
-      text-decoration: none;
+      text-decoration: underline;
+      text-decoration-color: rgba(139, 92, 246, 0.3);
+      text-underline-offset: 2px;
     }
 
+    .aspire-chat-powered a:hover {
+      color: white;
+    }
+
+    /* Error */
     .aspire-chat-error {
-      background: #fef2f2;
-      color: #dc2626;
+      background: rgba(220, 38, 38, 0.2);
+      color: #fca5a5;
       padding: 12px 16px;
-      border-radius: 8px;
+      border-radius: 12px;
       margin: 8px 0;
       font-size: 13px;
+      border: 1px solid rgba(220, 38, 38, 0.3);
     }
 
+    /* Mobile */
     @media (max-width: 480px) {
       .aspire-chat-window {
         width: 100%;
@@ -353,20 +368,8 @@
         bottom: 0;
         top: 0;
       }
-
-      .aspire-chat-button-text {
-        display: none;
-      }
     }
   `;
-
-  // Icons
-  const icons = {
-    chat: '<svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H5.17L4 17.17V4h16v12z"/><path d="M7 9h2v2H7zm4 0h2v2h-2zm4 0h2v2h-2z"/></svg>',
-    close: '<svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>',
-    send: '<svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>',
-    bot: '<svg viewBox="0 0 24 24"><path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 0 1 7 7h1a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1v1a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-1H2a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h1a7 7 0 0 1 7-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2M7.5 13A2.5 2.5 0 0 0 5 15.5A2.5 2.5 0 0 0 7.5 18a2.5 2.5 0 0 0 2.5-2.5A2.5 2.5 0 0 0 7.5 13m9 0a2.5 2.5 0 0 0-2.5 2.5a2.5 2.5 0 0 0 2.5 2.5a2.5 2.5 0 0 0 2.5-2.5a2.5 2.5 0 0 0-2.5-2.5z"/></svg>',
-  };
 
   // Widget Class
   class AspireChatWidget {
@@ -404,10 +407,12 @@
       this.input = this.container.querySelector('.aspire-chat-input');
       this.sendButton = this.container.querySelector('.aspire-chat-send');
       this.closeButton = this.container.querySelector('.aspire-chat-close');
+      this.resetButton = this.container.querySelector('.aspire-chat-reset');
 
       // Bind events
       this.button.addEventListener('click', () => this.toggle());
       this.closeButton.addEventListener('click', () => this.close());
+      this.resetButton.addEventListener('click', () => this.reset());
       this.sendButton.addEventListener('click', () => this.sendMessage());
       this.input.addEventListener('keypress', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
@@ -438,40 +443,43 @@
     render() {
       return `
         <button class="aspire-chat-button" aria-label="Open chat">
-          ${icons.chat}
-          ${config.buttonText ? `<span class="aspire-chat-button-text">${config.buttonText}</span>` : ''}
+          <span class="aspire-chat-button-icon">💬</span>
+          <span class="aspire-chat-button-text">${config.buttonText}</span>
         </button>
 
         <div class="aspire-chat-window">
           <div class="aspire-chat-header">
             <div class="aspire-chat-header-info">
-              <div class="aspire-chat-avatar">${icons.bot}</div>
+              <div class="aspire-chat-avatar">🤖</div>
               <div class="aspire-chat-header-text">
                 <h3>${config.title}</h3>
-                <p>${config.subtitle}</p>
+                <p class="aspire-chat-status">${config.subtitle}</p>
               </div>
             </div>
-            <button class="aspire-chat-close" aria-label="Close chat">
-              ${icons.close}
-            </button>
+            <div class="aspire-chat-header-actions">
+              <button class="aspire-chat-btn aspire-chat-reset">Reset</button>
+              <button class="aspire-chat-btn aspire-chat-close">Close</button>
+            </div>
           </div>
 
           <div class="aspire-chat-messages"></div>
 
           <div class="aspire-chat-input-area">
-            <textarea
-              class="aspire-chat-input"
-              placeholder="${config.placeholder}"
-              rows="1"
-            ></textarea>
-            <button class="aspire-chat-send" aria-label="Send message">
-              ${icons.send}
-            </button>
+            <div class="aspire-chat-input-row">
+              <textarea
+                class="aspire-chat-input"
+                placeholder="${config.placeholder}"
+                rows="1"
+              ></textarea>
+              <button class="aspire-chat-send" aria-label="Send message">
+                <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+              </button>
+            </div>
           </div>
 
           ${config.showPoweredBy ? `
             <div class="aspire-chat-powered">
-              Powered by <a href="https://aspire.ai" target="_blank" rel="noopener">Aspire AI</a>
+              Powered by <a href="https://aspireexecutive.ai" target="_blank" rel="noopener">Aspire Executive Solutions</a>
             </div>
           ` : ''}
         </div>
@@ -489,14 +497,40 @@
     open() {
       this.isOpen = true;
       this.window.classList.add('open');
-      this.button.innerHTML = icons.close;
+      this.button.style.display = 'none';
       this.input.focus();
+      this.updateStatus('Online');
     }
 
     close() {
       this.isOpen = false;
       this.window.classList.remove('open');
-      this.button.innerHTML = icons.chat + (config.buttonText ? `<span class="aspire-chat-button-text">${config.buttonText}</span>` : '');
+      this.button.style.display = 'inline-flex';
+    }
+
+    reset() {
+      // Clear session
+      const key = `aspire_chat_session_${config.assistantId}`;
+      localStorage.removeItem(key);
+      this.sessionId = generateSessionId();
+      localStorage.setItem(key, this.sessionId);
+
+      // Clear messages
+      this.messages = [];
+      this.messagesContainer.innerHTML = '';
+
+      // Add greeting back
+      if (config.greeting) {
+        this.addMessage('assistant', config.greeting);
+      }
+
+      this.isLoading = false;
+      this.input.value = '';
+    }
+
+    updateStatus(status) {
+      const statusEl = this.container.querySelector('.aspire-chat-status');
+      if (statusEl) statusEl.textContent = status;
     }
 
     addMessage(role, content) {
@@ -515,11 +549,13 @@
       typingEl.innerHTML = '<span></span><span></span><span></span>';
       this.messagesContainer.appendChild(typingEl);
       this.scrollToBottom();
+      this.updateStatus('Thinking...');
     }
 
     removeTypingIndicator() {
       const typingEl = document.getElementById('aspire-typing');
       if (typingEl) typingEl.remove();
+      this.updateStatus('Online');
     }
 
     showError(message) {
@@ -582,7 +618,8 @@
         // Update session ID if returned
         if (data.sessionId) {
           this.sessionId = data.sessionId;
-          sessionStorage.setItem('aspire_chat_session', this.sessionId);
+          const key = `aspire_chat_session_${config.assistantId}`;
+          localStorage.setItem(key, this.sessionId);
         }
 
       } catch (error) {
@@ -598,11 +635,15 @@
   }
 
   // Initialize widget
-  window.AspireChat = new AspireChatWidget();
+  const widget = new AspireChatWidget();
 
   // Expose API for programmatic control
-  window.AspireChat.open = () => window.AspireChat.open();
-  window.AspireChat.close = () => window.AspireChat.close();
-  window.AspireChat.toggle = () => window.AspireChat.toggle();
+  window.AspireChat = {
+    open: () => widget.open(),
+    close: () => widget.close(),
+    toggle: () => widget.toggle(),
+    reset: () => widget.reset(),
+    sendMessage: (msg) => { widget.input.value = msg; widget.sendMessage(); }
+  };
 
 })();

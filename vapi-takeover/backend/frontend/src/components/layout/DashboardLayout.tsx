@@ -17,11 +17,13 @@ import {
   Phone,
   BookOpen,
   CreditCard,
+  Headphones,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState, useEffect, useRef } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { useUser } from "@/context/UserContext";
+import { ServiceRequestModal } from "@/components/dashboard/ServiceRequestModal";
 
 interface DashboardLayoutProps {
   children: ReactNode;
@@ -39,6 +41,7 @@ export function DashboardLayout({ children, userRole = "org_admin", userName = "
   const [theme, setTheme] = useState<'light' | 'dark'>(() =>
     document.documentElement.classList.contains('dark') ? 'dark' : 'light'
   );
+  const [serviceRequestOpen, setServiceRequestOpen] = useState(false);
 
   const toggleTheme = () => {
     const next = theme === 'dark' ? 'light' : 'dark';
@@ -191,6 +194,23 @@ export function DashboardLayout({ children, userRole = "org_admin", userName = "
         })}
       </nav>
 
+      {/* Support Request Button - for org_admin users */}
+      {userRole === "org_admin" && (
+        <div className="px-3 pb-2">
+          <Button
+            variant="outline"
+            className={cn(
+              "w-full justify-start text-sidebar-foreground border-sidebar-border hover:bg-sidebar-accent",
+              !sidebarOpen && "justify-center"
+            )}
+            onClick={() => setServiceRequestOpen(true)}
+          >
+            <Headphones className={cn("h-5 w-5", sidebarOpen && "mr-3")} />
+            {sidebarOpen && <span>Contact Support</span>}
+          </Button>
+        </div>
+      )}
+
       {/* User section */}
       <div className="border-t border-sidebar-border p-4 sticky bottom-0 bg-sidebar flex-shrink-0">
         <div className={cn("flex items-center", sidebarOpen ? "justify-between" : "justify-center")}>
@@ -314,6 +334,13 @@ export function DashboardLayout({ children, userRole = "org_admin", userName = "
 
         <div className="p-3 sm:p-6 lg:p-8">{children}</div>
       </main>
+
+      {/* Service Request Modal */}
+      <ServiceRequestModal
+        open={serviceRequestOpen}
+        onOpenChange={setServiceRequestOpen}
+        organizationId={user?.org_id}
+      />
     </div>
   );
 }

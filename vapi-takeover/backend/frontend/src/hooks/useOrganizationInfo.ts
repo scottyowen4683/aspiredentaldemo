@@ -4,11 +4,10 @@ import { supabase } from '@/supabaseClient';
 export interface OrganizationInfo {
   id: string;
   name: string;
-  service_plan_name?: string | null;
-  monthly_service_fee?: number | null;
-  baseline_human_cost_per_call?: number | null;
-  coverage_hours?: "12hr" | "24hr" | null;
-  time_zone?: string | null;
+  flat_rate_fee?: number | null;
+  included_interactions?: number | null;
+  overage_rate_per_1000?: number | null;
+  settings?: Record<string, any> | null;
   created_at: string;
 }
 
@@ -33,11 +32,10 @@ export const useOrganizationInfo = (orgId: string | null) => {
           .select(`
             id,
             name,
-            service_plan_name,
-            monthly_service_fee,
-            baseline_human_cost_per_call,
-            coverage_hours,
-            time_zone,
+            flat_rate_fee,
+            included_interactions,
+            overage_rate_per_1000,
+            settings,
             created_at
           `)
           .eq('id', orgId)
@@ -47,15 +45,6 @@ export const useOrganizationInfo = (orgId: string | null) => {
           console.error('Error fetching organization info:', fetchError);
           setError(fetchError.message);
           return;
-        }
-
-        // Handle case where service plan columns might not exist yet
-        if (data) {
-          // Only log if we're getting undefined for service plan fields
-          const hasServicePlanFields = data.service_plan_name !== undefined || data.monthly_service_fee !== undefined;
-          if (!hasServicePlanFields) {
-            console.log('Service plan fields not found in database - migration may need to be run');
-          }
         }
 
         setOrganization(data);

@@ -5,12 +5,91 @@ import { v4 as uuidv4 } from 'uuid';
 import supabaseService from '../services/supabase-service.js';
 import logger from '../services/logger.js';
 import { scoreConversation } from '../ai/rubric-scorer.js';
+import { sendContactRequestNotification } from '../services/email-service.js';
 
 const router = express.Router();
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
+
+// Function definitions for OpenAI function calling
+const CHAT_FUNCTIONS = [
+  {
+    name: 'capture_contact_request',
+    description: 'Use this function when a user provides contact information, wants to lodge a complaint/request, or wants to be contacted. This captures their details for follow-up.',
+    parameters: {
+      type: 'object',
+      properties: {
+        name: {
+          type: 'string',
+          description: 'The name of the person (if provided)'
+        },
+        email: {
+          type: 'string',
+          description: 'The email address of the person (if provided)'
+        },
+        phone: {
+          type: 'string',
+          description: 'The phone number of the person (if provided)'
+        },
+        address: {
+          type: 'string',
+          description: 'The address related to the request (if provided, e.g., for barking dog complaints)'
+        },
+        request_type: {
+          type: 'string',
+          enum: ['complaint', 'enquiry', 'feedback', 'service_request', 'contact_request', 'other'],
+          description: 'The type of request'
+        },
+        request_details: {
+          type: 'string',
+          description: 'Full details of what the user is requesting or reporting'
+        },
+        urgency: {
+          type: 'string',
+          enum: ['low', 'medium', 'high'],
+          description: 'The urgency level of the request'
+        }
+      },
+      required: ['request_type', 'request_details']
+    }
+  }
+];
+
+// Default system prompt for chat - used when assistant has no custom prompt
+const DEFAULT_CHAT_PROMPT = `You are a helpful, friendly AI assistant.
+
+CORE INSTRUCTIONS:
+1. Use ONLY the knowledge base information provided below to answer questions - this is your PRIMARY source of truth
+2. Be conversational, helpful, and thorough in your responses
+3. If the knowledge base contains the answer, use it confidently and accurately
+4. If information is NOT in the knowledge base, say: "I don't have that specific information in my records. Would you like me to help connect you with someone who can assist?"
+5. NEVER make up or hallucinate information - accuracy is critical
+6. Be warm, professional, and helpful
+
+RESPONSE STYLE:
+- Provide clear, well-structured answers
+- Use bullet points or numbered lists for complex information
+- Offer to help with related questions
+- Be concise but thorough
+
+CAPTURING REQUESTS (IMPORTANT):
+When a user:
+- Wants to lodge a complaint (barking dog, noise, rubbish, etc.)
+- Wants to report an issue (with an address)
+- Wants to be contacted or receive follow-up
+- Provides contact details for any service
+
+You MUST use the capture_contact_request function to log their request. Include:
+- Their name and contact info (if provided)
+- The address related to the issue (if applicable)
+- The type of request (complaint, enquiry, service_request, etc.)
+- Full details of what they need
+
+After capturing, confirm what you've recorded and let them know someone will follow up.
+
+Always be helpful and guide users to the information they need.`;
 
 // Session timeout tracking
 const activeSessions = new Map();
@@ -82,49 +161,211 @@ router.post('/', async (req, res) => {
 
     // Search knowledge base if enabled
     let kbContext = '';
+    logger.info('KB check for assistant', {
+      assistantId,
+      kb_enabled: assistant.kb_enabled,
+      org_id: assistant.org_id,
+      kb_match_count: assistant.kb_match_count
+    });
+
     if (assistant.kb_enabled) {
-      // Create embedding for the message
-      const embeddingResponse = await openai.embeddings.create({
-        model: 'text-embedding-3-small',
-        input: message
-      });
+      try {
+        // Build context-enriched query for KB search
+        // Include recent conversation context so "Yes" or "What about that?" works
+        let kbQueryText = message;
+        if (history && history.length > 0) {
+          // Get last 2-3 exchanges for context (up to 500 chars)
+          const recentContext = history
+            .slice(-4) // Last 4 messages (2 exchanges)
+            .map(m => `${m.role}: ${m.content}`)
+            .join(' ')
+            .slice(-500);
 
-      const embedding = embeddingResponse.data[0].embedding;
+          // Combine recent context with current message for better KB matching
+          kbQueryText = `${recentContext} ${message}`.trim();
 
-      // Search knowledge base
-      const kbResults = await supabaseService.searchKnowledgeBase(
-        assistant.org_id, // Use org_id as tenant_id
-        embedding,
-        assistant.kb_match_count || 5
-      );
+          logger.info('KB query enriched with conversation context', {
+            originalQuery: message.substring(0, 50),
+            enrichedQueryLength: kbQueryText.length
+          });
+        }
 
-      if (kbResults.length > 0) {
-        kbContext = '\n\nRelevant information from knowledge base:\n' +
-          kbResults.map(r => `${r.heading ? r.heading + ':\n' : ''}${r.content}`).join('\n\n');
+        // Create embedding with context-enriched query
+        const embeddingResponse = await openai.embeddings.create({
+          model: 'text-embedding-3-small',
+          input: kbQueryText
+        });
+
+        const embedding = embeddingResponse.data[0].embedding;
+        logger.info('Created embedding for KB search', { embeddingLength: embedding.length });
+
+        // Search knowledge base with lower threshold for better recall
+        const kbResults = await supabaseService.searchKnowledgeBase(
+          assistant.org_id, // Use org_id as tenant_id
+          embedding,
+          assistant.kb_match_count || 5,
+          0.25 // Lower threshold for better semantic matching
+        );
+
+        logger.info('KB search results', {
+          resultCount: kbResults?.length || 0,
+          hasResults: kbResults && kbResults.length > 0,
+          topResult: kbResults?.[0]?.content?.substring(0, 100)
+        });
+
+        if (kbResults && kbResults.length > 0) {
+          kbContext = '\n\nRelevant information from knowledge base:\n' +
+            kbResults.map(r => `${r.heading ? r.heading + ':\n' : ''}${r.content}`).join('\n\n');
+          logger.info('KB context added to prompt', { contextLength: kbContext.length });
+        } else {
+          // No KB results - tell GPT explicitly
+          kbContext = `
+
+---
+IMPORTANT: No relevant information found in knowledge base for this query.
+You should say "I don't have that specific information in my records" and offer to connect them with someone who can assist.
+DO NOT make up or guess information like names, contact details, or specific facts.
+---`;
+          logger.info('No KB results found for query', { query: message.substring(0, 50) });
+        }
+      } catch (kbError) {
+        logger.error('KB search failed:', kbError);
+        // Continue without KB context
       }
+    } else {
+      logger.info('KB not enabled for this assistant');
     }
 
-    // Build messages for OpenAI
+    // Determine which prompt to use:
+    // 1. If use_default_prompt=true (or not set), use universal prompt from system_settings
+    // 2. If use_default_prompt=false, use assistant's custom prompt
+    // 3. Fall back to hardcoded DEFAULT_CHAT_PROMPT if nothing else available
+    let basePrompt;
+
+    if (assistant.use_default_prompt !== false) {
+      // Use universal prompt from system_settings
+      const universalPrompt = await supabaseService.getUniversalPrompt();
+      basePrompt = universalPrompt || DEFAULT_CHAT_PROMPT;
+    } else {
+      // Use assistant's custom prompt
+      basePrompt = assistant.prompt && assistant.prompt.trim()
+        ? assistant.prompt
+        : DEFAULT_CHAT_PROMPT;
+    }
+
+    // Function calling instructions - always included
+    const functionInstructions = `
+
+CAPTURING REQUESTS (IMPORTANT - ALWAYS DO THIS):
+When a user:
+- Wants to lodge a complaint (barking dog, noise, rubbish, etc.)
+- Wants to report an issue (with an address)
+- Wants to be contacted or receive follow-up
+- Provides details about a problem that needs action
+
+You MUST call the capture_contact_request function to log their request. Include:
+- Their name and contact info (if provided)
+- The address related to the issue (if applicable)
+- The type of request (complaint, enquiry, service_request, etc.)
+- Full details of what they need
+
+After capturing, confirm what you've recorded and let them know someone will follow up.`;
+
+    const systemPrompt = basePrompt + functionInstructions + kbContext;
     const messages = [
       {
         role: 'system',
-        content: assistant.prompt + kbContext
+        content: systemPrompt
       },
       ...history
     ];
 
-    // Call OpenAI
+    // Call OpenAI with function calling enabled
     const completion = await openai.chat.completions.create({
       model: assistant.model || 'gpt-4o-mini',
       messages,
       temperature: assistant.temperature || 0.5,
       max_tokens: assistant.max_tokens || 800,
-      // TODO: Add function calling for email tool
+      tools: CHAT_FUNCTIONS.map(fn => ({ type: 'function', function: fn })),
+      tool_choice: 'auto' // Let the model decide when to use functions
     });
 
-    const aiResponse = completion.choices[0].message.content;
+    let aiResponse = completion.choices[0].message.content || '';
     const tokensIn = completion.usage.prompt_tokens;
     const tokensOut = completion.usage.completion_tokens;
+
+    // Check if the model wants to call a function
+    const toolCalls = completion.choices[0].message.tool_calls;
+    if (toolCalls && toolCalls.length > 0) {
+      for (const toolCall of toolCalls) {
+        if (toolCall.function.name === 'capture_contact_request') {
+          try {
+            const args = JSON.parse(toolCall.function.arguments);
+
+            logger.info('Contact request captured', {
+              conversationId: conversation.id,
+              assistantId,
+              request: args
+            });
+
+            // Store the contact request in the database
+            await supabaseService.client
+              .from('contact_requests')
+              .insert({
+                conversation_id: conversation.id,
+                org_id: assistant.org_id,
+                assistant_id: assistantId,
+                name: args.name || null,
+                email: args.email || null,
+                phone: args.phone || null,
+                address: args.address || null,
+                request_type: args.request_type,
+                request_details: args.request_details,
+                urgency: args.urgency || 'medium',
+                status: 'pending',
+                created_at: new Date().toISOString()
+              });
+
+            logger.info('Contact request stored in database', {
+              conversationId: conversation.id,
+              requestType: args.request_type
+            });
+
+            // Send email notification and get reference ID
+            let referenceId = null;
+            try {
+              const emailResult = await sendContactRequestNotification(args, {
+                assistantName: assistant.friendly_name || assistant.name,
+                conversationId: conversation.id,
+                channel: 'chat',
+                notificationEmail: assistant.email_notification_address
+              });
+              referenceId = emailResult?.referenceId;
+              logger.info('Contact request email sent', { referenceId });
+            } catch (emailErr) {
+              logger.error('Failed to send contact request email:', emailErr);
+            }
+
+            // Generate a friendly confirmation with reference number
+            if (!aiResponse) {
+              const requestTypeLabel = args.request_type.replace('_', ' ');
+              aiResponse = `Thank you, ${args.name || 'I'}! I've logged your ${requestTypeLabel}`;
+              if (args.address) {
+                aiResponse += ` regarding ${args.address}`;
+              }
+              aiResponse += '.';
+              if (referenceId) {
+                aiResponse += ` Your reference number is **${referenceId}**.`;
+              }
+              aiResponse += ` Our team will be in touch soon to follow up.\n\nIs there anything else I can help you with today?`;
+            }
+          } catch (fnError) {
+            logger.error('Error processing function call:', fnError);
+            // Continue with any text response
+          }
+        }
+      }
+    }
 
     // Calculate cost (GPT-4o-mini pricing)
     const GPT_INPUT_COST = 0.15 / 1000000; // $0.15 per 1M tokens
@@ -203,12 +444,12 @@ async function scoreChatConversation(sessionId, conversationId, assistantId) {
     // Get organization for rubric
     const organization = await supabaseService.client
       .from('organizations')
-      .select('name, default_rubric')
+      .select('name, settings')
       .eq('id', assistant.org_id)
       .single();
 
-    // Use assistant-specific rubric, or fallback to org default
-    const rubric = assistant.rubric || organization.data?.default_rubric || null;
+    // Use assistant-specific rubric, or fallback to org default (stored in settings.default_rubric)
+    const rubric = assistant.rubric || organization.data?.settings?.default_rubric || null;
 
     logger.info('Scoring chat conversation:', {
       conversationId,

@@ -2,7 +2,7 @@ import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Pause, Play, Trash2, Edit, Filter, Search, Bot, Phone, MessageSquare, Code } from "lucide-react";
+import { Plus, Pause, Play, Trash2, Edit, Filter, Search, Bot, Phone, MessageSquare, Code, FileText, Clock } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import AddAssistantModal from "@/components/dashboard/AddAssistantModal";
@@ -42,6 +42,8 @@ export default function Assistants() {
     id: string;
     name: string;
     type: "voice" | "chat" | "both";
+    pilotEnabled?: boolean;
+    pilotSlug?: string | null;
   } | null>(null);
   const { toast } = useToast();
 
@@ -128,12 +130,15 @@ export default function Assistants() {
               Create and manage your Aspire AI assistants for voice and chat interactions
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <Button onClick={() => setOpenAddAssistant(true)} className="flex-1 sm:flex-none bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700">
-              <Plus className="mr-2 h-4 w-4" />
-              Create Assistant
-            </Button>
-          </div>
+          {/* Only super_admin can create new assistants */}
+          {user?.role === "super_admin" && (
+            <div className="flex flex-wrap gap-2">
+              <Button onClick={() => setOpenAddAssistant(true)} className="flex-1 sm:flex-none bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700">
+                <Plus className="mr-2 h-4 w-4" />
+                Create Assistant
+              </Button>
+            </div>
+          )}
           <AddAssistantModal
             open={openAddAssistant}
             onOpenChange={(open) => {
@@ -303,6 +308,24 @@ export default function Assistants() {
                     </div>
                   )}
 
+                  {/* Knowledge Base Status */}
+                  {assistant.raw?.kb_enabled && (
+                    <div className="flex items-center justify-between p-2 bg-purple-50 dark:bg-purple-950/30 rounded-lg text-sm">
+                      <div className="flex items-center gap-2">
+                        <FileText className="h-4 w-4 text-purple-500" />
+                        <span className="text-purple-700 dark:text-purple-300 font-medium">
+                          KB: {assistant.raw?.kb_chunks_count || 0} chunks
+                        </span>
+                      </div>
+                      {assistant.raw?.last_kb_upload_at && (
+                        <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                          <Clock className="h-3 w-3" />
+                          {new Date(assistant.raw.last_kb_upload_at).toLocaleDateString()}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {/* Auto-score toggle */}
                   <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
                     <Label htmlFor={`auto-score-${assistant.id}`} className="cursor-pointer text-sm">
@@ -359,6 +382,8 @@ export default function Assistants() {
                           id: assistant.id,
                           name: assistant.name,
                           type: (assistant.assistantType as "voice" | "chat") || "chat",
+                          pilotEnabled: assistant.raw?.pilot_enabled ?? false,
+                          pilotSlug: assistant.raw?.pilot_slug ?? null,
                         });
                         setIsIntegrationModalOpen(true);
                       }}
@@ -381,17 +406,20 @@ export default function Assistants() {
                       size="sm"
                       className="text-destructive hover:text-destructive"
                       onClick={async () => {
-                        if (!confirm("Delete this assistant? This cannot be undone.")) return;
+                        if (!confirm("Delete this assistant? This cannot be undone. All conversations and data for this assistant will be permanently deleted.")) return;
                         try {
-                          const res = await deleteAssistant(assistant.id);
+                          const res = await deleteAssistant(assistant.id, user?.id);
                           if (res.success) {
                             setAssistants((prev) => prev.filter((a) => a.id !== assistant.id));
-                            toast({ title: "Deleted", description: "Assistant deleted" });
+                            toast({ title: "Deleted", description: "Assistant deleted successfully" });
                           } else {
-                            toast({ title: "Error", description: "Failed to delete", variant: "destructive" });
+                            const errorMsg = res.error?.message || res.error?.toString() || "Failed to delete assistant";
+                            console.error("Delete assistant error:", res.error);
+                            toast({ title: "Error", description: errorMsg, variant: "destructive" });
                           }
-                        } catch (e) {
-                          toast({ title: "Error", description: "Failed to delete", variant: "destructive" });
+                        } catch (e: any) {
+                          console.error("Delete assistant exception:", e);
+                          toast({ title: "Error", description: e?.message || "Failed to delete assistant", variant: "destructive" });
                         }
                       }}
                     >
@@ -415,6 +443,8 @@ export default function Assistants() {
         assistantId={assistantForIntegration?.id || ""}
         assistantName={assistantForIntegration?.name || ""}
         assistantType={assistantForIntegration?.type || "chat"}
+        pilotEnabled={assistantForIntegration?.pilotEnabled}
+        pilotSlug={assistantForIntegration?.pilotSlug}
       />
     </DashboardLayout>
   );

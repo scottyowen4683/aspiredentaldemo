@@ -26,24 +26,13 @@ export interface ReviewQueueItem {
     id: string;
     assistant_id: string;
     org_id: string;
-    provider: string;
-    transcript: any;
-    transcript_source: string;
-    final_ai_summary: string;
-    confidence_score: number;
-    scored: boolean;
-    prompt_version: number;
-    kb_version: number;
-    success_evaluation: boolean;
-    total_cost: number;
-    call_duration: number;
-    cost_breakdown: any;
-    recording_url: string;
-    stereo_recording_url: string;
-    log_url: string;
-    end_reason: string;
+    channel: string;
+    session_id: string;
+    overall_score: number | null;
+    started_at: string;
+    ended_at: string | null;
+    end_reason: string | null;
     created_at: string;
-    updated_at: string;
     assistant: {
       friendly_name: string;
     } | null;
@@ -131,24 +120,13 @@ export async function getReviewQueueItems(orgId: string, reviewed: boolean = fal
             id,
             assistant_id,
             org_id,
-            provider,
-            transcript,
-            transcript_source,
-            final_ai_summary,
-            confidence_score,
-            scored,
-            prompt_version,
-            kb_version,
-            success_evaluation,
-            total_cost,
-            call_duration,
-            cost_breakdown,
-            recording_url,
-            stereo_recording_url,
-            log_url,
+            channel,
+            session_id,
+            overall_score,
+            started_at,
+            ended_at,
             end_reason,
-            created_at,
-            updated_at
+            created_at
           `)
           .eq('id', scoreData.conversation_id)
           .single();
@@ -252,24 +230,13 @@ export async function getReviewQueueItem(reviewId: string) {
             id,
             assistant_id,
             org_id,
-            provider,
-            transcript,
-            transcript_source,
-            final_ai_summary,
-            confidence_score,
-            scored,
-            prompt_version,
-            kb_version,
-            success_evaluation,
-            total_cost,
-            call_duration,
-            cost_breakdown,
-            recording_url,
-            stereo_recording_url,
-            log_url,
+            channel,
+            session_id,
+            overall_score,
+            started_at,
+            ended_at,
             end_reason,
-            created_at,
-            updated_at
+            created_at
           `)
           .eq('id', scoreData.conversation_id)
           .single();
@@ -364,7 +331,7 @@ export async function submitReview(
         updates.push(scoreUpdate);
       }
 
-      // 3. Update conversation confidence score if overridden
+      // 3. Update conversation overall_score if overridden
       if (reviewData.confidence_override !== undefined) {
         // First get the conversation_id from the score
         const { data: scoreData } = await supabase
@@ -377,10 +344,10 @@ export async function submitReview(
           const conversationUpdate = supabase
             .from('conversations')
             .update({
-              confidence_score: reviewData.confidence_override
+              overall_score: reviewData.confidence_override
             })
             .eq('id', scoreData.conversation_id);
-          
+
           updates.push(conversationUpdate);
         }
       }

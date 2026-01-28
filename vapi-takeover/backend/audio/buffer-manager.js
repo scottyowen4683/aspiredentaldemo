@@ -1,54 +1,164 @@
-// audio/buffer-manager.js - Audio buffering and Voice Activity Detection
+// audio/buffer-manager.js - Audio buffering and Voice Activity Detection (VAD)
 import logger from '../services/logger.js';
 
 /**
- * Manages audio buffering from Twilio Media Streams
- * Accumulates base64 audio chunks and detects silence
+ * Manages audio buffering from Twilio Media Streams with proper VAD
+ * Uses energy-based voice activity detection since Twilio sends continuous audio
  */
 export class BufferManager {
   constructor() {
     this.chunks = [];
-    this.lastAudioTime = null;
-    this.silenceThreshold = 1500; // 1.5 seconds of silence = speech end
-    this.silenceTimer = null;
     this.onSpeechEndCallback = null;
+
+    // VAD configuration - tuned for μ-law telephone audio
+    this.silenceThreshold = 5; // Lower threshold - μ-law silence is very low energy
+    this.speechStarted = false;
+    this.silentChunksCount = 0;
+    this.silentChunksRequired = 25; // ~500ms of silence (was 800ms - saves 300ms latency)
+    this.minSpeechChunks = 5; // Minimum chunks to consider valid speech (~100ms)
+    this.speechChunksCount = 0;
+    this.totalChunksReceived = 0;
+
+    // Debounce for processing
+    this.processingTimeout = null;
+    this.processDelay = 50; // Small delay to batch final silence detection
   }
 
   /**
-   * Add audio chunk to buffer
+   * Calculate energy of μ-law audio chunk
+   * For μ-law: 0xFF and 0x7F are silence (bias points)
+   * Deviation from these values indicates audio energy
+   * @param {string} audioBase64 - Base64 encoded μ-law audio
+   * @returns {number} Energy level (0-127 scale)
+   */
+  calculateEnergy(audioBase64) {
+    const buffer = Buffer.from(audioBase64, 'base64');
+    if (buffer.length === 0) return 0;
+
+    let totalDeviation = 0;
+
+    for (let i = 0; i < buffer.length; i++) {
+      const sample = buffer[i];
+      // μ-law silence is around 0x7F (127) or 0xFF (255)
+      // Calculate deviation from silence points
+      const devFrom7F = Math.abs(sample - 0x7F);
+      const devFromFF = Math.abs(sample - 0xFF);
+      // Use the smaller deviation (closer to a silence point = lower energy)
+      const deviation = Math.min(devFrom7F, devFromFF);
+      totalDeviation += deviation;
+    }
+
+    // Return average deviation (0-127 scale)
+    return totalDeviation / buffer.length;
+  }
+
+  /**
+   * Add audio chunk to buffer with VAD
    * @param {string} audioBase64 - Base64 encoded audio from Twilio (μ-law, 8kHz)
    */
   add(audioBase64) {
-    this.chunks.push(audioBase64);
-    this.lastAudioTime = Date.now();
+    this.totalChunksReceived++;
+    const energy = this.calculateEnergy(audioBase64);
+    const isSpeech = energy > this.silenceThreshold;
 
-    // Reset silence timer
-    if (this.silenceTimer) {
-      clearTimeout(this.silenceTimer);
+    // Log every 50 chunks to monitor
+    if (this.totalChunksReceived % 50 === 0) {
+      logger.info('VAD status', {
+        totalChunks: this.totalChunksReceived,
+        currentEnergy: energy.toFixed(2),
+        threshold: this.silenceThreshold,
+        speechStarted: this.speechStarted,
+        speechChunks: this.speechChunksCount,
+        silentChunks: this.silentChunksCount,
+        bufferedChunks: this.chunks.length
+      });
     }
 
-    // Start new silence timer
-    this.silenceTimer = setTimeout(() => {
-      this.detectSpeechEnd();
-    }, this.silenceThreshold);
+    // Always add chunks once speech has started
+    if (this.speechStarted || isSpeech) {
+      this.chunks.push(audioBase64);
+    }
+
+    if (isSpeech) {
+      // Speech detected
+      if (!this.speechStarted) {
+        this.speechStarted = true;
+        this.speechChunksCount = 0;
+        logger.info('🎤 Speech STARTED', { energy: energy.toFixed(2), threshold: this.silenceThreshold });
+      }
+      this.speechChunksCount++;
+      this.silentChunksCount = 0;
+
+      // Clear any pending processing
+      if (this.processingTimeout) {
+        clearTimeout(this.processingTimeout);
+        this.processingTimeout = null;
+      }
+    } else if (this.speechStarted) {
+      // Silence during speech - count consecutive silent chunks
+      this.silentChunksCount++;
+
+      if (this.silentChunksCount >= this.silentChunksRequired) {
+        // Enough silence detected - trigger speech end
+        if (!this.processingTimeout) {
+          logger.info('🔇 Silence detected, scheduling speech end', {
+            silentChunks: this.silentChunksCount,
+            speechChunks: this.speechChunksCount
+          });
+          this.processingTimeout = setTimeout(() => {
+            this.detectSpeechEnd();
+          }, this.processDelay);
+        }
+      }
+    }
   }
 
   /**
-   * Called when silence is detected (user stopped speaking)
+   * Called when silence is detected after speech
    */
   detectSpeechEnd() {
-    if (this.chunks.length === 0) {
+    this.processingTimeout = null;
+
+    // Only process if we had meaningful speech
+    if (this.speechChunksCount < this.minSpeechChunks) {
+      logger.info('Ignoring short audio', {
+        speechChunks: this.speechChunksCount,
+        minRequired: this.minSpeechChunks
+      });
+      this.reset();
       return;
     }
 
-    logger.debug('Speech end detected', {
-      chunks: this.chunks.length,
-      silenceDuration: this.silenceThreshold
+    logger.info('🎙️ Speech END - triggering processing', {
+      totalChunks: this.chunks.length,
+      speechChunks: this.speechChunksCount,
+      silentChunks: this.silentChunksCount,
+      estimatedDurationMs: this.chunks.length * 20 // ~20ms per chunk
     });
+
+    // IMPORTANT: Mark as not started BEFORE callback to prevent re-triggering
+    // The callback will call flush() which does full reset, but we need to
+    // prevent new silence chunks from triggering detectSpeechEnd again
+    this.speechStarted = false;
 
     // Trigger callback if set
     if (this.onSpeechEndCallback) {
       this.onSpeechEndCallback();
+    }
+  }
+
+  /**
+   * Reset state for next utterance
+   */
+  reset() {
+    this.speechStarted = false;
+    this.silentChunksCount = 0;
+    this.speechChunksCount = 0;
+    this.chunks = [];
+
+    if (this.processingTimeout) {
+      clearTimeout(this.processingTimeout);
+      this.processingTimeout = null;
     }
   }
 
@@ -61,30 +171,28 @@ export class BufferManager {
 
   /**
    * Get all accumulated audio and clear buffer
-   * @returns {string} Concatenated base64 audio
+   * @returns {Buffer} Concatenated raw audio buffer (NOT base64)
    */
   flush() {
-    const audio = this.chunks.join('');
-    this.chunks = [];
+    // Decode each base64 chunk and concatenate into single buffer
+    const buffers = this.chunks.map(chunk => Buffer.from(chunk, 'base64'));
+    const totalBuffer = Buffer.concat(buffers);
 
-    if (this.silenceTimer) {
-      clearTimeout(this.silenceTimer);
-      this.silenceTimer = null;
-    }
+    logger.info('Flushing audio buffer', {
+      chunks: this.chunks.length,
+      totalBytes: totalBuffer.length,
+      estimatedDurationSec: (totalBuffer.length / 8000).toFixed(2)
+    });
 
-    return audio;
+    this.reset();
+    return totalBuffer;
   }
 
   /**
    * Clear all audio without processing
    */
   clear() {
-    this.chunks = [];
-
-    if (this.silenceTimer) {
-      clearTimeout(this.silenceTimer);
-      this.silenceTimer = null;
-    }
+    this.reset();
   }
 
   /**
@@ -104,30 +212,35 @@ export class BufferManager {
 
 /**
  * Convert Twilio μ-law audio to PCM WAV for Whisper
- * @param {string} ulawBase64 - Base64 encoded μ-law audio
+ * @param {Buffer} ulawBuffer - Raw μ-law audio buffer (already decoded from base64)
  * @returns {Buffer} WAV file buffer
  */
-export function ulawToWav(ulawBase64) {
-  // Decode base64
-  const ulawBuffer = Buffer.from(ulawBase64, 'base64');
+export function ulawToWav(ulawBuffer) {
+  // Ensure we have a buffer
+  if (!Buffer.isBuffer(ulawBuffer)) {
+    throw new Error('ulawToWav expects a Buffer, not a string');
+  }
 
-  // μ-law to PCM conversion table
+  logger.info('Converting μ-law to WAV', {
+    inputBytes: ulawBuffer.length,
+    estimatedDurationSec: (ulawBuffer.length / 8000).toFixed(2)
+  });
+
+  // μ-law to PCM conversion (ITU-T G.711)
   const mulaw2pcm = (mulaw) => {
-    const MULAW_BIAS = 0x84;
-    const MULAW_MAX = 0x1FFF;
+    // Invert all bits
+    mulaw = ~mulaw & 0xFF;
 
-    mulaw = ~mulaw;
-    const sign = mulaw & 0x80;
+    // Extract sign, exponent, and mantissa
+    const sign = (mulaw & 0x80) ? -1 : 1;
     const exponent = (mulaw >> 4) & 0x07;
     const mantissa = mulaw & 0x0F;
 
-    let sample = mantissa << (exponent + 3);
-    sample += MULAW_BIAS;
+    // Compute linear value
+    let linear = ((mantissa << 3) + 0x84) << exponent;
+    linear -= 0x84;
 
-    if (exponent === 0) sample += 0x84;
-    if (sample > MULAW_MAX) sample = MULAW_MAX;
-
-    return sign ? -sample : sample;
+    return sign * linear;
   };
 
   // Convert μ-law to 16-bit PCM

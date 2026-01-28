@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Plus, Search, Settings, Users, AlertCircle, Bot, ArrowRightCircle, FileText, Building2, UserCog, Mail, DollarSign, Flag, Send } from "lucide-react";
+import { Plus, Search, Settings, Users, AlertCircle, Bot, ArrowRightCircle, FileText, Building2, UserCog, Mail, DollarSign, Flag, Send, Trash2 } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -26,11 +26,12 @@ import {
 import { AddOrganizationModal } from "@/components/dashboard/AddOrganizationModal";
 import OrganizationRubricModal from "@/components/dashboard/OrganizationRubricModal";
 import { SendMonthlyReportModal } from "@/components/dashboard/SendMonthlyReportModal";
-import { getAllOrganizations, getOrganizationStats, Organization } from "@/services/organizationService";
+import { getAllOrganizations, getOrganizationStats, Organization, deleteOrganization } from "@/services/organizationService";
 import { updateOrganizationRubric } from "@/services/rubricService";
 import { useUser } from "@/context/UserContext";
 import { supabase } from "@/supabaseClient";
 import { Skeleton } from "@/components/ui/skeleton";
+import { InviteUserModal } from "@/components/dashboard/InviteUserModal";
 
 export default function Organizations() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -42,6 +43,8 @@ export default function Organizations() {
   const orgForRubricRef = useRef<Organization | null>(null);
   const [isSendReportModalOpen, setIsSendReportModalOpen] = useState(false);
   const [orgForReport, setOrgForReport] = useState<Organization | null>(null);
+  const [isInviteUserModalOpen, setIsInviteUserModalOpen] = useState(false);
+  const [orgForInvite, setOrgForInvite] = useState<Organization | null>(null);
   const { toast } = useToast();
   const navigate = useNavigate();
 
@@ -89,10 +92,30 @@ export default function Organizations() {
     totalConversations: 0,
   };
 
-  // Show total organizations differently for org_admin: only their assigned org(s)
+  // For org_admin, calculate stats from their filtered organizations only
+  const orgAdminStats = user?.role !== "super_admin" ? {
+    organizations: organizations.length,
+    totalUsers: organizations.reduce((sum, org) => sum + (org.userCount || 0), 0),
+    totalAssistants: organizations.reduce((sum, org) => sum + (org.assistantCount || 0), 0),
+    totalConversations: organizations.reduce((sum, org) => sum + (org.conversationCount || 0), 0),
+  } : null;
+
+  // Show stats differently for org_admin: only their assigned org(s) data
   const displayOrgCount = user?.role === "super_admin"
     ? (totalStats.organizations ?? organizations.length)
     : organizations.length;
+
+  const displayUserCount = user?.role === "super_admin"
+    ? totalStats.totalUsers
+    : (orgAdminStats?.totalUsers ?? 0);
+
+  const displayAssistantCount = user?.role === "super_admin"
+    ? totalStats.totalAssistants
+    : (orgAdminStats?.totalAssistants ?? 0);
+
+  const displayConversationCount = user?.role === "super_admin"
+    ? totalStats.totalConversations
+    : (orgAdminStats?.totalConversations ?? 0);
 
   // Filter organizations based on search query
   const filteredOrganizations = organizations.filter(org =>
@@ -158,10 +181,10 @@ export default function Organizations() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              {isLoadingStats ? (
+              {isLoadingStats || isLoadingOrganizations ? (
                 <Skeleton className="h-8 w-24" />
               ) : (
-                <div className="text-3xl font-bold text-foreground">{totalStats.totalUsers}</div>
+                <div className="text-3xl font-bold text-foreground">{displayUserCount}</div>
               )}
             </CardContent>
           </Card>
@@ -172,10 +195,10 @@ export default function Organizations() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              {isLoadingStats ? (
+              {isLoadingStats || isLoadingOrganizations ? (
                 <Skeleton className="h-8 w-24" />
               ) : (
-                <div className="text-3xl font-bold text-foreground">{totalStats.totalAssistants}</div>
+                <div className="text-3xl font-bold text-foreground">{displayAssistantCount}</div>
               )}
             </CardContent>
           </Card>
@@ -186,10 +209,10 @@ export default function Organizations() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              {isLoadingStats ? (
+              {isLoadingStats || isLoadingOrganizations ? (
                 <Skeleton className="h-8 w-24" />
               ) : (
-                <div className="text-3xl font-bold text-foreground">{totalStats.totalConversations}</div>
+                <div className="text-3xl font-bold text-foreground">{displayConversationCount}</div>
               )}
             </CardContent>
           </Card>
@@ -324,13 +347,21 @@ export default function Organizations() {
                               <Building2 className="mr-2 h-4 w-4" />
                               Manage Org
                             </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => { 
+                            <DropdownMenuItem onClick={() => {
                               setOrgForRubric(org);
                               orgForRubricRef.current = org;
                               setIsRubricModalOpen(true);
                             }}>
                               <FileText className="mr-2 h-4 w-4" />
                               Manage Rubric
+                            </DropdownMenuItem>
+                            {/* Invite user - available to org_admin for their own org */}
+                            <DropdownMenuItem onClick={() => {
+                              setOrgForInvite(org);
+                              setIsInviteUserModalOpen(true);
+                            }}>
+                              <UserCog className="mr-2 h-4 w-4" />
+                              Invite User
                             </DropdownMenuItem>
                             {user?.role === "super_admin" && (
                               <DropdownMenuItem onClick={() => {
@@ -364,6 +395,28 @@ export default function Organizations() {
                                 <DropdownMenuItem>
                                   <DollarSign className="mr-2 h-4 w-4" />
                                   Manage Usage and Cost
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  className="text-destructive focus:text-destructive"
+                                  onClick={async () => {
+                                    if (!confirm(`Delete "${org.name}"? This will permanently delete all assistants, users, conversations, and data associated with this organization. This cannot be undone.`)) return;
+                                    try {
+                                      const res = await deleteOrganization(org.id);
+                                      if (res.success) {
+                                        refetchOrganizations();
+                                        toast({ title: "Deleted", description: `Organization "${org.name}" has been deleted` });
+                                      } else {
+                                        console.error("Delete organization error:", res.error);
+                                        toast({ title: "Error", description: res.error || "Failed to delete organization", variant: "destructive" });
+                                      }
+                                    } catch (e: any) {
+                                      console.error("Delete organization exception:", e);
+                                      toast({ title: "Error", description: e?.message || "Failed to delete organization", variant: "destructive" });
+                                    }
+                                  }}
+                                >
+                                  <Trash2 className="mr-2 h-4 w-4" />
+                                  Delete Organization
                                 </DropdownMenuItem>
                               </>
                             )}
@@ -402,60 +455,50 @@ export default function Organizations() {
       />
 
       {/* Organization Rubric Modal */}
-      <OrganizationRubricModal
-        open={isRubricModalOpen}
-        onOpenChange={(open) => {
-          setIsRubricModalOpen(open);
-          
-          // Only reset when truly closing
-          if (!open) {
-            setOrgForRubric(null);
-            orgForRubricRef.current = null;
-          }
-        }}
-        organization={(() => {
-          const orgData = orgForRubric || orgForRubricRef.current;
+      {orgForRubric && (
+        <OrganizationRubricModal
+          open={isRubricModalOpen}
+          onOpenChange={(open) => {
+            setIsRubricModalOpen(open);
 
+            // Only reset when truly closing
+            if (!open) {
+              setOrgForRubric(null);
+              orgForRubricRef.current = null;
+            }
+          }}
+          organization={(() => {
+            const orgData = orgForRubric;
 
+            if (!orgData) return null;
 
+            let parsedRubric = null;
 
-          
-          if (!orgData) return null;
-          
+            // Rubric is stored in settings.default_rubric (JSONB field)
+            const rubricFromSettings = orgData.settings?.default_rubric;
 
-
-          
-          let parsedRubric = null;
-          
-          if (orgData.default_rubric) {
-            // If it's already an object, use it directly
-            if (typeof orgData.default_rubric === 'object') {
-              parsedRubric = orgData.default_rubric;
-
-            } 
-            // If it's a string, parse it
-            else if (typeof orgData.default_rubric === 'string') {
-              try {
-                parsedRubric = JSON.parse(orgData.default_rubric);
-
-              } catch (error) {
-                console.error("❌ Error parsing rubric JSON:", error);
-                parsedRubric = null;
+            if (rubricFromSettings) {
+              // If it's already an object, use it directly
+              if (typeof rubricFromSettings === 'object') {
+                parsedRubric = rubricFromSettings;
+              }
+              // If it's a string, parse it
+              else if (typeof rubricFromSettings === 'string') {
+                try {
+                  parsedRubric = JSON.parse(rubricFromSettings);
+                } catch (error) {
+                  console.error("Error parsing rubric JSON:", error);
+                  parsedRubric = null;
+                }
               }
             }
-          } else {
 
-          }
-          
-          const result = {
-            id: orgData.id,
-            name: orgData.name,
-            default_rubric: parsedRubric
-          };
-          
-
-          return result;
-        })()}
+            return {
+              id: orgData.id,
+              name: orgData.name,
+              default_rubric: parsedRubric
+            };
+          })()}
         onSave={async (rubric) => {
           const orgData = orgForRubric || orgForRubricRef.current;
           if (!orgData) return;
@@ -482,7 +525,8 @@ export default function Organizations() {
             });
           }
         }}
-      />
+        />
+      )}
 
       {/* Send Monthly Report Modal */}
       <SendMonthlyReportModal
@@ -495,6 +539,19 @@ export default function Organizations() {
         }}
         organizationId={orgForReport?.id || ""}
         organizationName={orgForReport?.name || ""}
+      />
+
+      {/* Invite User Modal */}
+      <InviteUserModal
+        open={isInviteUserModalOpen}
+        onOpenChange={(open) => {
+          setIsInviteUserModalOpen(open);
+          if (!open) {
+            setOrgForInvite(null);
+          }
+        }}
+        organizationId={orgForInvite?.id || ""}
+        organizationName={orgForInvite?.name || ""}
       />
     </DashboardLayout>
   );

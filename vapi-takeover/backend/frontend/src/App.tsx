@@ -34,6 +34,8 @@ import Campaigns from "./pages/Campaigns";
 import KnowledgeBase from "./pages/KnowledgeBase";
 import Settings from "./pages/Settings";
 import Billing from "./pages/Billing";
+import Pilot from "./pages/Pilot";
+import Index from "./pages/Index";
 
 // Debug flag - set to true to use minimal app for testing
 const DEBUG_MINIMAL_APP = false;
@@ -97,7 +99,7 @@ const App = () => {
           {/* 👇 Wrap all routes inside UserProvider */}
           <UserProvider>
             <Routes>
-              <Route path="/" element={<Navigate to="/auth" replace />} />
+              <Route path="/" element={<Index />} />
               <Route path="/auth" element={<Auth />} />
               <Route path="/reset-password" element={<ResetPassword />} />
 
@@ -107,6 +109,9 @@ const App = () => {
 
               {/* AFA Routes */}
               <Route path="/vmf" element={<AuthMFA />} />
+
+              {/* Public Pilot Pages */}
+              <Route path="/pilot/:slug" element={<Pilot />} />
 
               {/* Protected routes */}
               <Route
