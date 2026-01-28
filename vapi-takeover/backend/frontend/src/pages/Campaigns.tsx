@@ -59,8 +59,10 @@ export default function Campaigns() {
   const [organizations, setOrganizations] = useState<{ id: string; name?: string | null }[]>([]);
   const [loading, setLoading] = useState(true);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null);
+  const [editingCampaign, setEditingCampaign] = useState<Campaign | null>(null);
   const [campaignStats, setCampaignStats] = useState<Record<string, CampaignStats>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -266,6 +268,77 @@ export default function Campaigns() {
       }
     } catch (err) {
       toast({ title: "Error", description: "Failed to delete campaign", variant: "destructive" });
+    }
+  };
+
+  const handleEditCampaign = async (campaign: Campaign) => {
+    // Fetch full campaign details including outbound fields
+    try {
+      const res = await fetch(`/api/campaigns/${campaign.id}`);
+      if (res.ok) {
+        const data = await res.json();
+        const fullCampaign = data.campaign;
+        setEditingCampaign(fullCampaign);
+        setFormData({
+          name: fullCampaign.name || "",
+          description: fullCampaign.description || "",
+          assistant_id: fullCampaign.assistant_id || "",
+          org_id: fullCampaign.org_id || "",
+          start_date: fullCampaign.start_date?.split("T")[0] || "",
+          end_date: fullCampaign.end_date?.split("T")[0] || "",
+          call_hours_start: fullCampaign.call_hours_start?.slice(0, 5) || "09:00",
+          call_hours_end: fullCampaign.call_hours_end?.slice(0, 5) || "17:00",
+          timezone: fullCampaign.timezone || "Australia/Sydney",
+          max_concurrent_calls: fullCampaign.max_concurrent_calls || 5,
+          calls_per_minute: fullCampaign.calls_per_minute || 2,
+          outbound_prompt: fullCampaign.outbound_prompt || "",
+          first_message: fullCampaign.first_message || "",
+        });
+        setIsEditModalOpen(true);
+      }
+    } catch (err) {
+      toast({ title: "Error", description: "Failed to load campaign details", variant: "destructive" });
+    }
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editingCampaign) return;
+
+    setIsSubmitting(true);
+    try {
+      const res = await fetch(`/api/campaigns/${editingCampaign.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: formData.name,
+          description: formData.description,
+          assistant_id: formData.assistant_id,
+          start_date: formData.start_date || null,
+          end_date: formData.end_date || null,
+          call_hours_start: formData.call_hours_start,
+          call_hours_end: formData.call_hours_end,
+          timezone: formData.timezone,
+          max_concurrent_calls: formData.max_concurrent_calls,
+          calls_per_minute: formData.calls_per_minute,
+          outbound_prompt: formData.outbound_prompt || null,
+          first_message: formData.first_message || null,
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setCampaigns((prev) => prev.map((c) => (c.id === editingCampaign.id ? data.campaign : c)));
+        setIsEditModalOpen(false);
+        setEditingCampaign(null);
+        toast({ title: "Success", description: "Campaign updated successfully" });
+      } else {
+        const error = await res.json();
+        toast({ title: "Error", description: error.error || "Failed to update campaign", variant: "destructive" });
+      }
+    } catch (err) {
+      toast({ title: "Error", description: "Failed to update campaign", variant: "destructive" });
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -479,6 +552,14 @@ export default function Campaigns() {
                       <Button
                         size="sm"
                         variant="outline"
+                        onClick={() => handleEditCampaign(campaign)}
+                      >
+                        <Settings className="h-3 w-3" />
+                      </Button>
+
+                      <Button
+                        size="sm"
+                        variant="outline"
                         className="text-destructive hover:text-destructive"
                         onClick={() => handleDeleteCampaign(campaign.id)}
                         disabled={campaign.status === "active"}
@@ -596,7 +677,7 @@ export default function Campaigns() {
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label>Start Date</Label>
+                <Label>Start Date (Optional)</Label>
                 <Input
                   type="date"
                   value={formData.start_date}
@@ -604,7 +685,7 @@ export default function Campaigns() {
                 />
               </div>
               <div className="space-y-2">
-                <Label>End Date</Label>
+                <Label>End Date (Optional)</Label>
                 <Input
                   type="date"
                   value={formData.end_date}
@@ -732,6 +813,158 @@ export default function Campaigns() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsUploadModalOpen(false)}>
               Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Campaign Modal */}
+      <Dialog open={isEditModalOpen} onOpenChange={(open) => {
+        setIsEditModalOpen(open);
+        if (!open) setEditingCampaign(null);
+      }}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Settings className="h-5 w-5 text-blue-500" />
+              Edit Campaign
+            </DialogTitle>
+            <DialogDescription>
+              Update the settings for "{editingCampaign?.name}"
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Campaign Name *</Label>
+                <Input
+                  placeholder="e.g. Q1 Customer Outreach"
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Voice Assistant</Label>
+                <Select value={formData.assistant_id} onValueChange={(v) => setFormData({ ...formData, assistant_id: v })}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select voice assistant" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {assistants.map((assistant) => (
+                      <SelectItem key={assistant.id} value={assistant.id}>
+                        {assistant.friendly_name || assistant.id}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Description</Label>
+              <Textarea
+                placeholder="Campaign description..."
+                value={formData.description}
+                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+              />
+            </div>
+
+            {/* Outbound-specific fields */}
+            <div className="border-t pt-4 mt-4">
+              <h4 className="font-medium text-sm mb-3 text-muted-foreground">Outbound Call Settings</h4>
+
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label>Opening Message</Label>
+                  <Textarea
+                    placeholder="What the AI says when the call is answered..."
+                    value={formData.first_message}
+                    onChange={(e) => setFormData({ ...formData, first_message: e.target.value })}
+                    rows={2}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Campaign Prompt</Label>
+                  <Textarea
+                    placeholder="Custom instructions for this campaign..."
+                    value={formData.outbound_prompt}
+                    onChange={(e) => setFormData({ ...formData, outbound_prompt: e.target.value })}
+                    rows={4}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Start Date (Optional)</Label>
+                <Input
+                  type="date"
+                  value={formData.start_date}
+                  onChange={(e) => setFormData({ ...formData, start_date: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>End Date (Optional)</Label>
+                <Input
+                  type="date"
+                  value={formData.end_date}
+                  onChange={(e) => setFormData({ ...formData, end_date: e.target.value })}
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <Label>Call Hours Start</Label>
+                <Input
+                  type="time"
+                  value={formData.call_hours_start}
+                  onChange={(e) => setFormData({ ...formData, call_hours_start: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Call Hours End</Label>
+                <Input
+                  type="time"
+                  value={formData.call_hours_end}
+                  onChange={(e) => setFormData({ ...formData, call_hours_end: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Timezone</Label>
+                <Select value={formData.timezone} onValueChange={(v) => setFormData({ ...formData, timezone: v })}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Australia/Sydney">Sydney (AEST)</SelectItem>
+                    <SelectItem value="Australia/Melbourne">Melbourne (AEST)</SelectItem>
+                    <SelectItem value="Australia/Brisbane">Brisbane (AEST)</SelectItem>
+                    <SelectItem value="Australia/Perth">Perth (AWST)</SelectItem>
+                    <SelectItem value="UTC">UTC</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => {
+              setIsEditModalOpen(false);
+              setEditingCampaign(null);
+            }}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSaveEdit}
+              disabled={isSubmitting}
+              className="bg-gradient-to-r from-blue-600 to-purple-600"
+            >
+              {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Save Changes
             </Button>
           </DialogFooter>
         </DialogContent>
