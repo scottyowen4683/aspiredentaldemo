@@ -966,34 +966,34 @@ export default function CRM() {
                       />
                     </div>
                   </div>
-                  <Select value={statusFilter} onValueChange={setStatusFilter}>
+                  <Select value={statusFilter || "all"} onValueChange={(v) => setStatusFilter(v === "all" ? "" : v)}>
                     <SelectTrigger className="w-[140px]">
                       <SelectValue placeholder="Status" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">All Status</SelectItem>
+                      <SelectItem value="all">All Status</SelectItem>
                       {CUSTOMER_STATUSES.map(s => (
                         <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
-                  <Select value={stageFilter} onValueChange={setStageFilter}>
+                  <Select value={stageFilter || "all"} onValueChange={(v) => setStageFilter(v === "all" ? "" : v)}>
                     <SelectTrigger className="w-[140px]">
                       <SelectValue placeholder="Stage" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">All Stages</SelectItem>
+                      <SelectItem value="all">All Stages</SelectItem>
                       {PIPELINE_STAGES.map(s => (
                         <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
-                  <Select value={stateFilter} onValueChange={setStateFilter}>
+                  <Select value={stateFilter || "all"} onValueChange={(v) => setStateFilter(v === "all" ? "" : v)}>
                     <SelectTrigger className="w-[140px]">
                       <SelectValue placeholder="State" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">All States</SelectItem>
+                      <SelectItem value="all">All States</SelectItem>
                       {AUSTRALIAN_STATES.map(s => (
                         <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
                       ))}
