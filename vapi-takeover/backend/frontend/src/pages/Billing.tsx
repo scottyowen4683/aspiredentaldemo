@@ -178,7 +178,7 @@ export default function Billing() {
       // Include channel='voice' OR channel IS NULL (backward compatibility for older records)
       let voiceQuery = supabase
         .from("conversations")
-        .select("org_id, duration_seconds, ai_duration_seconds, post_transfer_seconds, escalation, channel")
+        .select("org_id, duration_seconds, channel")
         .or("channel.eq.voice,channel.is.null")  // Only count voice calls (or null for backward compat), not chat sessions
         .gte("created_at", startDate.toISOString())
         .lte("created_at", endDate.toISOString());
@@ -250,28 +250,15 @@ export default function Billing() {
           return; // Skip this conversation
         }
 
-        // For transferred calls, use ai_duration_seconds for AI cost, post_transfer_seconds for post-transfer cost
-        // For non-transferred calls, duration_seconds is all AI time
-        // Cap all durations at MAX to prevent bad data
-        const aiSeconds = Math.min(conv.ai_duration_seconds ?? rawDuration, MAX_CALL_SECONDS);
-        const postTransferSeconds = Math.min(conv.post_transfer_seconds ?? 0, MAX_CALL_SECONDS);
+        // For now, all duration is AI time (transfer tracking columns not yet added)
         const totalSeconds = Math.min(rawDuration, MAX_CALL_SECONDS);
-
-        const aiMinutes = aiSeconds / 60;
-        const postTransferMinutes = postTransferSeconds / 60;
         const totalMinutes = totalSeconds / 60;
 
         // Track by org
-        voiceByOrg[conv.org_id] = (voiceByOrg[conv.org_id] || 0) + aiMinutes;
-        postTransferByOrg[conv.org_id] = (postTransferByOrg[conv.org_id] || 0) + postTransferMinutes;
+        voiceByOrg[conv.org_id] = (voiceByOrg[conv.org_id] || 0) + totalMinutes;
 
         totalVoiceMinutes += totalMinutes;
-        totalAiMinutes += aiMinutes;
-        totalPostTransferMinutes += postTransferMinutes;
-
-        if (conv.escalation) {
-          totalTransferredCalls++;
-        }
+        totalAiMinutes += totalMinutes;
       });
 
       // Debug: log voice data summary
