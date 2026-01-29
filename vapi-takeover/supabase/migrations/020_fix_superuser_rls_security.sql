@@ -11,8 +11,10 @@
 -- This function bypasses RLS to check if current user is super_admin
 -- This solves the chicken-and-egg problem where RLS policies need to
 -- query users table but can't because of RLS
+-- NOTE: Functions are in 'public' schema since 'auth' is managed by Supabase
 
-CREATE OR REPLACE FUNCTION auth.is_super_admin()
+DROP FUNCTION IF EXISTS public.is_super_admin();
+CREATE OR REPLACE FUNCTION public.is_super_admin()
 RETURNS BOOLEAN
 LANGUAGE sql
 SECURITY DEFINER
@@ -27,17 +29,19 @@ AS $$
 $$;
 
 -- Grant execute to authenticated users
-GRANT EXECUTE ON FUNCTION auth.is_super_admin() TO authenticated;
-GRANT EXECUTE ON FUNCTION auth.is_super_admin() TO service_role;
+GRANT EXECUTE ON FUNCTION public.is_super_admin() TO authenticated;
+GRANT EXECUTE ON FUNCTION public.is_super_admin() TO anon;
+GRANT EXECUTE ON FUNCTION public.is_super_admin() TO service_role;
 
-COMMENT ON FUNCTION auth.is_super_admin() IS 'Securely checks if current user is super_admin (bypasses RLS to prevent circular dependency)';
+COMMENT ON FUNCTION public.is_super_admin() IS 'Securely checks if current user is super_admin (bypasses RLS to prevent circular dependency)';
 
 -- ============================================================================
 -- PART 2: CREATE FUNCTION TO GET CURRENT USER ORG_ID
 -- ============================================================================
 -- This allows RLS policies to efficiently get the current user's org
 
-CREATE OR REPLACE FUNCTION auth.user_org_id()
+DROP FUNCTION IF EXISTS public.current_user_org_id();
+CREATE OR REPLACE FUNCTION public.current_user_org_id()
 RETURNS UUID
 LANGUAGE sql
 SECURITY DEFINER
@@ -49,16 +53,18 @@ AS $$
   LIMIT 1;
 $$;
 
-GRANT EXECUTE ON FUNCTION auth.user_org_id() TO authenticated;
-GRANT EXECUTE ON FUNCTION auth.user_org_id() TO service_role;
+GRANT EXECUTE ON FUNCTION public.current_user_org_id() TO authenticated;
+GRANT EXECUTE ON FUNCTION public.current_user_org_id() TO anon;
+GRANT EXECUTE ON FUNCTION public.current_user_org_id() TO service_role;
 
-COMMENT ON FUNCTION auth.user_org_id() IS 'Returns the org_id of the current authenticated user (bypasses RLS)';
+COMMENT ON FUNCTION public.current_user_org_id() IS 'Returns the org_id of the current authenticated user (bypasses RLS)';
 
 -- ============================================================================
 -- PART 3: CREATE FUNCTION TO GET CURRENT USER ROLE
 -- ============================================================================
 
-CREATE OR REPLACE FUNCTION auth.user_role()
+DROP FUNCTION IF EXISTS public.current_user_role();
+CREATE OR REPLACE FUNCTION public.current_user_role()
 RETURNS TEXT
 LANGUAGE sql
 SECURITY DEFINER
@@ -70,10 +76,11 @@ AS $$
   LIMIT 1;
 $$;
 
-GRANT EXECUTE ON FUNCTION auth.user_role() TO authenticated;
-GRANT EXECUTE ON FUNCTION auth.user_role() TO service_role;
+GRANT EXECUTE ON FUNCTION public.current_user_role() TO authenticated;
+GRANT EXECUTE ON FUNCTION public.current_user_role() TO anon;
+GRANT EXECUTE ON FUNCTION public.current_user_role() TO service_role;
 
-COMMENT ON FUNCTION auth.user_role() IS 'Returns the role of the current authenticated user (bypasses RLS)';
+COMMENT ON FUNCTION public.current_user_role() IS 'Returns the role of the current authenticated user (bypasses RLS)';
 
 -- ============================================================================
 -- PART 4: ENSURE RLS IS ENABLED ON USERS TABLE
@@ -111,8 +118,8 @@ CREATE POLICY "service_role_full_access"
 CREATE POLICY "super_admin_all_access"
   ON users FOR ALL
   TO authenticated
-  USING (auth.is_super_admin())
-  WITH CHECK (auth.is_super_admin());
+  USING (is_super_admin())
+  WITH CHECK (is_super_admin());
 
 -- Users can read their own row (self-lookup)
 CREATE POLICY "users_read_own"
@@ -132,8 +139,8 @@ CREATE POLICY "org_admin_view_org_users"
   ON users FOR SELECT
   TO authenticated
   USING (
-    auth.user_role() = 'org_admin'
-    AND org_id = auth.user_org_id()
+    current_user_role() = 'org_admin'
+    AND org_id = current_user_org_id()
   );
 
 -- ============================================================================
@@ -154,13 +161,13 @@ CREATE POLICY "service_role_full_access"
 CREATE POLICY "super_admin_all_access"
   ON organizations FOR ALL
   TO authenticated
-  USING (auth.is_super_admin())
-  WITH CHECK (auth.is_super_admin());
+  USING (is_super_admin())
+  WITH CHECK (is_super_admin());
 
 CREATE POLICY "org_admin_view_own_org"
   ON organizations FOR SELECT
   TO authenticated
-  USING (id = auth.user_org_id());
+  USING (id = current_user_org_id());
 
 -- ============================================================================
 -- PART 8: FIX SECURITY DEFINER VIEWS
@@ -262,14 +269,14 @@ CREATE POLICY "service_role_full_access"
 CREATE POLICY "super_admin_all_access"
   ON assistants FOR ALL
   TO authenticated
-  USING (auth.is_super_admin())
-  WITH CHECK (auth.is_super_admin());
+  USING (is_super_admin())
+  WITH CHECK (is_super_admin());
 
 CREATE POLICY "org_admin_manage_own"
   ON assistants FOR ALL
   TO authenticated
-  USING (org_id = auth.user_org_id())
-  WITH CHECK (org_id = auth.user_org_id());
+  USING (org_id = current_user_org_id())
+  WITH CHECK (org_id = current_user_org_id());
 
 -- Update conversations policies
 DROP POLICY IF EXISTS "super_admin_all" ON conversations;
@@ -285,13 +292,13 @@ CREATE POLICY "service_role_full_access"
 CREATE POLICY "super_admin_all_access"
   ON conversations FOR ALL
   TO authenticated
-  USING (auth.is_super_admin())
-  WITH CHECK (auth.is_super_admin());
+  USING (is_super_admin())
+  WITH CHECK (is_super_admin());
 
 CREATE POLICY "org_admin_view_own"
   ON conversations FOR SELECT
   TO authenticated
-  USING (org_id = auth.user_org_id());
+  USING (org_id = current_user_org_id());
 
 -- Update conversation_messages policies
 DROP POLICY IF EXISTS "super_admin_all" ON conversation_messages;
@@ -307,8 +314,8 @@ CREATE POLICY "service_role_full_access"
 CREATE POLICY "super_admin_all_access"
   ON conversation_messages FOR ALL
   TO authenticated
-  USING (auth.is_super_admin())
-  WITH CHECK (auth.is_super_admin());
+  USING (is_super_admin())
+  WITH CHECK (is_super_admin());
 
 CREATE POLICY "org_admin_view_own"
   ON conversation_messages FOR SELECT
@@ -316,7 +323,7 @@ CREATE POLICY "org_admin_view_own"
   USING (
     conversation_id IN (
       SELECT id FROM conversations
-      WHERE org_id = auth.user_org_id()
+      WHERE org_id = current_user_org_id()
     )
   );
 
@@ -334,14 +341,14 @@ CREATE POLICY "service_role_full_access"
 CREATE POLICY "super_admin_all_access"
   ON knowledge_chunks FOR ALL
   TO authenticated
-  USING (auth.is_super_admin())
-  WITH CHECK (auth.is_super_admin());
+  USING (is_super_admin())
+  WITH CHECK (is_super_admin());
 
 CREATE POLICY "org_admin_manage_own"
   ON knowledge_chunks FOR ALL
   TO authenticated
-  USING (org_id = auth.user_org_id())
-  WITH CHECK (org_id = auth.user_org_id());
+  USING (org_id = current_user_org_id())
+  WITH CHECK (org_id = current_user_org_id());
 
 -- Update cost_usage policies
 DROP POLICY IF EXISTS "super_admin_all" ON cost_usage;
@@ -357,13 +364,13 @@ CREATE POLICY "service_role_full_access"
 CREATE POLICY "super_admin_all_access"
   ON cost_usage FOR ALL
   TO authenticated
-  USING (auth.is_super_admin())
-  WITH CHECK (auth.is_super_admin());
+  USING (is_super_admin())
+  WITH CHECK (is_super_admin());
 
 CREATE POLICY "org_admin_view_own"
   ON cost_usage FOR SELECT
   TO authenticated
-  USING (org_id = auth.user_org_id());
+  USING (org_id = current_user_org_id());
 
 -- Update audit_logs policies
 DROP POLICY IF EXISTS "super_admin_all" ON audit_logs;
@@ -378,13 +385,13 @@ CREATE POLICY "service_role_full_access"
 CREATE POLICY "super_admin_all_access"
   ON audit_logs FOR ALL
   TO authenticated
-  USING (auth.is_super_admin())
-  WITH CHECK (auth.is_super_admin());
+  USING (is_super_admin())
+  WITH CHECK (is_super_admin());
 
 CREATE POLICY "org_admin_view_own"
   ON audit_logs FOR SELECT
   TO authenticated
-  USING (org_id = auth.user_org_id());
+  USING (org_id = current_user_org_id());
 
 -- ============================================================================
 -- PART 10: UPDATE INTEGRATION TABLES TO USE SECURE FUNCTIONS
@@ -404,14 +411,14 @@ CREATE POLICY "service_role_full_access"
 CREATE POLICY "super_admin_all_access"
   ON organization_integrations FOR ALL
   TO authenticated
-  USING (auth.is_super_admin())
-  WITH CHECK (auth.is_super_admin());
+  USING (is_super_admin())
+  WITH CHECK (is_super_admin());
 
 CREATE POLICY "org_admin_manage_own"
   ON organization_integrations FOR ALL
   TO authenticated
-  USING (org_id = auth.user_org_id())
-  WITH CHECK (org_id = auth.user_org_id());
+  USING (org_id = current_user_org_id())
+  WITH CHECK (org_id = current_user_org_id());
 
 -- integration_sync_logs
 DROP POLICY IF EXISTS "Super admins can access all integration_sync_logs" ON integration_sync_logs;
@@ -427,8 +434,8 @@ CREATE POLICY "service_role_full_access"
 CREATE POLICY "super_admin_all_access"
   ON integration_sync_logs FOR ALL
   TO authenticated
-  USING (auth.is_super_admin())
-  WITH CHECK (auth.is_super_admin());
+  USING (is_super_admin())
+  WITH CHECK (is_super_admin());
 
 CREATE POLICY "org_admin_view_own"
   ON integration_sync_logs FOR SELECT
@@ -436,7 +443,7 @@ CREATE POLICY "org_admin_view_own"
   USING (
     integration_id IN (
       SELECT id FROM organization_integrations
-      WHERE org_id = auth.user_org_id()
+      WHERE org_id = current_user_org_id()
     )
   );
 
@@ -454,8 +461,8 @@ CREATE POLICY "service_role_full_access"
 CREATE POLICY "super_admin_all_access"
   ON integration_event_queue FOR ALL
   TO authenticated
-  USING (auth.is_super_admin())
-  WITH CHECK (auth.is_super_admin());
+  USING (is_super_admin())
+  WITH CHECK (is_super_admin());
 
 CREATE POLICY "org_admin_view_own"
   ON integration_event_queue FOR SELECT
@@ -463,7 +470,7 @@ CREATE POLICY "org_admin_view_own"
   USING (
     integration_id IN (
       SELECT id FROM organization_integrations
-      WHERE org_id = auth.user_org_id()
+      WHERE org_id = current_user_org_id()
     )
   );
 
@@ -480,8 +487,8 @@ CREATE POLICY "service_role_full_access"
 CREATE POLICY "super_admin_all_access"
   ON integration_assistant_assignments FOR ALL
   TO authenticated
-  USING (auth.is_super_admin())
-  WITH CHECK (auth.is_super_admin());
+  USING (is_super_admin())
+  WITH CHECK (is_super_admin());
 
 CREATE POLICY "org_admin_manage_own"
   ON integration_assistant_assignments FOR ALL
@@ -489,13 +496,13 @@ CREATE POLICY "org_admin_manage_own"
   USING (
     integration_id IN (
       SELECT id FROM organization_integrations
-      WHERE org_id = auth.user_org_id()
+      WHERE org_id = current_user_org_id()
     )
   )
   WITH CHECK (
     integration_id IN (
       SELECT id FROM organization_integrations
-      WHERE org_id = auth.user_org_id()
+      WHERE org_id = current_user_org_id()
     )
   );
 
@@ -517,13 +524,13 @@ CREATE POLICY "service_role_full_access"
 CREATE POLICY "super_admin_all_access"
   ON interaction_logs FOR ALL
   TO authenticated
-  USING (auth.is_super_admin())
-  WITH CHECK (auth.is_super_admin());
+  USING (is_super_admin())
+  WITH CHECK (is_super_admin());
 
 CREATE POLICY "org_admin_view_own"
   ON interaction_logs FOR SELECT
   TO authenticated
-  USING (org_id = auth.user_org_id());
+  USING (org_id = current_user_org_id());
 
 -- outbound_campaigns
 DROP POLICY IF EXISTS "Super admins can access all outbound_campaigns" ON outbound_campaigns;
@@ -539,14 +546,14 @@ CREATE POLICY "service_role_full_access"
 CREATE POLICY "super_admin_all_access"
   ON outbound_campaigns FOR ALL
   TO authenticated
-  USING (auth.is_super_admin())
-  WITH CHECK (auth.is_super_admin());
+  USING (is_super_admin())
+  WITH CHECK (is_super_admin());
 
 CREATE POLICY "org_admin_manage_own"
   ON outbound_campaigns FOR ALL
   TO authenticated
-  USING (org_id = auth.user_org_id())
-  WITH CHECK (org_id = auth.user_org_id());
+  USING (org_id = current_user_org_id())
+  WITH CHECK (org_id = current_user_org_id());
 
 -- campaign_contacts
 DROP POLICY IF EXISTS "Super admins can access all campaign_contacts" ON campaign_contacts;
@@ -562,8 +569,8 @@ CREATE POLICY "service_role_full_access"
 CREATE POLICY "super_admin_all_access"
   ON campaign_contacts FOR ALL
   TO authenticated
-  USING (auth.is_super_admin())
-  WITH CHECK (auth.is_super_admin());
+  USING (is_super_admin())
+  WITH CHECK (is_super_admin());
 
 CREATE POLICY "org_admin_manage_own"
   ON campaign_contacts FOR ALL
@@ -571,13 +578,13 @@ CREATE POLICY "org_admin_manage_own"
   USING (
     campaign_id IN (
       SELECT id FROM outbound_campaigns
-      WHERE org_id = auth.user_org_id()
+      WHERE org_id = current_user_org_id()
     )
   )
   WITH CHECK (
     campaign_id IN (
       SELECT id FROM outbound_campaigns
-      WHERE org_id = auth.user_org_id()
+      WHERE org_id = current_user_org_id()
     )
   );
 
@@ -595,13 +602,13 @@ CREATE POLICY "service_role_full_access"
 CREATE POLICY "super_admin_all_access"
   ON contact_requests FOR ALL
   TO authenticated
-  USING (auth.is_super_admin())
-  WITH CHECK (auth.is_super_admin());
+  USING (is_super_admin())
+  WITH CHECK (is_super_admin());
 
 CREATE POLICY "org_admin_view_own"
   ON contact_requests FOR SELECT
   TO authenticated
-  USING (org_id = auth.user_org_id());
+  USING (org_id = current_user_org_id());
 
 -- ============================================================================
 -- COMMENTS
@@ -619,9 +626,9 @@ COMMENT ON POLICY "org_admin_view_org_users" ON users IS 'Org admins can view us
 -- After applying this migration, run these queries to verify:
 --
 -- 1. Check that the functions exist:
---    SELECT auth.is_super_admin();
---    SELECT auth.user_org_id();
---    SELECT auth.user_role();
+--    SELECT is_super_admin();
+--    SELECT current_user_org_id();
+--    SELECT current_user_role();
 --
 -- 2. Check that RLS is enabled:
 --    SELECT tablename, rowsecurity
