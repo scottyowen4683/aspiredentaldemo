@@ -212,18 +212,30 @@ export default function Billing() {
       const phoneNumbers = assistants?.filter(a => a.phone_number).length || 0;
 
       // Calculate voice minutes by org (AI minutes vs post-transfer minutes)
+      // MAX_CALL_DURATION: Cap at 60 minutes (3600 seconds) - any longer is likely bad data
+      const MAX_CALL_SECONDS = 3600;
       const voiceByOrg: Record<string, number> = {};
       const postTransferByOrg: Record<string, number> = {};
       let totalVoiceMinutes = 0;
       let totalAiMinutes = 0;
       let totalPostTransferMinutes = 0;
       let totalTransferredCalls = 0;
+      let skippedBadData = 0;
+
       voiceData?.forEach(conv => {
+        // Skip conversations with obviously bad data (null, 0, or > 1 hour)
+        const rawDuration = conv.duration_seconds || 0;
+        if (rawDuration <= 0 || rawDuration > MAX_CALL_SECONDS) {
+          skippedBadData++;
+          return; // Skip this conversation
+        }
+
         // For transferred calls, use ai_duration_seconds for AI cost, post_transfer_seconds for post-transfer cost
         // For non-transferred calls, duration_seconds is all AI time
-        const aiSeconds = conv.ai_duration_seconds ?? conv.duration_seconds ?? 0;
-        const postTransferSeconds = conv.post_transfer_seconds ?? 0;
-        const totalSeconds = conv.duration_seconds || 0;
+        // Cap all durations at MAX to prevent bad data
+        const aiSeconds = Math.min(conv.ai_duration_seconds ?? rawDuration, MAX_CALL_SECONDS);
+        const postTransferSeconds = Math.min(conv.post_transfer_seconds ?? 0, MAX_CALL_SECONDS);
+        const totalSeconds = Math.min(rawDuration, MAX_CALL_SECONDS);
 
         const aiMinutes = aiSeconds / 60;
         const postTransferMinutes = postTransferSeconds / 60;
@@ -241,6 +253,11 @@ export default function Billing() {
           totalTransferredCalls++;
         }
       });
+
+      // Log if we skipped bad data (for debugging)
+      if (skippedBadData > 0) {
+        console.warn(`Billing: Skipped ${skippedBadData} conversations with bad duration data (null, 0, or > 60 min)`);
+      }
 
       // Calculate chat interactions by org
       const chatByOrg: Record<string, number> = {};
