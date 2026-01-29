@@ -102,6 +102,9 @@ export function useConversations(filters: ConversationsFilters = {}) {
       if (filters.score_max !== undefined) {
         countQuery = countQuery.lte('overall_score', filters.score_max);
       }
+      if (filters.sentiment) {
+        countQuery = countQuery.eq('sentiment', filters.sentiment);
+      }
 
       // Get total count
       const { count, error: countError } = await countQuery;
@@ -169,6 +172,10 @@ export function useConversations(filters: ConversationsFilters = {}) {
 
       if (filters.score_max !== undefined) {
         query = query.lte('overall_score', filters.score_max);
+      }
+
+      if (filters.sentiment) {
+        query = query.eq('sentiment', filters.sentiment);
       }
 
       // Escalation status would require additional database fields
