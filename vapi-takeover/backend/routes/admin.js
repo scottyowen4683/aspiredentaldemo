@@ -1199,12 +1199,13 @@ router.post('/service-request', async (req, res) => {
 // POST /api/admin/conversations/rescore - Bulk re-score conversations
 router.post('/conversations/rescore', async (req, res) => {
   try {
-    const { conversation_ids, rescore_all, limit = 50 } = req.body;
+    const { conversation_ids, rescore_all, limit = 50, offset = 0 } = req.body;
 
     logger.info('Bulk re-score request', {
       rescoreAll: rescore_all,
       idsProvided: conversation_ids?.length,
-      limit
+      limit,
+      offset
     });
 
     // Get conversations to score
@@ -1220,7 +1221,12 @@ router.post('/conversations/rescore', async (req, res) => {
       query = query.or('scored.is.null,scored.eq.false');
     }
 
-    query = query.limit(Math.min(limit, 100)); // Max 100 at a time
+    // Apply offset for pagination when rescoring all
+    if (offset > 0) {
+      query = query.range(offset, offset + Math.min(limit, 100) - 1);
+    } else {
+      query = query.limit(Math.min(limit, 100)); // Max 100 at a time
+    }
 
     const { data: conversations, error: fetchError } = await query;
 
@@ -1333,6 +1339,7 @@ router.post('/conversations/rescore', async (req, res) => {
       scored,
       failed,
       total: conversations.length,
+      next_offset: conversations.length > 0 ? offset + conversations.length : null,
       results
     });
 
@@ -1348,12 +1355,13 @@ router.post('/conversations/rescore', async (req, res) => {
 // Also add endpoint for chat conversations
 router.post('/chat-conversations/rescore', async (req, res) => {
   try {
-    const { conversation_ids, rescore_all, limit = 50 } = req.body;
+    const { conversation_ids, rescore_all, limit = 50, offset = 0 } = req.body;
 
     logger.info('Bulk re-score chat request', {
       rescoreAll: rescore_all,
       idsProvided: conversation_ids?.length,
-      limit
+      limit,
+      offset
     });
 
     // Get chat conversations to score (note: org_id comes from assistant, not directly on chat_conversations)
@@ -1368,7 +1376,12 @@ router.post('/chat-conversations/rescore', async (req, res) => {
       query = query.or('scored.is.null,scored.eq.false');
     }
 
-    query = query.limit(Math.min(limit, 100));
+    // Apply offset for pagination when rescoring all
+    if (offset > 0) {
+      query = query.range(offset, offset + Math.min(limit, 100) - 1);
+    } else {
+      query = query.limit(Math.min(limit, 100));
+    }
 
     const { data: conversations, error: fetchError } = await query;
 
@@ -1488,6 +1501,7 @@ router.post('/chat-conversations/rescore', async (req, res) => {
       scored,
       failed,
       total: conversations.length,
+      next_offset: conversations.length > 0 ? offset + conversations.length : null,
       results
     });
 
