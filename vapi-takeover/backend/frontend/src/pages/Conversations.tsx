@@ -138,8 +138,9 @@ export default function Conversations() {
   };
 
   const isFlagged = (conversation: any) => {
-    // Only flag if scored AND has actual issues
+    // Only flag if scored AND has actual issues AND not already reviewed
     if (!conversation.scored) return false;
+    if (conversation.reviewed === true) return false; // Exclude reviewed conversations
     const score = getScore(conversation);
     // Flag if: low score OR explicitly failed success evaluation OR negative sentiment
     return (score !== null && score < 70) ||
