@@ -49,6 +49,7 @@ import {
   USD_TO_AUD_RATE,
   usdToAud,
   VOICE_AI_COSTS_PER_MINUTE,
+  POST_TRANSFER_COSTS_PER_MINUTE,
   CHAT_COSTS_PER_INTERACTION,
   SMS_COSTS_PER_MESSAGE,
   FIXED_MONTHLY_COSTS,
@@ -66,12 +67,16 @@ import {
 interface BillingData {
   // Usage counts
   voiceMinutes: number;
+  aiMinutes: number;
+  postTransferMinutes: number;
+  transferredCalls: number;
   chatInteractions: number;
   smsMessages: number;
   phoneNumbers: number;
 
   // Variable costs (USD)
   voiceCostUSD: number;
+  postTransferCostUSD: number;
   chatCostUSD: number;
   smsCostUSD: number;
   totalVariableCostUSD: number;
@@ -169,10 +174,10 @@ export default function Billing() {
 
       const { data: orgsData } = await orgsQuery;
 
-      // Fetch voice conversations
+      // Fetch voice conversations with transfer tracking
       let voiceQuery = supabase
         .from("conversations")
-        .select("org_id, duration_seconds")
+        .select("org_id, duration_seconds, ai_duration_seconds, post_transfer_seconds, escalation")
         .gte("created_at", startDate.toISOString())
         .lte("created_at", endDate.toISOString());
 
@@ -206,13 +211,35 @@ export default function Billing() {
       // Count phone numbers
       const phoneNumbers = assistants?.filter(a => a.phone_number).length || 0;
 
-      // Calculate voice minutes by org
+      // Calculate voice minutes by org (AI minutes vs post-transfer minutes)
       const voiceByOrg: Record<string, number> = {};
+      const postTransferByOrg: Record<string, number> = {};
       let totalVoiceMinutes = 0;
+      let totalAiMinutes = 0;
+      let totalPostTransferMinutes = 0;
+      let totalTransferredCalls = 0;
       voiceData?.forEach(conv => {
-        const minutes = (conv.duration_seconds || 0) / 60;
-        voiceByOrg[conv.org_id] = (voiceByOrg[conv.org_id] || 0) + minutes;
-        totalVoiceMinutes += minutes;
+        // For transferred calls, use ai_duration_seconds for AI cost, post_transfer_seconds for post-transfer cost
+        // For non-transferred calls, duration_seconds is all AI time
+        const aiSeconds = conv.ai_duration_seconds ?? conv.duration_seconds ?? 0;
+        const postTransferSeconds = conv.post_transfer_seconds ?? 0;
+        const totalSeconds = conv.duration_seconds || 0;
+
+        const aiMinutes = aiSeconds / 60;
+        const postTransferMinutes = postTransferSeconds / 60;
+        const totalMinutes = totalSeconds / 60;
+
+        // Track by org
+        voiceByOrg[conv.org_id] = (voiceByOrg[conv.org_id] || 0) + aiMinutes;
+        postTransferByOrg[conv.org_id] = (postTransferByOrg[conv.org_id] || 0) + postTransferMinutes;
+
+        totalVoiceMinutes += totalMinutes;
+        totalAiMinutes += aiMinutes;
+        totalPostTransferMinutes += postTransferMinutes;
+
+        if (conv.escalation) {
+          totalTransferredCalls++;
+        }
       });
 
       // Calculate chat interactions by org
@@ -233,10 +260,13 @@ export default function Billing() {
       const totalSmsMessages = 0;
 
       // Calculate variable costs (USD)
-      const voiceCostUSD = totalVoiceMinutes * VOICE_AI_COSTS_PER_MINUTE.total;
+      // Voice AI cost only applies to AI-handled minutes (not post-transfer human time)
+      const voiceCostUSD = totalAiMinutes * VOICE_AI_COSTS_PER_MINUTE.total;
+      // Post-transfer cost is only Twilio telephony (human handling, no AI costs)
+      const postTransferCostUSD = totalPostTransferMinutes * POST_TRANSFER_COSTS_PER_MINUTE.total;
       const chatCostUSD = totalChatInteractions * CHAT_COSTS_PER_INTERACTION.total;
       const smsCostUSD = totalSmsMessages * SMS_COSTS_PER_MESSAGE.total;
-      const totalVariableCostUSD = voiceCostUSD + chatCostUSD + smsCostUSD;
+      const totalVariableCostUSD = voiceCostUSD + postTransferCostUSD + chatCostUSD + smsCostUSD;
 
       // Calculate fixed costs (USD)
       const phoneNumberCostUSD = phoneNumbers * FIXED_MONTHLY_COSTS.twilioPhoneNumber;
@@ -285,10 +315,14 @@ export default function Billing() {
 
       return {
         voiceMinutes: totalVoiceMinutes,
+        aiMinutes: totalAiMinutes,
+        postTransferMinutes: totalPostTransferMinutes,
+        transferredCalls: totalTransferredCalls,
         chatInteractions: totalChatInteractions,
         smsMessages: totalSmsMessages,
         phoneNumbers,
         voiceCostUSD,
+        postTransferCostUSD,
         chatCostUSD,
         smsCostUSD,
         totalVariableCostUSD,
@@ -522,10 +556,31 @@ export default function Billing() {
                           </div>
                         </div>
                         <div className="text-right">
-                          <p className="text-2xl font-bold">{(billingData?.voiceMinutes || 0).toFixed(1)}</p>
+                          <p className="text-2xl font-bold">{(billingData?.aiMinutes || 0).toFixed(1)}</p>
                           <p className="text-sm text-muted-foreground">{formatAUD(usdToAud(billingData?.voiceCostUSD || 0))}</p>
                         </div>
                       </div>
+
+                      {/* Post-Transfer (Human Handoff) Minutes */}
+                      {(billingData?.postTransferMinutes || 0) > 0 && (
+                        <div className="flex items-center justify-between p-4 rounded-lg border bg-card border-orange-500/30">
+                          <div className="flex items-center gap-3">
+                            <div className="h-10 w-10 rounded-full bg-orange-500/10 flex items-center justify-center">
+                              <Phone className="h-5 w-5 text-orange-500" />
+                            </div>
+                            <div>
+                              <p className="font-medium">Human Transfer Minutes</p>
+                              <p className="text-sm text-muted-foreground">
+                                ${POST_TRANSFER_COSTS_PER_MINUTE.total}/min USD • {billingData?.transferredCalls || 0} transfers
+                              </p>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-2xl font-bold text-orange-600">{(billingData?.postTransferMinutes || 0).toFixed(1)}</p>
+                            <p className="text-sm text-muted-foreground">{formatAUD(usdToAud(billingData?.postTransferCostUSD || 0))}</p>
+                          </div>
+                        </div>
+                      )}
 
                       <div className="flex items-center justify-between p-4 rounded-lg border bg-card">
                         <div className="flex items-center gap-3">
@@ -800,9 +855,21 @@ export default function Billing() {
                             Voice AI
                           </div>
                         </TableCell>
-                        <TableCell className="text-right">{(billingData?.voiceMinutes || 0).toFixed(1)} min</TableCell>
+                        <TableCell className="text-right">{(billingData?.aiMinutes || 0).toFixed(1)} min</TableCell>
                         <TableCell className="text-right">{formatAUD(usdToAud(billingData?.voiceCostUSD || 0))}</TableCell>
                       </TableRow>
+                      {(billingData?.postTransferMinutes || 0) > 0 && (
+                        <TableRow>
+                          <TableCell className="font-medium">
+                            <div className="flex items-center gap-2">
+                              <Phone className="h-4 w-4 text-orange-500" />
+                              Human Transfer
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-right">{(billingData?.postTransferMinutes || 0).toFixed(1)} min</TableCell>
+                          <TableCell className="text-right">{formatAUD(usdToAud(billingData?.postTransferCostUSD || 0))}</TableCell>
+                        </TableRow>
+                      )}
                       <TableRow>
                         <TableCell className="font-medium">
                           <div className="flex items-center gap-2">

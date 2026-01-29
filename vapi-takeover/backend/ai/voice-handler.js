@@ -375,6 +375,7 @@ class VoiceHandler {
     // Transfer and notification state
     this.transferRequested = false;
     this.transferNumber = null;
+    this.transferredAt = null; // Timestamp when call was transferred to human
 
     // Prevent duplicate endCall processing
     this.isEnded = false;
@@ -1227,7 +1228,9 @@ DO NOT make up or guess information like names, contact details, or specific fac
                 });
 
                 if (transferResult.success) {
-                  logger.info('Voice: Call transfer initiated', transferResult);
+                  // Record transfer timestamp for billing/analytics
+                  this.transferredAt = Date.now();
+                  logger.info('Voice: Call transfer initiated', { ...transferResult, transferredAt: this.transferredAt });
                   if (!responseText) {
                     responseText = "I'm transferring you now. Please hold.";
                   }
@@ -1605,7 +1608,9 @@ DO NOT make up or guess information like names, contact details, or specific fac
                 });
 
                 if (transferResult.success) {
-                  logger.info('Voice streaming: Call transfer initiated', transferResult);
+                  // Record transfer timestamp for billing/analytics
+                  this.transferredAt = Date.now();
+                  logger.info('Voice streaming: Call transfer initiated', { ...transferResult, transferredAt: this.transferredAt });
                   if (!fullText.trim()) {
                     fullText = "I'm transferring you now. Please hold.";
                     onSentence(fullText);
@@ -1930,6 +1935,20 @@ DO NOT make up or guess information like names, contact details, or specific fac
 
       const duration = Math.floor((Date.now() - this.startTime) / 1000);
 
+      // Calculate AI duration vs post-transfer duration
+      let aiDuration = duration;
+      let postTransferDuration = 0;
+      if (this.transferredAt) {
+        aiDuration = Math.floor((this.transferredAt - this.startTime) / 1000);
+        postTransferDuration = Math.max(0, duration - aiDuration);
+        logger.info('Call transfer timing', {
+          totalDuration: duration,
+          aiDuration,
+          postTransferDuration,
+          transferredAt: new Date(this.transferredAt).toISOString()
+        });
+      }
+
       // Calculate Twilio costs (approximate: $0.0085/min for voice)
       const twilioMinutes = duration / 60;
       this.costs.twilio = twilioMinutes * 0.0085;
@@ -1941,6 +1960,10 @@ DO NOT make up or guess information like names, contact details, or specific fac
           await supabaseService.endConversation(this.sessionId, {
             endReason,
             duration,
+            aiDuration: this.transferredAt ? aiDuration : null,
+            postTransferDuration: this.transferredAt ? postTransferDuration : null,
+            transferredAt: this.transferredAt ? new Date(this.transferredAt).toISOString() : null,
+            escalation: this.transferRequested,
             costs: {
               whisper_cost: this.costs.whisper,
               gpt_cost: this.costs.gpt,
