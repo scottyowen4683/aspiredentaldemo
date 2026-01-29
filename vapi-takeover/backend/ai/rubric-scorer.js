@@ -151,7 +151,11 @@ function buildScoringPrompt(rubric, conversationType) {
   prompt += `Analyze:\n`;
   prompt += `- Overall resident sentiment (positive/neutral/negative/escalated)\n`;
   prompt += `- Sentiment progression throughout conversation\n`;
-  prompt += `- Satisfaction indicators\n`;
+  prompt += `- Customer satisfaction (high/medium/low) - IMPORTANT: Infer from overall_sentiment and emotional_tone if not explicitly stated\n`;
+  prompt += `  - If emotional_tone is "frustrated" or "angry" → satisfaction should be "low"\n`;
+  prompt += `  - If overall_sentiment is "negative" → satisfaction should be "low"\n`;
+  prompt += `  - If emotional_tone is "satisfied" and overall_sentiment is "positive" → satisfaction should be "high"\n`;
+  prompt += `  - NEVER return "Unknown" for satisfaction - always infer from available signals\n`;
   prompt += `- Emotional tone (calm/frustrated/angry/satisfied)\n\n`;
 
   prompt += `## RESIDENT INTENT EXTRACTION\n\n`;
