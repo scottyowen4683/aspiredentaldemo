@@ -254,6 +254,13 @@ router.post('/', async (req, res) => {
           kbContext = '\n\nRelevant information from knowledge base:\n' +
             kbResults.map(r => `${r.heading ? r.heading + ':\n' : ''}${r.content}`).join('\n\n');
           logger.info('KB context added to prompt', { contextLength: kbContext.length });
+
+          // Track KB usage in session for later scoring
+          const session = activeSessions.get(sessionId);
+          if (session) {
+            session.kbUsed = true;
+            session.kbResultsCount = kbResults.length;
+          }
         } else {
           // No KB results - tell GPT explicitly
           kbContext = `
@@ -556,35 +563,70 @@ async function scoreChatConversation(sessionId, conversationId, assistantId) {
       assistantName: assistant.friendly_name
     });
 
-    // Save score to database
+    // Extract key fields from scoring result
+    const overallScore = Math.round(scoringResult.weighted_total_score || 0);
+    const successEvaluation = scoringResult.success_evaluation?.overall_success === true;
+    const sentiment = scoringResult.sentiments?.overall_sentiment || 'neutral';
+    const flags = Object.entries(scoringResult.flags || {})
+      .filter(([_, value]) => value === true)
+      .map(([key]) => key);
+
+    // Get session data for KB tracking
+    const session = activeSessions.get(sessionId);
+    const kbUsed = session?.kbUsed || false;
+    const kbResultsCount = session?.kbResultsCount || 0;
+
+    // Save score to conversation_scores table
     await supabaseService.client
       .from('conversation_scores')
       .insert({
         conversation_id: conversationId,
-        overall_score: scoringResult.overallScore,
-        dimension_scores: scoringResult.dimensions,
-        flags: scoringResult.flags,
-        feedback: scoringResult.feedback,
-        cost: scoringResult.metadata.cost.total,
+        overall_score: overallScore,
+        dimension_scores: scoringResult.scores || {},
+        flags: flags,
+        feedback: scoringResult.summary || '',
+        cost: scoringResult.metadata?.cost?.total || 0,
         model_used: 'gpt-4o-mini',
         scoring_type: 'chat'
       });
 
-    // Update conversation with score
+    // Update conversation with comprehensive scoring data
+    const currentConv = await supabaseService.getConversation(sessionId);
     await supabaseService.client
       .from('chat_conversations')
       .update({
-        score: scoringResult.overallScore,
+        score: overallScore,
+        overall_score: overallScore,
+        scored: true,
         scored_at: new Date().toISOString(),
-        total_cost: (await supabaseService.getConversation(sessionId)).total_cost + scoringResult.metadata.cost.total
+        success_evaluation: successEvaluation,
+        sentiment: sentiment,
+        kb_used: kbUsed,
+        kb_results_count: kbResultsCount,
+        score_details: {
+          scores: scoringResult.scores,
+          grade: scoringResult.grade,
+          sentiments: scoringResult.sentiments,
+          flags: scoringResult.flags,
+          success_evaluation: scoringResult.success_evaluation,
+          resident_intents: scoringResult.resident_intents,
+          summary: scoringResult.summary,
+          strengths: scoringResult.strengths,
+          improvements: scoringResult.improvements,
+          confidence_score: scoringResult.confidence_score
+        },
+        total_cost: (currentConv?.total_cost || 0) + (scoringResult.metadata?.cost?.total || 0)
       })
       .eq('id', conversationId);
 
     logger.info('Chat conversation scored:', {
       conversationId,
-      score: scoringResult.overallScore,
-      flags: scoringResult.flags.length,
-      scoringCost: scoringResult.metadata.cost.total
+      overallScore,
+      successEvaluation,
+      sentiment,
+      kbUsed,
+      flagsCount: flags.length,
+      scoringCost: scoringResult.metadata?.cost?.total || 0
     });
 
   } catch (error) {
