@@ -1365,9 +1365,10 @@ router.post('/chat-conversations/rescore', async (req, res) => {
     });
 
     // Get chat conversations to score (note: org_id comes from assistant, not directly on chat_conversations)
+    // Include transcript field as fallback if conversation_messages is empty
     let query = supabaseService.client
       .from('chat_conversations')
-      .select('id, session_id, assistant_id')
+      .select('id, session_id, assistant_id, transcript')
       .order('created_at', { ascending: false });
 
     if (conversation_ids && conversation_ids.length > 0) {
@@ -1404,15 +1405,38 @@ router.post('/chat-conversations/rescore', async (req, res) => {
 
     for (const conv of conversations) {
       try {
-        // Get conversation history
+        // Get conversation history from conversation_messages table
         const { data: messages } = await supabaseService.client
           .from('conversation_messages')
           .select('role, content')
           .eq('conversation_id', conv.id)
           .order('timestamp', { ascending: true });
 
-        if (!messages || messages.length === 0) {
-          results.push({ id: conv.id, status: 'skipped', reason: 'no_messages' });
+        // Format transcript - try messages first, fallback to transcript field
+        let transcript = '';
+        if (messages && messages.length > 0) {
+          transcript = messages
+            .map(msg => `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content}`)
+            .join('\n');
+        } else if (conv.transcript) {
+          // Use transcript field directly (may be stored as conversation_flow array or string)
+          if (typeof conv.transcript === 'string') {
+            transcript = conv.transcript;
+          } else if (conv.transcript.conversation_flow) {
+            transcript = conv.transcript.conversation_flow
+              .map(msg => `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.message || msg.content || ''}`)
+              .join('\n');
+          } else if (Array.isArray(conv.transcript)) {
+            transcript = conv.transcript
+              .map(msg => `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.message || msg.content || ''}`)
+              .join('\n');
+          } else {
+            transcript = JSON.stringify(conv.transcript);
+          }
+        }
+
+        if (!transcript || transcript.trim().length === 0) {
+          results.push({ id: conv.id, status: 'skipped', reason: 'no_transcript' });
           continue;
         }
 
@@ -1429,11 +1453,6 @@ router.post('/chat-conversations/rescore', async (req, res) => {
           .select('name, settings')
           .eq('id', assistant?.org_id)
           .single();
-
-        // Format transcript
-        const transcript = messages
-          .map(msg => `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content}`)
-          .join('\n');
 
         // Score the conversation
         const scoringResult = await scoreConversation({
