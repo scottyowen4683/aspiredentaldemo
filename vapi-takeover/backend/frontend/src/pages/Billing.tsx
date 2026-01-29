@@ -53,7 +53,6 @@ import {
   SMS_COSTS_PER_MESSAGE,
   FIXED_MONTHLY_COSTS,
   ELEVENLABS_PRICING,
-  calculateElevenLabsOverage,
   calculateFullyLoadedVoiceCost,
   UNIT_COSTS_QUICK_REF,
 } from "@/lib/pricing";
@@ -242,11 +241,11 @@ export default function Billing() {
       const flyioCostUSD = FIXED_MONTHLY_COSTS.flyioVmSydney;
       const elevenLabsFeeUSD = ELEVENLABS_PRICING.monthlyFeeUSD;
 
-      // ElevenLabs overage
-      const elevenLabsOverage = calculateElevenLabsOverage(totalVoiceMinutes);
-      const elevenLabsOverageUSD = elevenLabsOverage.usd;
+      // ElevenLabs overage - set to 0 here, real overage is fetched from ElevenLabs API separately
+      // Voice minutes != TTS minutes (TTS is only ~35% of call time when AI speaks)
+      const elevenLabsOverageUSD = 0;
 
-      const totalFixedCostUSD = phoneNumberCostUSD + flyioCostUSD + elevenLabsFeeUSD + elevenLabsOverageUSD;
+      const totalFixedCostUSD = phoneNumberCostUSD + flyioCostUSD + elevenLabsFeeUSD;
 
       // Total costs
       const totalCostUSD = totalVariableCostUSD + totalFixedCostUSD;
@@ -301,10 +300,11 @@ export default function Billing() {
         totalRevenue,
         grossProfit,
         grossMargin,
-        ttsMinutesUsed: totalVoiceMinutes,
+        // TTS data - these are placeholder values, real data comes from ElevenLabs API
+        ttsMinutesUsed: 0,
         ttsMinutesIncluded: ELEVENLABS_PRICING.ttsMinutesIncluded,
-        ttsUsagePercent: elevenLabsOverage.ttsUsagePercent,
-        elevenLabsNeedsUpgrade: elevenLabsOverage.needsUpgrade,
+        ttsUsagePercent: 0,
+        elevenLabsNeedsUpgrade: false,
         fullyLoadedCostPerMinuteUSD: fullyLoaded.usd,
         fullyLoadedCostPerMinuteAUD: fullyLoaded.aud,
         organizations,
@@ -328,6 +328,19 @@ export default function Billing() {
     enabled: currentRole === "super_admin",
   });
 
+  // Fetch real ElevenLabs usage from API (super_admin only)
+  const { data: elevenLabsUsage } = useQuery({
+    queryKey: ["elevenlabs-usage"],
+    queryFn: async () => {
+      const response = await fetch("/api/admin/elevenlabs/usage");
+      if (!response.ok) throw new Error("Failed to fetch ElevenLabs usage");
+      const result = await response.json();
+      return result.data;
+    },
+    enabled: currentRole === "super_admin",
+    staleTime: 60000, // Cache for 1 minute
+  });
+
   // Pie chart data
   const pieChartData = [
     { name: 'Voice AI', value: usdToAud(billingData?.voiceCostUSD || 0), color: CHART_COLORS.voice },
@@ -349,13 +362,14 @@ export default function Billing() {
           </Alert>
         )}
 
-        {/* ElevenLabs Upgrade Alert */}
-        {currentRole === "super_admin" && billingData?.elevenLabsNeedsUpgrade && (
+        {/* ElevenLabs Upgrade Alert - Uses real API data */}
+        {currentRole === "super_admin" && elevenLabsUsage?.needsUpgrade && (
           <Alert className="bg-orange-500/10 border-orange-500/30">
             <AlertTriangle className="h-4 w-4 text-orange-500" />
             <AlertTitle className="text-orange-600">ElevenLabs Plan Alert</AlertTitle>
             <AlertDescription>
-              TTS usage at <strong>{billingData.ttsUsagePercent.toFixed(0)}%</strong> of included {billingData.ttsMinutesIncluded} minutes.
+              TTS usage at <strong>{elevenLabsUsage.usagePercent.toFixed(0)}%</strong> of included {elevenLabsUsage.minutesIncluded} minutes
+              ({elevenLabsUsage.minutesUsed.toFixed(1)} / {elevenLabsUsage.minutesIncluded} mins).
               Consider upgrading to Pro plan to avoid overage charges (${ELEVENLABS_PRICING.ttsOveragePerMinuteUSD}/min).
             </AlertDescription>
           </Alert>
@@ -596,44 +610,49 @@ export default function Billing() {
               </Card>
             </div>
 
-            {/* ElevenLabs Usage Tracking */}
+            {/* ElevenLabs Usage Tracking - Uses real API data */}
             {currentRole === "super_admin" && (
               <Card>
                 <CardHeader>
                   <CardTitle className="text-lg flex items-center gap-2">
                     <Volume2 className="h-5 w-5" />
-                    ElevenLabs TTS Usage (Creator Plan - ${ELEVENLABS_PRICING.monthlyFeeUSD}/mo)
+                    ElevenLabs TTS Usage ({elevenLabsUsage?.tier || 'Creator'} Plan - ${ELEVENLABS_PRICING.monthlyFeeUSD}/mo)
                   </CardTitle>
                   <CardDescription>
-                    {ELEVENLABS_PRICING.ttsMinutesIncluded} minutes included | Overage: ${ELEVENLABS_PRICING.ttsOveragePerMinuteUSD}/min
+                    {elevenLabsUsage?.minutesIncluded || ELEVENLABS_PRICING.ttsMinutesIncluded} minutes included | Overage: ${ELEVENLABS_PRICING.ttsOveragePerMinuteUSD}/min
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-4">
                     <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium">TTS Minutes Used</span>
+                      <span className="text-sm font-medium">TTS Minutes Used (from ElevenLabs API)</span>
                       <span className={`text-sm font-bold ${
-                        (billingData?.ttsUsagePercent || 0) >= 100 ? 'text-red-500' :
-                        (billingData?.ttsUsagePercent || 0) >= 80 ? 'text-orange-500' : 'text-green-500'
+                        (elevenLabsUsage?.usagePercent || 0) >= 100 ? 'text-red-500' :
+                        (elevenLabsUsage?.usagePercent || 0) >= 80 ? 'text-orange-500' : 'text-green-500'
                       }`}>
-                        {(billingData?.ttsMinutesUsed || 0).toFixed(1)} / {billingData?.ttsMinutesIncluded || 100}
+                        {(elevenLabsUsage?.minutesUsed || 0).toFixed(1)} / {elevenLabsUsage?.minutesIncluded || 100}
                       </span>
                     </div>
                     <Progress
-                      value={Math.min(billingData?.ttsUsagePercent || 0, 100)}
+                      value={Math.min(elevenLabsUsage?.usagePercent || 0, 100)}
                       className={`h-3 ${
-                        (billingData?.ttsUsagePercent || 0) >= 100 ? '[&>div]:bg-red-500' :
-                        (billingData?.ttsUsagePercent || 0) >= 80 ? '[&>div]:bg-orange-500' : ''
+                        (elevenLabsUsage?.usagePercent || 0) >= 100 ? '[&>div]:bg-red-500' :
+                        (elevenLabsUsage?.usagePercent || 0) >= 80 ? '[&>div]:bg-orange-500' : ''
                       }`}
                     />
                     <div className="flex justify-between text-xs text-muted-foreground">
-                      <span>{(billingData?.ttsUsagePercent || 0).toFixed(0)}% used</span>
-                      {(billingData?.elevenLabsOverageUSD || 0) > 0 && (
+                      <span>{(elevenLabsUsage?.usagePercent || 0).toFixed(0)}% used</span>
+                      {elevenLabsUsage?.isOverLimit && (
                         <span className="text-red-500">
-                          Overage: {formatAUD(usdToAud(billingData?.elevenLabsOverageUSD || 0))}
+                          Over limit - overage charges apply
                         </span>
                       )}
                     </div>
+                    {elevenLabsUsage?.nextCharacterCountResetUnix && (
+                      <div className="text-xs text-muted-foreground">
+                        Resets: {new Date(elevenLabsUsage.nextCharacterCountResetUnix * 1000).toLocaleDateString()}
+                      </div>
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -749,16 +768,18 @@ export default function Billing() {
                         <TableCell className="text-right">Creator Plan</TableCell>
                         <TableCell className="text-right">{formatAUD(usdToAud(billingData?.elevenLabsFeeUSD || 0))}</TableCell>
                       </TableRow>
-                      {(billingData?.elevenLabsOverageUSD || 0) > 0 && (
+                      {elevenLabsUsage?.isOverLimit && (
                         <TableRow className="text-red-500">
                           <TableCell className="font-medium pl-8">
                             <Minus className="h-4 w-4 inline mr-2" />
                             TTS Overage
                           </TableCell>
                           <TableCell className="text-right">
-                            {Math.max(0, (billingData?.ttsMinutesUsed || 0) - ELEVENLABS_PRICING.ttsMinutesIncluded).toFixed(1)} min
+                            {Math.max(0, (elevenLabsUsage?.minutesUsed || 0) - (elevenLabsUsage?.minutesIncluded || 100)).toFixed(1)} min
                           </TableCell>
-                          <TableCell className="text-right">{formatAUD(usdToAud(billingData?.elevenLabsOverageUSD || 0))}</TableCell>
+                          <TableCell className="text-right">
+                            {formatAUD(usdToAud(Math.max(0, (elevenLabsUsage?.minutesUsed || 0) - (elevenLabsUsage?.minutesIncluded || 100)) * ELEVENLABS_PRICING.ttsOveragePerMinuteUSD))}
+                          </TableCell>
                         </TableRow>
                       )}
                       <TableRow className="font-bold bg-muted/50">
