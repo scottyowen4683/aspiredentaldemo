@@ -18,6 +18,7 @@ import {
   BookOpen,
   CreditCard,
   Headphones,
+  Plug,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState, useEffect, useRef } from "react";
@@ -103,6 +104,8 @@ export function DashboardLayout({ children, userRole = "org_admin", userName = "
     { name: "Users", href: "/users", icon: Users, roles: ["super_admin"] },
     // Audit Logs: only visible to super_admin
     { name: "Audit Logs", href: "/audit-logs", icon: FileText, roles: ["super_admin"] },
+    // Integrations: only visible to super_admin
+    { name: "Integrations", href: "/integrations", icon: Plug, roles: ["super_admin"] },
     // Settings: only visible to super_admin
     { name: "Settings", href: "/settings", icon: Settings, roles: ["super_admin"] },
   ];
