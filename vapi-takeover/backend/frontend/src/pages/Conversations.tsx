@@ -363,21 +363,6 @@ export default function Conversations() {
                   </div>
                 </CardContent>
               </Card>
-              <Card className="shadow-card">
-                <CardContent className="p-4">
-                  <div className="flex items-center space-x-2">
-                    <div className="text-2xl font-bold text-blue-600">
-                      {(() => {
-                        const withKb = conversations.filter(c => c.kb_used === true);
-                        return conversations.length > 0 ? Math.round((withKb.length / conversations.length) * 100) : 0;
-                      })()}%
-                    </div>
-                    <div className="text-sm text-muted-foreground">
-                      KB Hit Rate
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
               {user?.role === "super_admin" && (
                 <Card className="shadow-card">
                   <CardContent className="p-4">
