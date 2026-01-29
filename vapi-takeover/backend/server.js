@@ -22,6 +22,7 @@ import adminRouter from './routes/admin.js';
 import campaignsRouter from './routes/campaigns.js';
 import invitationsRouter from './routes/invitations.js';
 import usersRouter from './routes/users.js';
+import integrationsRouter from './routes/integrations.js';
 
 dotenv.config();
 
@@ -87,6 +88,7 @@ app.use('/api/admin', adminRouter);
 app.use('/api/campaigns', campaignsRouter);
 app.use('/api/invitations', invitationsRouter);
 app.use('/api/users', usersRouter);
+app.use('/api/integrations', integrationsRouter);
 
 // ============================================
 // MARKETING SITE API ENDPOINTS
