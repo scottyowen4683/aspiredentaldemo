@@ -3,6 +3,7 @@
 
 import express from 'express';
 import integrationService from '../services/integration-service.js';
+import supabaseService from '../services/supabase-service.js';
 import logger from '../services/logger.js';
 
 const router = express.Router();
@@ -62,9 +63,29 @@ router.get('/templates/:provider', async (req, res) => {
 // =============================================================================
 
 // GET /api/integrations/org/:org_id - Get all integrations for an organization
+// Use "all" as org_id for super admins to get all integrations
 router.get('/org/:org_id', async (req, res) => {
   try {
     const { org_id } = req.params;
+
+    // Handle "all" for super admins - fetch all integrations
+    if (org_id === 'all') {
+      const { data, error } = await supabaseService.client
+        .from('organization_integrations')
+        .select('*, organizations(name)')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        logger.error('Error fetching all integrations:', error);
+        throw error;
+      }
+
+      return res.json({
+        success: true,
+        integrations: data || []
+      });
+    }
+
     const integrations = await integrationService.getIntegrations(org_id);
 
     res.json({

@@ -231,7 +231,7 @@ export default function Integrations() {
         setTemplates(templatesData.templates);
       }
 
-      // Fetch integrations for org
+      // Fetch integrations for org (or all for super admin)
       const targetOrgId = orgId || (isSuperAdmin ? "all" : null);
       if (targetOrgId) {
         const integrationsRes = await fetch(`${API_BASE}/api/integrations/org/${targetOrgId}`);
@@ -241,15 +241,28 @@ export default function Integrations() {
         }
       }
 
-      // Fetch assistants for linking
-      const { data: assistantsData } = await supabase
-        .from("assistants")
-        .select("id, friendly_name, bot_type, integrations_enabled")
-        .eq("org_id", orgId)
-        .eq("active", true);
+      // Fetch assistants for linking (only if we have an org_id)
+      if (orgId) {
+        const { data: assistantsData } = await supabase
+          .from("assistants")
+          .select("id, friendly_name, bot_type, integrations_enabled")
+          .eq("org_id", orgId)
+          .eq("active", true);
 
-      if (assistantsData) {
-        setAssistants(assistantsData);
+        if (assistantsData) {
+          setAssistants(assistantsData);
+        }
+      } else if (isSuperAdmin) {
+        // For super admin, fetch all assistants
+        const { data: assistantsData } = await supabase
+          .from("assistants")
+          .select("id, friendly_name, bot_type, integrations_enabled, org_id, organizations(name)")
+          .eq("active", true)
+          .limit(100);
+
+        if (assistantsData) {
+          setAssistants(assistantsData);
+        }
       }
     } catch (error) {
       console.error("Error fetching integrations data:", error);
