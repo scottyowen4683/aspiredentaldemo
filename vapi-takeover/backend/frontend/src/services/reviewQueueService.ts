@@ -49,8 +49,8 @@ function isFlagged(conversation: any): boolean {
  */
 export async function getFlaggedConversations(orgId: string, reviewed: boolean = false) {
   try {
-    // Fetch voice conversations
-    const { data: voiceData, error: voiceError } = await supabase
+    // Build voice query - handle NULL as "not reviewed"
+    let voiceQuery = supabase
       .from('conversations')
       .select(`
         id,
@@ -72,21 +72,29 @@ export async function getFlaggedConversations(orgId: string, reviewed: boolean =
         score_details
       `)
       .eq('org_id', orgId)
-      .eq('reviewed', reviewed)
       .eq('scored', true)
       .order('started_at', { ascending: false });
+
+    // For pending (not reviewed), include NULL and false
+    // For reviewed, only include true
+    if (reviewed) {
+      voiceQuery = voiceQuery.eq('reviewed', true);
+    } else {
+      voiceQuery = voiceQuery.or('reviewed.is.null,reviewed.eq.false');
+    }
+
+    const { data: voiceData, error: voiceError } = await voiceQuery;
 
     if (voiceError) {
       console.error('Error fetching voice conversations:', voiceError);
     }
 
-    // Fetch chat conversations
-    const { data: chatData, error: chatError } = await supabase
+    // Build chat query - chat_conversations doesn't have org_id directly, filter later by assistant
+    let chatQuery = supabase
       .from('chat_conversations')
       .select(`
         id,
         assistant_id,
-        org_id,
         overall_score,
         success_evaluation,
         sentiment,
@@ -102,18 +110,35 @@ export async function getFlaggedConversations(orgId: string, reviewed: boolean =
         final_ai_summary,
         score_details
       `)
-      .eq('org_id', orgId)
-      .eq('reviewed', reviewed)
       .eq('scored', true)
       .order('started_at', { ascending: false });
+
+    // For pending (not reviewed), include NULL and false
+    if (reviewed) {
+      chatQuery = chatQuery.eq('reviewed', true);
+    } else {
+      chatQuery = chatQuery.or('reviewed.is.null,reviewed.eq.false');
+    }
+
+    const { data: chatData, error: chatError } = await chatQuery;
 
     if (chatError) {
       console.error('Error fetching chat conversations:', chatError);
     }
 
-    // Combine and process
+    // Get assistants for the org to filter chat conversations
+    const { data: orgAssistants } = await supabase
+      .from('assistants')
+      .select('id')
+      .eq('org_id', orgId);
+
+    const orgAssistantIds = new Set((orgAssistants || []).map(a => a.id));
+
+    // Combine and process - filter chat by org's assistants
     const voiceConvos = (voiceData || []).map(c => ({ ...c, type: 'voice' as const }));
-    const chatConvos = (chatData || []).map(c => ({ ...c, type: 'chat' as const }));
+    const chatConvos = (chatData || [])
+      .filter(c => orgAssistantIds.has(c.assistant_id))
+      .map(c => ({ ...c, type: 'chat' as const, org_id: orgId }));
     const allConversations = [...voiceConvos, ...chatConvos];
 
     // Filter to only flagged conversations
@@ -289,23 +314,37 @@ export async function markConversationReviewed(
  */
 export async function getReviewQueueStats(orgId: string) {
   try {
-    // Fetch all scored conversations
+    // Fetch all scored voice conversations
     const { data: voiceData } = await supabase
       .from('conversations')
       .select('id, overall_score, success_evaluation, sentiment, scored, reviewed, reviewed_at')
       .eq('org_id', orgId)
       .eq('scored', true);
 
-    const { data: chatData } = await supabase
-      .from('chat_conversations')
-      .select('id, overall_score, success_evaluation, sentiment, scored, reviewed, reviewed_at')
-      .eq('org_id', orgId)
-      .eq('scored', true);
+    // Get org's assistants for filtering chat conversations
+    const { data: orgAssistants } = await supabase
+      .from('assistants')
+      .select('id')
+      .eq('org_id', orgId);
 
-    const allConversations = [...(voiceData || []), ...(chatData || [])];
+    const orgAssistantIds = (orgAssistants || []).map(a => a.id);
+
+    // Fetch chat conversations - filter by assistant IDs
+    let chatData: any[] = [];
+    if (orgAssistantIds.length > 0) {
+      const { data } = await supabase
+        .from('chat_conversations')
+        .select('id, assistant_id, overall_score, success_evaluation, sentiment, scored, reviewed, reviewed_at')
+        .in('assistant_id', orgAssistantIds)
+        .eq('scored', true);
+      chatData = data || [];
+    }
+
+    const allConversations = [...(voiceData || []), ...chatData];
 
     // Filter flagged
     const flagged = allConversations.filter(isFlagged);
+    // Pending = flagged AND (reviewed is null OR reviewed is false)
     const pending = flagged.filter(c => !c.reviewed);
 
     // Reviewed today
