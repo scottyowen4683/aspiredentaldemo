@@ -221,7 +221,7 @@ export async function getAnalyticsMetrics(
 }
 
 /**
- * Get top questions from conversation transcripts
+ * Get top questions from conversation transcripts (voice + chat)
  * Extracts user messages from transcript.conversation_flow JSONB
  */
 export async function getTopQuestions(
@@ -234,25 +234,65 @@ export async function getTopQuestions(
     const dateFrom = new Date();
     dateFrom.setDate(dateFrom.getDate() - days);
 
-    // Query conversations with transcript data
-    let query = supabase
+    // Query voice conversations with transcript data
+    let voiceQuery = supabase
       .from("conversations")
       .select("transcript, started_at")
       .not("transcript", "is", null)
       .gte("started_at", dateFrom.toISOString());
 
     if (orgId && orgId !== "all") {
-      query = query.eq("org_id", orgId);
+      voiceQuery = voiceQuery.eq("org_id", orgId);
     }
 
-    const { data: conversations, error } = await query;
+    const { data: voiceConversations, error: voiceError } = await voiceQuery;
 
-    if (error) {
-      console.error("Error fetching conversations for questions:", error);
-      return [];
+    if (voiceError) {
+      console.error("Error fetching voice conversations for questions:", voiceError);
     }
 
-    if (!conversations || conversations.length === 0) {
+    // Query chat conversations - need to filter by org's assistants
+    let chatConversations: any[] = [];
+    if (orgId && orgId !== "all") {
+      // Get assistants for this org
+      const { data: orgAssistants } = await supabase
+        .from("assistants")
+        .select("id")
+        .eq("org_id", orgId);
+
+      const assistantIds = (orgAssistants || []).map(a => a.id);
+
+      if (assistantIds.length > 0) {
+        const { data: chatData, error: chatError } = await supabase
+          .from("chat_conversations")
+          .select("transcript, started_at")
+          .not("transcript", "is", null)
+          .in("assistant_id", assistantIds)
+          .gte("started_at", dateFrom.toISOString());
+
+        if (chatError) {
+          console.error("Error fetching chat conversations for questions:", chatError);
+        }
+        chatConversations = chatData || [];
+      }
+    } else {
+      // Get all chat conversations
+      const { data: chatData, error: chatError } = await supabase
+        .from("chat_conversations")
+        .select("transcript, started_at")
+        .not("transcript", "is", null)
+        .gte("started_at", dateFrom.toISOString());
+
+      if (chatError) {
+        console.error("Error fetching chat conversations for questions:", chatError);
+      }
+      chatConversations = chatData || [];
+    }
+
+    // Combine voice and chat conversations
+    const conversations = [...(voiceConversations || []), ...chatConversations];
+
+    if (conversations.length === 0) {
       return [];
     }
 
@@ -862,7 +902,9 @@ export async function getTrendData(
 }
 
 /**
- * Get top deferral/escalation reasons based on end_reason column
+ * Get top deferral/escalation reasons (voice + chat)
+ * Voice: Uses end_reason column (escalated, transferred, etc.)
+ * Chat: Uses success_evaluation=false as "Unable to resolve"
  */
 export async function getTopDeferralReasons(
   orgId?: string,
@@ -874,39 +916,82 @@ export async function getTopDeferralReasons(
     const dateFrom = new Date();
     dateFrom.setDate(dateFrom.getDate() - days);
 
-    let query = supabase
+    // Get voice conversation end reasons
+    let voiceQuery = supabase
       .from("conversations")
       .select("end_reason")
       .gte("started_at", dateFrom.toISOString())
       .not("end_reason", "is", null);
 
     if (orgId && orgId !== "all") {
-      query = query.eq("org_id", orgId);
+      voiceQuery = voiceQuery.eq("org_id", orgId);
     }
 
-    const { data: conversations, error } = await query;
+    const { data: voiceConversations, error: voiceError } = await voiceQuery;
 
-    if (error) {
-      console.error("Error fetching deferral reasons:", error);
-      throw error;
+    if (voiceError) {
+      console.error("Error fetching voice deferral reasons:", voiceError);
+    }
+
+    // Get chat conversations that failed (unable to resolve)
+    let chatUnresolved = 0;
+    if (orgId && orgId !== "all") {
+      const { data: orgAssistants } = await supabase
+        .from("assistants")
+        .select("id")
+        .eq("org_id", orgId);
+
+      const assistantIds = (orgAssistants || []).map(a => a.id);
+
+      if (assistantIds.length > 0) {
+        const { data: chatData, error: chatError } = await supabase
+          .from("chat_conversations")
+          .select("success_evaluation, overall_score")
+          .in("assistant_id", assistantIds)
+          .gte("started_at", dateFrom.toISOString());
+
+        if (chatError) {
+          console.error("Error fetching chat conversations:", chatError);
+        }
+
+        // Count chat conversations that were unable to resolve
+        // (success_evaluation = false OR overall_score < 50)
+        chatUnresolved = (chatData || []).filter(c =>
+          c.success_evaluation === false || (c.overall_score !== null && c.overall_score < 50)
+        ).length;
+      }
+    } else {
+      const { data: chatData, error: chatError } = await supabase
+        .from("chat_conversations")
+        .select("success_evaluation, overall_score")
+        .gte("started_at", dateFrom.toISOString());
+
+      if (chatError) {
+        console.error("Error fetching chat conversations:", chatError);
+      }
+
+      chatUnresolved = (chatData || []).filter(c =>
+        c.success_evaluation === false || (c.overall_score !== null && c.overall_score < 50)
+      ).length;
     }
 
     // Map of end_reason descriptions
     const reasonDescriptions: Record<string, string> = {
-      "escalated": "Transferred to human agent",
-      "transferred": "Transferred to another department",
+      "escalated": "Transferred to human agent (Voice)",
+      "transferred": "Transferred to another department (Voice)",
       "timeout": "Conversation timed out",
       "user_ended": "Customer ended conversation",
       "completed": "Successfully resolved",
       "error": "Technical error occurred",
+      "chat_unresolved": "Unable to resolve customer query (Chat)",
       "other": "Other reasons"
     };
 
-    // Count reasons
+    // Count voice reasons
     const reasonCounts: Record<string, number> = {};
     let total = 0;
 
-    conversations?.forEach(conv => {
+    (voiceConversations || []).forEach(conv => {
       if (conv.end_reason) {
         const reason = conv.end_reason;
         reasonCounts[reason] = (reasonCounts[reason] || 0) + 1;
@@ -914,10 +999,18 @@ export async function getTopDeferralReasons(
       }
     });
 
+    // Add chat unresolved count
+    if (chatUnresolved > 0) {
+      reasonCounts["chat_unresolved"] = chatUnresolved;
+      total += chatUnresolved;
+    }
+
     // Convert to array and sort by count
     const sortedReasons = Object.entries(reasonCounts)
       .map(([reason, count]) => ({
-        reason: reason.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+        reason: reason === "chat_unresolved"
+          ? "Unable to Resolve (Chat)"
+          : reason.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
         count,
         percentage: total > 0 ? Math.round((count / total) * 1000) / 10 : 0,
         description: reasonDescriptions[reason] || "End reason"
