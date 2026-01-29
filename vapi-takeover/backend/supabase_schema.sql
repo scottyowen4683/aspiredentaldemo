@@ -138,6 +138,11 @@ CREATE TABLE IF NOT EXISTS conversations (
     duration_seconds INTEGER,
     call_duration INTEGER,
 
+    -- Transfer tracking
+    transferred_at TIMESTAMPTZ,              -- When the call was transferred to human
+    ai_duration_seconds INTEGER,             -- Duration handled by AI (before transfer)
+    post_transfer_seconds INTEGER,           -- Duration after transfer to human
+
     -- Content
     transcript JSONB,
     transcript_source TEXT,

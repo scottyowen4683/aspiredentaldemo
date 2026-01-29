@@ -251,12 +251,17 @@ class SupabaseService {
     return data;
   }
 
-  async endConversation(sessionId, { endReason, duration, costs }) {
+  async endConversation(sessionId, { endReason, duration, aiDuration, postTransferDuration, transferredAt, escalation, costs }) {
     // Match exact schema columns
     const updates = {
       ended_at: new Date().toISOString(),
       end_reason: endReason,
       duration_seconds: duration,
+      // Transfer tracking fields (for billing/analytics)
+      transferred_at: transferredAt || null,
+      ai_duration_seconds: aiDuration || null,
+      post_transfer_seconds: postTransferDuration || null,
+      escalation: escalation || false,
       // Individual cost columns (all exist in schema)
       whisper_cost: costs?.whisper_cost || 0,
       gpt_cost: costs?.gpt_cost || 0,
