@@ -50,6 +50,7 @@ function isFlagged(conversation: any): boolean {
 export async function getFlaggedConversations(orgId: string, reviewed: boolean = false) {
   try {
     // Build voice query - fetch all scored, filter reviewed status in JS
+    // Only select columns that exist in the conversations table
     const { data: voiceData, error: voiceError } = await supabase
       .from('conversations')
       .select(`
@@ -68,7 +69,6 @@ export async function getFlaggedConversations(orgId: string, reviewed: boolean =
         started_at,
         ended_at,
         transcript,
-        final_ai_summary,
         score_details
       `)
       .eq('org_id', orgId)
@@ -79,7 +79,7 @@ export async function getFlaggedConversations(orgId: string, reviewed: boolean =
       console.error('Error fetching voice conversations:', voiceError);
     }
 
-    // Build chat query - chat_conversations doesn't have org_id directly
+    // Build chat query - chat_conversations uses created_at not started_at
     const { data: chatData, error: chatError } = await supabase
       .from('chat_conversations')
       .select(`
@@ -94,14 +94,13 @@ export async function getFlaggedConversations(orgId: string, reviewed: boolean =
         reviewed_at,
         reviewed_by,
         review_notes,
-        started_at,
+        created_at,
         ended_at,
         transcript,
-        final_ai_summary,
         score_details
       `)
       .eq('scored', true)
-      .order('started_at', { ascending: false });
+      .order('created_at', { ascending: false });
 
     if (chatError) {
       console.error('Error fetching chat conversations:', chatError);
@@ -116,10 +115,17 @@ export async function getFlaggedConversations(orgId: string, reviewed: boolean =
     const orgAssistantIds = new Set((orgAssistants || []).map(a => a.id));
 
     // Combine and process - filter chat by org's assistants
-    const voiceConvos = (voiceData || []).map(c => ({ ...c, type: 'voice' as const }));
+    // Map chat created_at to started_at for consistency
+    const voiceConvos = (voiceData || []).map(c => ({ ...c, type: 'voice' as const, final_ai_summary: null }));
     const chatConvos = (chatData || [])
       .filter(c => orgAssistantIds.has(c.assistant_id))
-      .map(c => ({ ...c, type: 'chat' as const, org_id: orgId }));
+      .map(c => ({
+        ...c,
+        type: 'chat' as const,
+        org_id: orgId,
+        started_at: c.created_at, // Map created_at to started_at for consistency
+        final_ai_summary: null
+      }));
     const allConversations = [...voiceConvos, ...chatConvos];
 
     // Filter to only flagged conversations
@@ -174,29 +180,16 @@ export async function getFlaggedConversations(orgId: string, reviewed: boolean =
  */
 export async function getConversationForReview(conversationId: string, type: 'voice' | 'chat') {
   try {
+    // Use different columns based on table
+    const selectColumns = type === 'voice'
+      ? `id, assistant_id, org_id, overall_score, success_evaluation, sentiment, kb_used, scored, reviewed, reviewed_at, reviewed_by, review_notes, started_at, ended_at, transcript, score_details`
+      : `id, assistant_id, overall_score, success_evaluation, sentiment, kb_used, scored, reviewed, reviewed_at, reviewed_by, review_notes, created_at, ended_at, transcript, score_details`;
+
     const tableName = type === 'voice' ? 'conversations' : 'chat_conversations';
 
     const { data, error } = await supabase
       .from(tableName)
-      .select(`
-        id,
-        assistant_id,
-        org_id,
-        overall_score,
-        success_evaluation,
-        sentiment,
-        kb_used,
-        scored,
-        reviewed,
-        reviewed_at,
-        reviewed_by,
-        review_notes,
-        started_at,
-        ended_at,
-        transcript,
-        final_ai_summary,
-        score_details
-      `)
+      .select(selectColumns)
       .eq('id', conversationId)
       .single();
 
@@ -204,24 +197,34 @@ export async function getConversationForReview(conversationId: string, type: 'vo
       return { success: false, error };
     }
 
+    // Normalize the data - map created_at to started_at for chat
+    const normalizedData = type === 'chat'
+      ? { ...data, started_at: data.created_at, org_id: null, final_ai_summary: null }
+      : { ...data, final_ai_summary: null };
+
     // Get assistant and organization
     let assistant = null;
     let organization = null;
 
-    if (data.assistant_id) {
+    if (normalizedData.assistant_id) {
       const { data: assistantData } = await supabase
         .from('assistants')
-        .select('id, friendly_name')
-        .eq('id', data.assistant_id)
+        .select('id, friendly_name, org_id')
+        .eq('id', normalizedData.assistant_id)
         .single();
       assistant = assistantData;
+
+      // For chat, get org from assistant
+      if (type === 'chat' && assistantData?.org_id) {
+        normalizedData.org_id = assistantData.org_id;
+      }
     }
 
-    if (data.org_id) {
+    if (normalizedData.org_id) {
       const { data: orgData } = await supabase
         .from('organizations')
         .select('id, name')
-        .eq('id', data.org_id)
+        .eq('id', normalizedData.org_id)
         .single();
       organization = orgData;
     }
@@ -229,7 +232,7 @@ export async function getConversationForReview(conversationId: string, type: 'vo
     return {
       success: true,
       data: {
-        ...data,
+        ...normalizedData,
         type,
         assistant,
         organization
