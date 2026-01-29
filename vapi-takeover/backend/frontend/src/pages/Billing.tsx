@@ -589,19 +589,38 @@ export default function Billing() {
             </CardContent>
           </Card>
 
-          {/* Fully Loaded Cost */}
+          {/* True Cost per Call Minute - accounts for ElevenLabs speaking ratio */}
           <Card className="bg-gradient-to-br from-purple-500/10 to-pink-500/10 border-purple-500/20">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Cost/AI Minute</CardTitle>
+              <CardTitle className="text-sm font-medium">Cost/Call Minute</CardTitle>
               <Activity className="h-4 w-4 text-purple-500" />
             </CardHeader>
             <CardContent>
               {isLoading ? <Skeleton className="h-8 w-24" /> : (
-                <div className="text-2xl font-bold text-purple-600">
-                  ${(billingData?.fullyLoadedCostPerMinuteAUD || 0).toFixed(3)}
-                </div>
+                (() => {
+                  // AI speaks ~35% of call time, so ElevenLabs cost is prorated
+                  const AI_SPEAKING_RATIO = 0.35;
+                  const variableCostAUD = usdToAud(VOICE_AI_COSTS_PER_MINUTE.total); // $0.055 AUD
+                  const elevenLabsOveragePerMinAUD = usdToAud(ELEVENLABS_PRICING.flashOveragePerMinuteUSD); // $0.237 AUD
+
+                  // Within included minutes: just variable cost
+                  // In overage: variable + (35% × ElevenLabs overage rate)
+                  const isInOverage = elevenLabsUsage?.isOverLimit || false;
+                  const ttsOverageCostPerCallMin = isInOverage ? (AI_SPEAKING_RATIO * elevenLabsOveragePerMinAUD) : 0;
+                  const totalCostPerMinAUD = variableCostAUD + ttsOverageCostPerCallMin;
+
+                  return (
+                    <>
+                      <div className="text-2xl font-bold text-purple-600">
+                        ${totalCostPerMinAUD.toFixed(3)}
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        {isInOverage ? 'In TTS overage' : 'Within 200 TTS mins'}
+                      </p>
+                    </>
+                  );
+                })()
               )}
-              <p className="text-xs text-muted-foreground">Fully loaded (AUD)</p>
             </CardContent>
           </Card>
         </div>
@@ -1235,6 +1254,62 @@ export default function Billing() {
                       <span className="font-medium">${ELEVENLABS_PRICING.monthlyFeeUSD} USD (${usdToAud(ELEVENLABS_PRICING.monthlyFeeUSD).toFixed(2)} AUD)</span>
                     </div>
                   </div>
+                </div>
+
+                {/* True Cost Per Call Minute Summary */}
+                <div className="mt-6 p-4 rounded-lg border-2 bg-gradient-to-br from-purple-500/5 to-pink-500/5 border-purple-500/30">
+                  <div className="flex items-center gap-2 mb-3">
+                    <Phone className="h-5 w-5 text-purple-500" />
+                    <h3 className="font-semibold">True Cost Per Voice Call Minute (AUD)</h3>
+                  </div>
+                  <p className="text-xs text-muted-foreground mb-4">
+                    AI speaks ~35% of call time, so ElevenLabs TTS cost is prorated per call minute
+                  </p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* Within Included Minutes */}
+                    <div className="p-3 rounded-lg bg-green-500/10 border border-green-500/20">
+                      <div className="text-sm font-medium text-green-700 mb-2">A) Within 200 TTS Minutes</div>
+                      <Table>
+                        <TableBody>
+                          <TableRow>
+                            <TableCell className="py-1 text-sm">Variable costs</TableCell>
+                            <TableCell className="py-1 text-sm text-right">${usdToAud(VOICE_AI_COSTS_PER_MINUTE.total).toFixed(3)}</TableCell>
+                          </TableRow>
+                          <TableRow>
+                            <TableCell className="py-1 text-sm">ElevenLabs</TableCell>
+                            <TableCell className="py-1 text-sm text-right">$0.000</TableCell>
+                          </TableRow>
+                          <TableRow className="font-bold bg-green-500/10">
+                            <TableCell className="py-1">Total per call min</TableCell>
+                            <TableCell className="py-1 text-right text-green-700">${usdToAud(VOICE_AI_COSTS_PER_MINUTE.total).toFixed(3)} AUD</TableCell>
+                          </TableRow>
+                        </TableBody>
+                      </Table>
+                    </div>
+                    {/* In Overage */}
+                    <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20">
+                      <div className="text-sm font-medium text-red-700 mb-2">B) After TTS Overage</div>
+                      <Table>
+                        <TableBody>
+                          <TableRow>
+                            <TableCell className="py-1 text-sm">Variable costs</TableCell>
+                            <TableCell className="py-1 text-sm text-right">${usdToAud(VOICE_AI_COSTS_PER_MINUTE.total).toFixed(3)}</TableCell>
+                          </TableRow>
+                          <TableRow>
+                            <TableCell className="py-1 text-sm">ElevenLabs (35% × ${usdToAud(ELEVENLABS_PRICING.flashOveragePerMinuteUSD).toFixed(3)})</TableCell>
+                            <TableCell className="py-1 text-sm text-right">${(0.35 * usdToAud(ELEVENLABS_PRICING.flashOveragePerMinuteUSD)).toFixed(3)}</TableCell>
+                          </TableRow>
+                          <TableRow className="font-bold bg-red-500/10">
+                            <TableCell className="py-1">Total per call min</TableCell>
+                            <TableCell className="py-1 text-right text-red-700">${(usdToAud(VOICE_AI_COSTS_PER_MINUTE.total) + 0.35 * usdToAud(ELEVENLABS_PRICING.flashOveragePerMinuteUSD)).toFixed(3)} AUD</TableCell>
+                          </TableRow>
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-3">
+                    200 TTS minutes ≈ {Math.round(200 / 0.35)} call minutes at 35% AI speaking time
+                  </p>
                 </div>
               </CardContent>
             </Card>
