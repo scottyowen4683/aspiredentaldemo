@@ -208,7 +208,13 @@ router.get('/elevenlabs/usage', async (req, res) => {
   try {
     logger.info('Fetching ElevenLabs subscription info...');
     const subscription = await getSubscriptionInfo();
-    logger.info('ElevenLabs raw response:', JSON.stringify(subscription, null, 2));
+
+    // Log key fields (avoid circular refs)
+    logger.info('ElevenLabs subscription:', {
+      tier: subscription.tier,
+      character_count: subscription.character_count,
+      character_limit: subscription.character_limit
+    });
 
     // ElevenLabs credits to minutes conversion
     // From pricing page: 200,000 flash credits = ~200 minutes
@@ -222,6 +228,18 @@ router.get('/elevenlabs/usage', async (req, res) => {
     const minutesUsed = characterCount / CREDITS_PER_MINUTE;
     const minutesIncluded = characterLimit / CREDITS_PER_MINUTE;
     const usagePercent = characterLimit > 0 ? (characterCount / characterLimit) * 100 : 0;
+
+    // Extract only safe primitive fields from subscription for _raw
+    const safeRaw = {
+      tier: subscription.tier,
+      character_count: subscription.character_count,
+      character_limit: subscription.character_limit,
+      next_character_count_reset_unix: subscription.next_character_count_reset_unix,
+      voice_limit: subscription.voice_limit,
+      max_voice_add_edits: subscription.max_voice_add_edits,
+      can_extend_character_limit: subscription.can_extend_character_limit,
+      status: subscription.status
+    };
 
     res.json({
       success: true,
@@ -241,8 +259,8 @@ router.get('/elevenlabs/usage', async (req, res) => {
         needsUpgrade: usagePercent >= 80,
         isOverLimit: characterCount >= characterLimit,
 
-        // Include full raw data for debugging
-        _raw: subscription
+        // Safe subset of raw data for debugging
+        _raw: safeRaw
       }
     });
   } catch (error) {
