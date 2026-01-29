@@ -53,7 +53,9 @@ import {
   SMS_COSTS_PER_MESSAGE,
   FIXED_MONTHLY_COSTS,
   ELEVENLABS_PRICING,
+  ELEVENLABS_PLANS,
   calculateFullyLoadedVoiceCost,
+  calculateUpgradeRecommendation,
   UNIT_COSTS_QUICK_REF,
 } from "@/lib/pricing";
 
@@ -654,6 +656,117 @@ export default function Billing() {
                       </div>
                     )}
                   </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* ElevenLabs Plan Comparison & Upgrade Recommendations */}
+            {currentRole === "super_admin" && elevenLabsUsage && (
+              <Card className="mt-4">
+                <CardHeader>
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <TrendingUp className="h-5 w-5" />
+                    ElevenLabs Plan Comparison
+                  </CardTitle>
+                  <CardDescription>
+                    Compare plans based on your current usage ({elevenLabsUsage.minutesUsed.toFixed(0)} flash minutes this period)
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {(() => {
+                    const currentTier = (elevenLabsUsage.tier || 'creator').toLowerCase();
+                    const recommendation = calculateUpgradeRecommendation(currentTier, elevenLabsUsage.minutesUsed);
+
+                    return (
+                      <div className="space-y-4">
+                        {/* Current Plan Cost */}
+                        <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg">
+                          <div className="flex justify-between items-center">
+                            <div>
+                              <span className="font-medium">Current Plan: {recommendation.currentPlan.name}</span>
+                              <p className="text-sm text-muted-foreground">
+                                {recommendation.currentPlan.flashMinutesIncluded} flash mins included
+                              </p>
+                            </div>
+                            <div className="text-right">
+                              <span className="text-lg font-bold">{formatAUD(usdToAud(recommendation.currentCost))}</span>
+                              <p className="text-xs text-muted-foreground">/month at current usage</p>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Plan Comparison Table */}
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Plan</TableHead>
+                              <TableHead className="text-right">Monthly Fee</TableHead>
+                              <TableHead className="text-right">Flash Mins</TableHead>
+                              <TableHead className="text-right">Overage Rate</TableHead>
+                              <TableHead className="text-right">Total at Usage</TableHead>
+                              <TableHead className="text-right">vs Current</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {Object.entries(ELEVENLABS_PLANS).map(([key, plan]) => {
+                              const isCurrentPlan = key === currentTier;
+                              const rec = recommendation.recommendations.find(r => r.planKey === key);
+                              const totalCost = rec?.totalCost || recommendation.currentCost;
+                              const savings = rec?.savings || 0;
+
+                              return (
+                                <TableRow key={key} className={isCurrentPlan ? 'bg-blue-500/5' : ''}>
+                                  <TableCell className="font-medium">
+                                    {plan.name}
+                                    {isCurrentPlan && <Badge className="ml-2" variant="secondary">Current</Badge>}
+                                    {rec?.recommended && savings > 0 && (
+                                      <Badge className="ml-2 bg-green-500">Recommended</Badge>
+                                    )}
+                                  </TableCell>
+                                  <TableCell className="text-right">{formatAUD(usdToAud(plan.monthlyFeeUSD))}</TableCell>
+                                  <TableCell className="text-right">{plan.flashMinutesIncluded.toLocaleString()}</TableCell>
+                                  <TableCell className="text-right">${plan.flashOveragePer1000USD}/min</TableCell>
+                                  <TableCell className="text-right font-medium">{formatAUD(usdToAud(totalCost))}</TableCell>
+                                  <TableCell className={`text-right font-bold ${
+                                    isCurrentPlan ? '' : savings > 0 ? 'text-green-600' : savings < 0 ? 'text-red-500' : ''
+                                  }`}>
+                                    {isCurrentPlan ? '-' : savings > 0 ? `Save ${formatAUD(usdToAud(savings))}` : savings < 0 ? `+${formatAUD(usdToAud(Math.abs(savings)))}` : 'Same'}
+                                  </TableCell>
+                                </TableRow>
+                              );
+                            })}
+                          </TableBody>
+                        </Table>
+
+                        {/* Best Recommendation Callout */}
+                        {recommendation.recommendations.some(r => r.savings > 0) && (
+                          <Alert className="bg-green-500/10 border-green-500/30">
+                            <TrendingDown className="h-4 w-4 text-green-500" />
+                            <AlertTitle className="text-green-600">Upgrade Opportunity</AlertTitle>
+                            <AlertDescription>
+                              {(() => {
+                                const bestRec = recommendation.recommendations.find(r => r.savings > 0);
+                                if (!bestRec) return null;
+                                return (
+                                  <>
+                                    Upgrading to <strong>{bestRec.plan.name}</strong> would save you{' '}
+                                    <strong>{formatAUD(usdToAud(bestRec.savings))}/month</strong> based on current usage.
+                                    The plan costs {formatAUD(usdToAud(bestRec.additionalCost))} more per month but includes{' '}
+                                    {bestRec.plan.flashMinutesIncluded.toLocaleString()} flash minutes with lower overage rates.
+                                  </>
+                                );
+                              })()}
+                            </AlertDescription>
+                          </Alert>
+                        )}
+
+                        <p className="text-xs text-muted-foreground">
+                          * Calculations based on Flash/Turbo model (eleven_flash_v2) which is used for voice calls.
+                          Prices shown in AUD at {USD_TO_AUD_RATE} exchange rate.
+                        </p>
+                      </div>
+                    );
+                  })()}
                 </CardContent>
               </Card>
             )}

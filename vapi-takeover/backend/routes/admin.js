@@ -208,15 +208,17 @@ router.get('/elevenlabs/usage', async (req, res) => {
   try {
     const subscription = await getSubscriptionInfo();
 
-    // ElevenLabs API returns character-based usage, convert to minutes
-    // Approximate: 150 characters per second of speech, so 9000 chars = 1 minute
-    const CHARS_PER_MINUTE = 9000;
+    // ElevenLabs credits to minutes conversion
+    // From pricing page: 200,000 flash credits = ~200 minutes
+    // So 1000 credits = 1 minute (for Flash/Turbo model)
+    const CREDITS_PER_MINUTE = 1000;
 
     const characterCount = subscription.character_count || 0;
     const characterLimit = subscription.character_limit || 0;
 
-    const minutesUsed = characterCount / CHARS_PER_MINUTE;
-    const minutesIncluded = characterLimit / CHARS_PER_MINUTE;
+    // Credits and characters are 1:1 in ElevenLabs
+    const minutesUsed = characterCount / CREDITS_PER_MINUTE;
+    const minutesIncluded = characterLimit / CREDITS_PER_MINUTE;
     const usagePercent = characterLimit > 0 ? (characterCount / characterLimit) * 100 : 0;
 
     res.json({
@@ -228,7 +230,7 @@ router.get('/elevenlabs/usage', async (req, res) => {
         characterLimit,
         nextCharacterCountResetUnix: subscription.next_character_count_reset_unix,
 
-        // Calculated minutes (approximate)
+        // Calculated minutes (1000 credits = 1 flash minute)
         minutesUsed: Math.round(minutesUsed * 10) / 10,
         minutesIncluded: Math.round(minutesIncluded),
         usagePercent: Math.round(usagePercent * 10) / 10,

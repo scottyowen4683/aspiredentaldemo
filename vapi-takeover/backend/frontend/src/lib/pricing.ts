@@ -76,28 +76,150 @@ export const FIXED_MONTHLY_COSTS = {
 };
 
 // ============================================================================
-// ELEVENLABS PLAN DETAILS (Creator Plan - $11/month)
+// ELEVENLABS PLAN DETAILS
+// Plans: Creator ($22), Pro ($99), Scale ($330), Business ($1320)
+// Using Flash/Turbo model (eleven_flash_v2) for voice calls
 // ============================================================================
 
-export interface ElevenLabsPricing {
-  plan: string;
+export interface ElevenLabsPlan {
+  name: string;
   monthlyFeeUSD: number;
-  ttsMinutesIncluded: number;
-  ttsOveragePerMinuteUSD: number;
-  flashMinutesIncluded: number;
-  flashOveragePerMinuteUSD: number;
-  audioQuality: string;
+  // High-quality TTS (Multilingual V2/V3)
+  ttsCreditsIncluded: number;
+  ttsMinutesIncluded: number;           // ~1000 credits = 1 minute
+  ttsOveragePer1000USD: number;
+  // Flash/Turbo TTS (eleven_flash_v2) - what we use
+  flashCreditsIncluded: number;
+  flashMinutesIncluded: number;         // ~1000 credits = 1 minute
+  flashOveragePer1000USD: number;
+  // Limits
+  concurrencyLimit: number;
 }
 
-export const ELEVENLABS_PRICING: ElevenLabsPricing = {
-  plan: 'Creator',
-  monthlyFeeUSD: 11,                    // Creator plan $11/month
-  ttsMinutesIncluded: 100,              // ~100 mins Multilingual V2/V3 included
-  ttsOveragePerMinuteUSD: 0.30,         // ~$0.30/min overage
-  flashMinutesIncluded: 200,            // ~200 mins Flash included
-  flashOveragePerMinuteUSD: 0.15,       // ~$0.15/min Flash overage
-  audioQuality: '128 & 192 kbps (via Studio & API), 44.1kHz',
+// All ElevenLabs plans for comparison
+export const ELEVENLABS_PLANS: Record<string, ElevenLabsPlan> = {
+  creator: {
+    name: 'Creator',
+    monthlyFeeUSD: 22,
+    ttsCreditsIncluded: 100000,
+    ttsMinutesIncluded: 100,
+    ttsOveragePer1000USD: 0.30,
+    flashCreditsIncluded: 200000,
+    flashMinutesIncluded: 200,
+    flashOveragePer1000USD: 0.15,
+    concurrencyLimit: 5,
+  },
+  pro: {
+    name: 'Pro',
+    monthlyFeeUSD: 99,
+    ttsCreditsIncluded: 500000,
+    ttsMinutesIncluded: 500,
+    ttsOveragePer1000USD: 0.24,
+    flashCreditsIncluded: 1000000,
+    flashMinutesIncluded: 1000,
+    flashOveragePer1000USD: 0.12,
+    concurrencyLimit: 10,
+  },
+  scale: {
+    name: 'Scale',
+    monthlyFeeUSD: 330,
+    ttsCreditsIncluded: 2000000,
+    ttsMinutesIncluded: 2000,
+    ttsOveragePer1000USD: 0.18,
+    flashCreditsIncluded: 4000000,
+    flashMinutesIncluded: 4000,
+    flashOveragePer1000USD: 0.09,
+    concurrencyLimit: 15,
+  },
+  business: {
+    name: 'Business',
+    monthlyFeeUSD: 1320,
+    ttsCreditsIncluded: 11000000,
+    ttsMinutesIncluded: 11000,
+    ttsOveragePer1000USD: 0.11,         // avg of $0.10-$0.12
+    flashCreditsIncluded: 22000000,
+    flashMinutesIncluded: 22000,
+    flashOveragePer1000USD: 0.055,      // avg of $0.05-$0.06
+    concurrencyLimit: 15,
+  },
 };
+
+// Current plan (for backwards compatibility)
+export const ELEVENLABS_PRICING = {
+  plan: 'Creator',
+  monthlyFeeUSD: 22,                    // Creator plan $22/month
+  ttsMinutesIncluded: 100,              // ~100 mins high-quality TTS
+  ttsOveragePerMinuteUSD: 0.30,         // $0.30/min overage (high-quality)
+  flashMinutesIncluded: 200,            // ~200 mins Flash included
+  flashOveragePerMinuteUSD: 0.15,       // $0.15/min Flash overage
+};
+
+/**
+ * Calculate cost for a plan given usage in flash minutes
+ */
+export function calculateElevenLabsPlanCost(
+  flashMinutesUsed: number,
+  plan: ElevenLabsPlan
+): { monthlyFee: number; overageCost: number; totalCost: number } {
+  const overageMinutes = Math.max(0, flashMinutesUsed - plan.flashMinutesIncluded);
+  const overageCost = overageMinutes * plan.flashOveragePer1000USD;
+  return {
+    monthlyFee: plan.monthlyFeeUSD,
+    overageCost,
+    totalCost: plan.monthlyFeeUSD + overageCost,
+  };
+}
+
+/**
+ * Calculate upgrade savings based on current usage
+ * Returns recommended plan and potential savings
+ */
+export function calculateUpgradeRecommendation(
+  currentPlanKey: string,
+  flashMinutesUsed: number
+): {
+  currentPlan: ElevenLabsPlan;
+  currentCost: number;
+  recommendations: Array<{
+    plan: ElevenLabsPlan;
+    planKey: string;
+    totalCost: number;
+    savings: number;
+    additionalCost: number;
+    recommended: boolean;
+  }>;
+} {
+  const currentPlan = ELEVENLABS_PLANS[currentPlanKey] || ELEVENLABS_PLANS.creator;
+  const currentCostCalc = calculateElevenLabsPlanCost(flashMinutesUsed, currentPlan);
+
+  const recommendations = Object.entries(ELEVENLABS_PLANS)
+    .filter(([key]) => key !== currentPlanKey)
+    .map(([planKey, plan]) => {
+      const planCost = calculateElevenLabsPlanCost(flashMinutesUsed, plan);
+      const savings = currentCostCalc.totalCost - planCost.totalCost;
+      const additionalCost = plan.monthlyFeeUSD - currentPlan.monthlyFeeUSD;
+
+      return {
+        plan,
+        planKey,
+        totalCost: planCost.totalCost,
+        savings,
+        additionalCost,
+        // Recommend if saves money OR if approaching limits with minimal cost increase
+        recommended: savings > 0 || (
+          flashMinutesUsed > currentPlan.flashMinutesIncluded * 0.8 &&
+          additionalCost < currentCostCalc.overageCost * 2
+        ),
+      };
+    })
+    .sort((a, b) => b.savings - a.savings);
+
+  return {
+    currentPlan,
+    currentCost: currentCostCalc.totalCost,
+    recommendations,
+  };
+}
 
 // ============================================================================
 // DETAILED SERVICE PRICING (for reference/breakdown)
