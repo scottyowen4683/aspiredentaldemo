@@ -10,7 +10,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   Table,
   TableBody,
@@ -25,13 +25,9 @@ import {
   TrendingUp,
   TrendingDown,
   Phone,
-  PhoneIncoming,
-  PhoneOutgoing,
   MessageSquare,
-  MessageCircle,
   AlertTriangle,
   Building2,
-  CreditCard,
   Receipt,
   Activity,
   Server,
@@ -40,122 +36,92 @@ import {
   Brain,
   Globe,
   Calendar,
-  Clock,
-  CheckCircle,
   Info,
-  ArrowRight,
-  Percent,
+  Minus,
+  MessageCircle,
 } from "lucide-react";
 import { useUser } from "@/context/UserContext";
 import { useState } from "react";
 import { supabase } from "@/supabaseClient";
 import { useQuery } from "@tanstack/react-query";
-import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend } from 'recharts';
+import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import {
   USD_TO_AUD_RATE,
   usdToAud,
-  formatCurrency,
+  VOICE_AI_COSTS_PER_MINUTE,
+  CHAT_COSTS_PER_INTERACTION,
+  SMS_COSTS_PER_MESSAGE,
+  FIXED_MONTHLY_COSTS,
   ELEVENLABS_PRICING,
-  TWILIO_PRICING,
-  DEEPGRAM_PRICING,
-  OPENAI_PRICING,
-  FLYIO_PRICING,
+  calculateElevenLabsOverage,
+  calculateFullyLoadedVoiceCost,
+  UNIT_COSTS_QUICK_REF,
 } from "@/lib/pricing";
 
 // ============================================================================
 // Types
 // ============================================================================
 
-interface InteractionCounts {
-  callInbound: number;
-  callOutbound: number;
-  smsInbound: number;
-  smsOutbound: number;
-  chatSessions: number;
-  total: number;
-}
-
-interface OrganizationBilling {
-  id: string;
-  name: string;
-  flatRateFee: number;
-  includedInteractions: number;
-  overageRatePer1000: number;
-  currentPeriodInteractions: number;
-  currentPeriodStart: string | null;
-  currentPeriodEnd: string | null;
-  monthlyServiceFee: number;
-  status: string;
-  // Usage metrics
-  voiceMinutes: number;
-  chatSessions: number;
-  inputTokens: number;
-  outputTokens: number;
-  // Interaction breakdown
-  interactions: InteractionCounts;
-  // Costs
-  elevenLabsCost: number;
-  twilioCost: number;
-  deepgramCost: number;
-  openaiCost: number;
-  totalApiCost: number;
-  // Calculated fields
-  overageInteractions: number;
-  overageCost: number;
-  totalBill: number;
-  usagePercentage: number;
-  isOverLimit: boolean;
-}
-
-interface ServiceCost {
-  service: string;
-  description: string;
-  costUSD: number;
-  costAUD: number;
-  usage: string;
-  color: string;
-  icon: string;
-  isNativeCurrency: 'USD' | 'AUD';
-}
-
 interface BillingData {
+  // Usage counts
+  voiceMinutes: number;
+  chatInteractions: number;
+  smsMessages: number;
+  phoneNumbers: number;
+
+  // Variable costs (USD)
+  voiceCostUSD: number;
+  chatCostUSD: number;
+  smsCostUSD: number;
+  totalVariableCostUSD: number;
+
+  // Fixed costs (USD)
+  phoneNumberCostUSD: number;
+  flyioCostUSD: number;
+  elevenLabsFeeUSD: number;
+  elevenLabsOverageUSD: number;
+  totalFixedCostUSD: number;
+
+  // Totals
+  totalCostUSD: number;
+  totalCostAUD: number;
+
   // Revenue & Profit
   totalRevenue: number;
-  totalApiCosts: number;
   grossProfit: number;
   grossMargin: number;
-  // Counts
-  totalInteractions: number;
-  totalVoiceMinutes: number;
-  totalChatSessions: number;
+
+  // ElevenLabs tracking
+  ttsMinutesUsed: number;
+  ttsMinutesIncluded: number;
+  ttsUsagePercent: number;
+  elevenLabsNeedsUpgrade: boolean;
+
+  // Fully loaded cost
+  fullyLoadedCostPerMinuteUSD: number;
+  fullyLoadedCostPerMinuteAUD: number;
+
+  // Organization data
+  organizations: OrgBilling[];
   organizationCount: number;
-  avgBillPerOrg: number;
-  // Platform-wide interaction breakdown
-  platformInteractions: InteractionCounts;
-  // Service breakdown
-  serviceCosts: ServiceCost[];
-  // Organizations
-  organizations: OrganizationBilling[];
-  // Exchange rate
-  exchangeRate: number;
-  // Standard limit
-  standardIncludedInteractions: number;
 }
 
-const INTERACTION_COLORS = {
-  call_inbound: "#10B981",
-  call_outbound: "#3B82F6",
-  sms_inbound: "#8B5CF6",
-  sms_outbound: "#F59E0B",
-  chat_session: "#06B6D4",
-};
+interface OrgBilling {
+  id: string;
+  name: string;
+  voiceMinutes: number;
+  chatInteractions: number;
+  smsMessages: number;
+  totalCostAUD: number;
+  monthlyFee: number;
+  status: string;
+}
 
-const SERVICE_COLORS = {
-  elevenlabs: "#8B5CF6",
-  twilio: "#F43F5E",
-  deepgram: "#10B981",
-  openai: "#3B82F6",
-  flyio: "#6366F1",
+const CHART_COLORS = {
+  voice: "#8B5CF6",
+  chat: "#3B82F6",
+  sms: "#10B981",
+  fixed: "#F59E0B",
 };
 
 // ============================================================================
@@ -189,20 +155,10 @@ export default function Billing() {
         startDate.setDate(startDate.getDate() - 90);
       }
 
-      // Fetch organizations with billing info
+      // Fetch organizations
       let orgsQuery = supabase
         .from("organizations")
-        .select(`
-          id,
-          name,
-          flat_rate_fee,
-          included_interactions,
-          overage_rate_per_1000,
-          current_period_interactions,
-          current_period_start,
-          current_period_end,
-          active
-        `);
+        .select("id, name, flat_rate_fee, active");
 
       if (currentRole === "org_admin" && user?.org_id) {
         orgsQuery = orgsQuery.eq("id", user.org_id);
@@ -210,417 +166,155 @@ export default function Billing() {
         orgsQuery = orgsQuery.eq("id", selectedOrg);
       }
 
-      const { data: orgsData, error: orgsError } = await orgsQuery;
+      const { data: orgsData } = await orgsQuery;
 
-      if (orgsError) {
-        console.error("Error fetching organizations:", orgsError);
-        throw orgsError;
-      }
-
-      // Fetch conversations with cost data
-      let convQuery = supabase
+      // Fetch voice conversations
+      let voiceQuery = supabase
         .from("conversations")
-        .select(`
-          org_id,
-          channel,
-          duration_seconds,
-          tokens_in,
-          tokens_out,
-          whisper_cost,
-          gpt_cost,
-          elevenlabs_cost,
-          twilio_cost,
-          total_cost
-        `)
+        .select("org_id, duration_seconds")
         .gte("created_at", startDate.toISOString())
         .lte("created_at", endDate.toISOString());
 
       if (currentRole === "org_admin" && user?.org_id) {
-        convQuery = convQuery.eq("org_id", user.org_id);
+        voiceQuery = voiceQuery.eq("org_id", user.org_id);
       } else if (selectedOrg !== "all") {
-        convQuery = convQuery.eq("org_id", selectedOrg);
+        voiceQuery = voiceQuery.eq("org_id", selectedOrg);
       }
 
-      const { data: convData } = await convQuery;
+      const { data: voiceData } = await voiceQuery;
 
-      // Fetch phone number counts per org
-      const { data: assistantsData } = await supabase
+      // Fetch chat conversations
+      let chatQuery = supabase
+        .from("chat_conversations")
+        .select("assistant_id")
+        .gte("created_at", startDate.toISOString())
+        .lte("created_at", endDate.toISOString());
+
+      const { data: chatData } = await chatQuery;
+
+      // Fetch assistants to map chat to orgs
+      const { data: assistants } = await supabase
         .from("assistants")
-        .select("org_id, phone_number")
-        .not("phone_number", "is", null);
+        .select("id, org_id, phone_number");
 
-      const phoneCountByOrg: Record<string, number> = {};
-      assistantsData?.forEach((a) => {
-        phoneCountByOrg[a.org_id] = (phoneCountByOrg[a.org_id] || 0) + 1;
+      const assistantToOrg: Record<string, string> = {};
+      assistants?.forEach(a => {
+        assistantToOrg[a.id] = a.org_id;
       });
 
-      // Try to fetch interaction_logs for detailed interaction tracking
-      let interactionsQuery = supabase
-        .from("interaction_logs")
-        .select("org_id, interaction_type, duration_seconds")
-        .gte("created_at", startDate.toISOString())
-        .lte("created_at", endDate.toISOString());
+      // Count phone numbers
+      const phoneNumbers = assistants?.filter(a => a.phone_number).length || 0;
 
-      if (currentRole === "org_admin" && user?.org_id) {
-        interactionsQuery = interactionsQuery.eq("org_id", user.org_id);
-      } else if (selectedOrg !== "all") {
-        interactionsQuery = interactionsQuery.eq("org_id", selectedOrg);
-      }
-
-      const { data: interactionLogs } = await interactionsQuery;
-
-      // Chat session timeout constant (30 minutes = 1 session)
-      const CHAT_SESSION_TIMEOUT_MINUTES = 30;
-
-      // Aggregate usage and interactions by org
-      const usageByOrg: Record<string, {
-        voiceMinutes: number;
-        chatSessions: number;
-        inputTokens: number;
-        outputTokens: number;
-        dbElevenLabs: number;
-        dbTwilio: number;
-        dbWhisper: number;
-        dbGpt: number;
-        dbTotal: number;
-        interactions: InteractionCounts;
-      }> = {};
-
-      // Helper to initialize org usage
-      const initOrgUsage = (orgId: string) => {
-        if (!usageByOrg[orgId]) {
-          usageByOrg[orgId] = {
-            voiceMinutes: 0,
-            chatSessions: 0,
-            inputTokens: 0,
-            outputTokens: 0,
-            dbElevenLabs: 0,
-            dbTwilio: 0,
-            dbWhisper: 0,
-            dbGpt: 0,
-            dbTotal: 0,
-            interactions: {
-              callInbound: 0,
-              callOutbound: 0,
-              smsInbound: 0,
-              smsOutbound: 0,
-              chatSessions: 0,
-              total: 0,
-            },
-          };
-        }
-      };
-
-      // Process interaction_logs if available
-      if (interactionLogs && interactionLogs.length > 0) {
-        interactionLogs.forEach((log) => {
-          initOrgUsage(log.org_id);
-          const usage = usageByOrg[log.org_id];
-
-          switch (log.interaction_type) {
-            case 'call_inbound':
-              usage.interactions.callInbound++;
-              break;
-            case 'call_outbound':
-              usage.interactions.callOutbound++;
-              break;
-            case 'sms_inbound':
-              usage.interactions.smsInbound++;
-              break;
-            case 'sms_outbound':
-              usage.interactions.smsOutbound++;
-              break;
-            case 'chat_session':
-              usage.interactions.chatSessions++;
-              break;
-          }
-          usage.interactions.total++;
-        });
-      }
-
-      // Process conversations for cost data and fallback interaction counting
-      convData?.forEach((conv) => {
-        initOrgUsage(conv.org_id);
-        const usage = usageByOrg[conv.org_id];
-
-        if (conv.channel === 'voice') {
-          usage.voiceMinutes += (conv.duration_seconds || 0) / 60;
-          // If no interaction_logs, count from conversations
-          if (!interactionLogs || interactionLogs.length === 0) {
-            // Assume 70% inbound, 30% outbound for voice without detailed logs
-            usage.interactions.callInbound++;
-          }
-        } else if (conv.channel === 'sms') {
-          // SMS conversation - count as SMS interaction
-          if (!interactionLogs || interactionLogs.length === 0) {
-            // Default to inbound SMS if direction unknown
-            usage.interactions.smsInbound++;
-          }
-        } else {
-          // Chat session - apply timeout logic
-          const durationMinutes = (conv.duration_seconds || 0) / 60;
-          // If session is longer than timeout, count as multiple sessions
-          const sessionCount = Math.max(1, Math.ceil(durationMinutes / CHAT_SESSION_TIMEOUT_MINUTES));
-          usage.chatSessions += sessionCount;
-
-          // If no interaction_logs, count from conversations
-          if (!interactionLogs || interactionLogs.length === 0) {
-            usage.interactions.chatSessions += sessionCount;
-            usage.interactions.total += sessionCount;
-          }
-        }
-
-        usage.inputTokens += conv.tokens_in || 0;
-        usage.outputTokens += conv.tokens_out || 0;
-        usage.dbElevenLabs += parseFloat(conv.elevenlabs_cost) || 0;
-        usage.dbTwilio += parseFloat(conv.twilio_cost) || 0;
-        usage.dbWhisper += parseFloat(conv.whisper_cost) || 0;
-        usage.dbGpt += parseFloat(conv.gpt_cost) || 0;
-        usage.dbTotal += parseFloat(conv.total_cost) || 0;
+      // Calculate voice minutes by org
+      const voiceByOrg: Record<string, number> = {};
+      let totalVoiceMinutes = 0;
+      voiceData?.forEach(conv => {
+        const minutes = (conv.duration_seconds || 0) / 60;
+        voiceByOrg[conv.org_id] = (voiceByOrg[conv.org_id] || 0) + minutes;
+        totalVoiceMinutes += minutes;
       });
 
-      // Recalculate totals if we used fallback counting
-      if (!interactionLogs || interactionLogs.length === 0) {
-        Object.values(usageByOrg).forEach((usage) => {
-          usage.interactions.total =
-            usage.interactions.callInbound +
-            usage.interactions.callOutbound +
-            usage.interactions.smsInbound +
-            usage.interactions.smsOutbound +
-            usage.interactions.chatSessions;
-        });
-      }
+      // Calculate chat interactions by org
+      const chatByOrg: Record<string, number> = {};
+      let totalChatInteractions = 0;
+      chatData?.forEach(conv => {
+        const orgId = assistantToOrg[conv.assistant_id];
+        if (orgId) {
+          // Filter by selected org if applicable
+          if (currentRole === "org_admin" && user?.org_id && orgId !== user.org_id) return;
+          if (selectedOrg !== "all" && orgId !== selectedOrg) return;
+          chatByOrg[orgId] = (chatByOrg[orgId] || 0) + 1;
+          totalChatInteractions++;
+        }
+      });
 
-      // Calculate costs for each organization
-      const organizations: OrganizationBilling[] = (orgsData || []).map(org => {
-        const flatRateFee = parseFloat(org.flat_rate_fee) || 0;
-        const includedInteractions = org.included_interactions || 5000;
-        const overageRatePer1000 = parseFloat(org.overage_rate_per_1000) || 0;
-        const currentInteractions = org.current_period_interactions || 0;
-        const monthlyServiceFee = flatRateFee;
+      // SMS - assume 0 for now (would need separate table)
+      const totalSmsMessages = 0;
 
-        // Get usage data
-        const defaultInteractions: InteractionCounts = {
-          callInbound: 0,
-          callOutbound: 0,
-          smsInbound: 0,
-          smsOutbound: 0,
-          chatSessions: 0,
-          total: 0,
-        };
-        const usage = usageByOrg[org.id] || {
-          voiceMinutes: 0,
-          chatSessions: 0,
-          inputTokens: 0,
-          outputTokens: 0,
-          dbElevenLabs: 0,
-          dbTwilio: 0,
-          dbWhisper: 0,
-          dbGpt: 0,
-          dbTotal: 0,
-          interactions: defaultInteractions,
-        };
-        const phoneCount = phoneCountByOrg[org.id] || 0;
+      // Calculate variable costs (USD)
+      const voiceCostUSD = totalVoiceMinutes * VOICE_AI_COSTS_PER_MINUTE.total;
+      const chatCostUSD = totalChatInteractions * CHAT_COSTS_PER_INTERACTION.total;
+      const smsCostUSD = totalSmsMessages * SMS_COSTS_PER_MESSAGE.total;
+      const totalVariableCostUSD = voiceCostUSD + chatCostUSD + smsCostUSD;
 
-        // Calculate API costs based on actual usage and pricing
-        // ElevenLabs TTS
-        const elevenLabsOverage = Math.max(0, usage.voiceMinutes - ELEVENLABS_PRICING.ttsMinutesIncluded);
-        const elevenLabsCostUSD = elevenLabsOverage * ELEVENLABS_PRICING.ttsOveragePerMinuteUSD;
-        const elevenLabsCost = usdToAud(elevenLabsCostUSD);
+      // Calculate fixed costs (USD)
+      const phoneNumberCostUSD = phoneNumbers * FIXED_MONTHLY_COSTS.twilioPhoneNumber;
+      const flyioCostUSD = FIXED_MONTHLY_COSTS.flyioVmSydney;
+      const elevenLabsFeeUSD = ELEVENLABS_PRICING.monthlyFeeUSD;
 
-        // Twilio - calls + phone numbers
-        const twilioCallCostUSD =
-          (usage.voiceMinutes * 0.7 * TWILIO_PRICING.localCallsReceiveUSD) +
-          (usage.voiceMinutes * 0.3 * TWILIO_PRICING.localCallsMakeUSD);
-        const twilioNumberCostUSD = phoneCount * TWILIO_PRICING.localNumberMonthlyUSD;
-        const twilioCost = usdToAud(twilioCallCostUSD + twilioNumberCostUSD);
+      // ElevenLabs overage
+      const elevenLabsOverage = calculateElevenLabsOverage(totalVoiceMinutes);
+      const elevenLabsOverageUSD = elevenLabsOverage.usd;
 
-        // Deepgram STT
-        const deepgramCostUSD = usage.voiceMinutes * DEEPGRAM_PRICING.nova2PerMinuteUSD;
-        const deepgramCost = usdToAud(deepgramCostUSD);
+      const totalFixedCostUSD = phoneNumberCostUSD + flyioCostUSD + elevenLabsFeeUSD + elevenLabsOverageUSD;
 
-        // OpenAI LLM + Whisper
-        const openaiLlmCostUSD =
-          (usage.inputTokens / 1000) * OPENAI_PRICING.gpt4oMiniInputPer1kTokensUSD +
-          (usage.outputTokens / 1000) * OPENAI_PRICING.gpt4oMiniOutputPer1kTokensUSD;
-        const openaiWhisperCostUSD = usage.voiceMinutes * OPENAI_PRICING.whisperPerMinuteUSD;
-        const openaiCost = usdToAud(openaiLlmCostUSD + openaiWhisperCostUSD);
+      // Total costs
+      const totalCostUSD = totalVariableCostUSD + totalFixedCostUSD;
+      const totalCostAUD = usdToAud(totalCostUSD);
 
-        const totalApiCost = elevenLabsCost + twilioCost + deepgramCost + openaiCost;
+      // Revenue (sum of org flat rate fees)
+      const totalRevenue = (orgsData || []).reduce((sum, org) => sum + (parseFloat(org.flat_rate_fee) || 0), 0);
 
-        // Calculate plan billing
-        const overageInteractions = Math.max(0, currentInteractions - includedInteractions);
-        const overageCost = (overageInteractions / 1000) * overageRatePer1000;
-        const totalBill = monthlyServiceFee + overageCost;
-        const usagePercentage = includedInteractions > 0
-          ? Math.min(100, (currentInteractions / includedInteractions) * 100)
-          : 0;
+      // Profit = Revenue - Total Costs
+      const grossProfit = totalRevenue - totalCostAUD;
+      const grossMargin = totalRevenue > 0 ? (grossProfit / totalRevenue) * 100 : 0;
 
-        // Calculate total interactions from the detailed breakdown
-        // If no detailed breakdown available, use DB value
-        const totalInteractionsFromUsage = usage.interactions.total > 0
-          ? usage.interactions.total
-          : currentInteractions;
+      // Fully loaded cost per minute
+      const fullyLoaded = calculateFullyLoadedVoiceCost(totalVoiceMinutes, phoneNumbers);
 
-        // Ensure the interactions object has the correct total
-        // This is needed for platform-wide aggregation
-        const finalInteractions = {
-          ...usage.interactions,
-          total: totalInteractionsFromUsage
-        };
+      // Build org breakdown
+      const organizations: OrgBilling[] = (orgsData || []).map(org => {
+        const voiceMins = voiceByOrg[org.id] || 0;
+        const chatCount = chatByOrg[org.id] || 0;
+        const orgVoiceCost = voiceMins * VOICE_AI_COSTS_PER_MINUTE.total;
+        const orgChatCost = chatCount * CHAT_COSTS_PER_INTERACTION.total;
+        const orgTotalCostUSD = orgVoiceCost + orgChatCost;
 
         return {
           id: org.id,
-          name: org.name || 'Unknown Organization',
-          flatRateFee,
-          includedInteractions,
-          overageRatePer1000,
-          currentPeriodInteractions: totalInteractionsFromUsage,
-          currentPeriodStart: org.current_period_start,
-          currentPeriodEnd: org.current_period_end,
-          monthlyServiceFee,
+          name: org.name || 'Unknown',
+          voiceMinutes: voiceMins,
+          chatInteractions: chatCount,
+          smsMessages: 0,
+          totalCostAUD: usdToAud(orgTotalCostUSD),
+          monthlyFee: parseFloat(org.flat_rate_fee) || 0,
           status: org.active === false ? 'inactive' : 'active',
-          voiceMinutes: usage.voiceMinutes,
-          chatSessions: usage.chatSessions,
-          inputTokens: usage.inputTokens,
-          outputTokens: usage.outputTokens,
-          interactions: finalInteractions,
-          elevenLabsCost,
-          twilioCost,
-          deepgramCost,
-          openaiCost,
-          totalApiCost,
-          overageInteractions,
-          overageCost,
-          totalBill,
-          usagePercentage,
-          isOverLimit: totalInteractionsFromUsage > includedInteractions,
         };
       });
 
-      // Calculate platform-wide totals
-      const totalRevenue = organizations.reduce((sum, org) => sum + org.totalBill, 0);
-      const totalApiCosts = organizations.reduce((sum, org) => sum + org.totalApiCost, 0);
-      const totalVoiceMinutes = organizations.reduce((sum, org) => sum + org.voiceMinutes, 0);
-      const totalChatSessions = organizations.reduce((sum, org) => sum + org.chatSessions, 0);
-      const totalInputTokens = organizations.reduce((sum, org) => sum + org.inputTokens, 0);
-      const totalOutputTokens = organizations.reduce((sum, org) => sum + org.outputTokens, 0);
-      const totalPhoneNumbers = Object.values(phoneCountByOrg).reduce((sum, count) => sum + count, 0);
-
-      // Add Fly.io cost (shared infrastructure)
-      const flyioCostAUD = FLYIO_PRICING.sharedCpu1x1gb;
-      const totalApiCostsWithFlyio = totalApiCosts + flyioCostAUD;
-
-      // Calculate service breakdown
-      const totalElevenLabsUSD = organizations.reduce((sum, org) => {
-        const overage = Math.max(0, org.voiceMinutes - ELEVENLABS_PRICING.ttsMinutesIncluded);
-        return sum + (overage * ELEVENLABS_PRICING.ttsOveragePerMinuteUSD);
-      }, 0);
-
-      const totalTwilioCallsUSD = organizations.reduce((sum, org) => {
-        return sum + (org.voiceMinutes * 0.7 * TWILIO_PRICING.localCallsReceiveUSD) +
-          (org.voiceMinutes * 0.3 * TWILIO_PRICING.localCallsMakeUSD);
-      }, 0);
-      const totalTwilioNumbersUSD = totalPhoneNumbers * TWILIO_PRICING.localNumberMonthlyUSD;
-      const totalTwilioUSD = totalTwilioCallsUSD + totalTwilioNumbersUSD;
-
-      const totalDeepgramUSD = totalVoiceMinutes * DEEPGRAM_PRICING.nova2PerMinuteUSD;
-
-      const totalOpenAIUSD =
-        (totalInputTokens / 1000) * OPENAI_PRICING.gpt4oMiniInputPer1kTokensUSD +
-        (totalOutputTokens / 1000) * OPENAI_PRICING.gpt4oMiniOutputPer1kTokensUSD +
-        totalVoiceMinutes * OPENAI_PRICING.whisperPerMinuteUSD;
-
-      const serviceCosts: ServiceCost[] = [
-        {
-          service: 'ElevenLabs',
-          description: 'Text-to-Speech (Creator Plan)',
-          costUSD: totalElevenLabsUSD,
-          costAUD: usdToAud(totalElevenLabsUSD),
-          usage: `${totalVoiceMinutes.toFixed(1)} voice minutes`,
-          color: SERVICE_COLORS.elevenlabs,
-          icon: 'Volume2',
-          isNativeCurrency: 'USD',
-        },
-        {
-          service: 'Twilio',
-          description: 'Voice calls & phone numbers',
-          costUSD: totalTwilioUSD,
-          costAUD: usdToAud(totalTwilioUSD),
-          usage: `${totalVoiceMinutes.toFixed(1)} call mins, ${totalPhoneNumbers} numbers`,
-          color: SERVICE_COLORS.twilio,
-          icon: 'Phone',
-          isNativeCurrency: 'USD',
-        },
-        {
-          service: 'Deepgram',
-          description: 'Speech-to-Text (Nova-2)',
-          costUSD: totalDeepgramUSD,
-          costAUD: usdToAud(totalDeepgramUSD),
-          usage: `${totalVoiceMinutes.toFixed(1)} minutes transcribed`,
-          color: SERVICE_COLORS.deepgram,
-          icon: 'Mic',
-          isNativeCurrency: 'USD',
-        },
-        {
-          service: 'OpenAI',
-          description: 'GPT-4o-mini + Whisper',
-          costUSD: totalOpenAIUSD,
-          costAUD: usdToAud(totalOpenAIUSD),
-          usage: `${((totalInputTokens + totalOutputTokens) / 1000).toFixed(1)}k tokens`,
-          color: SERVICE_COLORS.openai,
-          icon: 'Brain',
-          isNativeCurrency: 'USD',
-        },
-        {
-          service: 'Fly.io',
-          description: 'Server hosting (Sydney)',
-          costUSD: flyioCostAUD / USD_TO_AUD_RATE,
-          costAUD: flyioCostAUD,
-          usage: 'shared-cpu-1x 1GB',
-          color: SERVICE_COLORS.flyio,
-          icon: 'Server',
-          isNativeCurrency: 'AUD',
-        },
-      ];
-
-      const grossProfit = totalRevenue - totalApiCostsWithFlyio;
-      const grossMargin = totalRevenue > 0 ? (grossProfit / totalRevenue) * 100 : 0;
-
-      // Calculate platform-wide interaction counts
-      const platformInteractions: InteractionCounts = organizations.reduce(
-        (acc, org) => ({
-          callInbound: acc.callInbound + org.interactions.callInbound,
-          callOutbound: acc.callOutbound + org.interactions.callOutbound,
-          smsInbound: acc.smsInbound + org.interactions.smsInbound,
-          smsOutbound: acc.smsOutbound + org.interactions.smsOutbound,
-          chatSessions: acc.chatSessions + org.interactions.chatSessions,
-          total: acc.total + org.interactions.total,
-        }),
-        { callInbound: 0, callOutbound: 0, smsInbound: 0, smsOutbound: 0, chatSessions: 0, total: 0 }
-      );
-
       return {
+        voiceMinutes: totalVoiceMinutes,
+        chatInteractions: totalChatInteractions,
+        smsMessages: totalSmsMessages,
+        phoneNumbers,
+        voiceCostUSD,
+        chatCostUSD,
+        smsCostUSD,
+        totalVariableCostUSD,
+        phoneNumberCostUSD,
+        flyioCostUSD,
+        elevenLabsFeeUSD,
+        elevenLabsOverageUSD,
+        totalFixedCostUSD,
+        totalCostUSD,
+        totalCostAUD,
         totalRevenue,
-        totalApiCosts: totalApiCostsWithFlyio,
         grossProfit,
         grossMargin,
-        totalInteractions: platformInteractions.total || (totalVoiceMinutes + totalChatSessions),
-        totalVoiceMinutes,
-        totalChatSessions,
-        organizationCount: organizations.length,
-        avgBillPerOrg: organizations.length > 0 ? totalRevenue / organizations.length : 0,
-        platformInteractions,
-        serviceCosts,
+        ttsMinutesUsed: totalVoiceMinutes,
+        ttsMinutesIncluded: ELEVENLABS_PRICING.ttsMinutesIncluded,
+        ttsUsagePercent: elevenLabsOverage.ttsUsagePercent,
+        elevenLabsNeedsUpgrade: elevenLabsOverage.needsUpgrade,
+        fullyLoadedCostPerMinuteUSD: fullyLoaded.usd,
+        fullyLoadedCostPerMinuteAUD: fullyLoaded.aud,
         organizations,
-        exchangeRate: USD_TO_AUD_RATE,
-        standardIncludedInteractions: 5000,
+        organizationCount: organizations.length,
       };
     },
     refetchInterval: 60000,
   });
 
-  // Fetch organizations for dropdown (super admin only)
+  // Fetch organizations for dropdown
   const { data: orgsList = [] } = useQuery({
     queryKey: ["billing-orgs-list"],
     queryFn: async () => {
@@ -628,31 +322,21 @@ export default function Billing() {
         .from("organizations")
         .select("id, name")
         .order("name");
-
       if (error) throw error;
       return data || [];
     },
     enabled: currentRole === "super_admin",
   });
 
-  const getServiceIcon = (iconName: string) => {
-    switch (iconName) {
-      case 'Volume2': return <Volume2 className="h-5 w-5" />;
-      case 'Phone': return <Phone className="h-5 w-5" />;
-      case 'Mic': return <Mic className="h-5 w-5" />;
-      case 'Brain': return <Brain className="h-5 w-5" />;
-      case 'Server': return <Server className="h-5 w-5" />;
-      default: return <Activity className="h-5 w-5" />;
-    }
-  };
+  // Pie chart data
+  const pieChartData = [
+    { name: 'Voice AI', value: usdToAud(billingData?.voiceCostUSD || 0), color: CHART_COLORS.voice },
+    { name: 'Chat', value: usdToAud(billingData?.chatCostUSD || 0), color: CHART_COLORS.chat },
+    { name: 'Fixed Costs', value: usdToAud(billingData?.totalFixedCostUSD || 0), color: CHART_COLORS.fixed },
+  ].filter(d => d.value > 0);
 
-  const pieChartData = billingData?.serviceCosts
-    .filter(s => s.costAUD > 0)
-    .map(s => ({
-      name: s.service,
-      value: s.costAUD,
-      color: s.color,
-    })) || [];
+  const formatAUD = (amount: number) => `$${amount.toFixed(2)} AUD`;
+  const formatUSD = (amount: number) => `$${amount.toFixed(4)} USD`;
 
   return (
     <DashboardLayout userRole={currentRole} userName={user?.full_name || "Unknown User"}>
@@ -661,8 +345,18 @@ export default function Billing() {
         {error && (
           <Alert variant="destructive">
             <AlertTriangle className="h-4 w-4" />
+            <AlertDescription>Failed to load billing data. Please refresh.</AlertDescription>
+          </Alert>
+        )}
+
+        {/* ElevenLabs Upgrade Alert */}
+        {currentRole === "super_admin" && billingData?.elevenLabsNeedsUpgrade && (
+          <Alert className="bg-orange-500/10 border-orange-500/30">
+            <AlertTriangle className="h-4 w-4 text-orange-500" />
+            <AlertTitle className="text-orange-600">ElevenLabs Plan Alert</AlertTitle>
             <AlertDescription>
-              Failed to load billing data. Please try refreshing the page.
+              TTS usage at <strong>{billingData.ttsUsagePercent.toFixed(0)}%</strong> of included {billingData.ttsMinutesIncluded} minutes.
+              Consider upgrading to Pro plan to avoid overage charges (${ELEVENLABS_PRICING.ttsOveragePerMinuteUSD}/min).
             </AlertDescription>
           </Alert>
         )}
@@ -674,9 +368,7 @@ export default function Billing() {
               Billing & Costs
             </h1>
             <p className="text-sm md:text-base text-muted-foreground mt-2">
-              {currentRole === "super_admin"
-                ? "Platform costs, revenue, and organization billing"
-                : "Your organization's billing and usage details"}
+              Platform costs and profitability (All amounts in AUD)
             </p>
           </div>
 
@@ -689,14 +381,11 @@ export default function Billing() {
                 <SelectContent>
                   <SelectItem value="all">All Organizations</SelectItem>
                   {orgsList.map((org) => (
-                    <SelectItem key={org.id} value={org.id}>
-                      {org.name}
-                    </SelectItem>
+                    <SelectItem key={org.id} value={org.id}>{org.name}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             )}
-
             <Select value={selectedPeriod} onValueChange={setSelectedPeriod}>
               <SelectTrigger className="w-full sm:w-[150px]">
                 <SelectValue placeholder="Period" />
@@ -714,7 +403,7 @@ export default function Billing() {
         <Alert className="bg-blue-500/10 border-blue-500/20">
           <Globe className="h-4 w-4 text-blue-500" />
           <AlertDescription className="text-sm">
-            All costs displayed in AUD. USD to AUD exchange rate: <strong>{billingData?.exchangeRate.toFixed(2) || USD_TO_AUD_RATE.toFixed(2)}</strong>
+            USD to AUD: <strong>{USD_TO_AUD_RATE.toFixed(2)}</strong> | All costs displayed in AUD
           </AlertDescription>
         </Alert>
 
@@ -723,132 +412,70 @@ export default function Billing() {
           {/* Revenue */}
           <Card className="bg-gradient-to-br from-green-500/10 to-emerald-500/10 border-green-500/20">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">
-                {currentRole === "super_admin" ? "Total Revenue" : "Your Bill"}
-              </CardTitle>
+              <CardTitle className="text-sm font-medium">Total Revenue</CardTitle>
               <DollarSign className="h-4 w-4 text-green-500" />
             </CardHeader>
             <CardContent>
-              {isLoading ? (
-                <Skeleton className="h-8 w-24" />
-              ) : (
-                <div className="text-2xl font-bold text-green-600">
-                  ${(billingData?.totalRevenue || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </div>
+              {isLoading ? <Skeleton className="h-8 w-24" /> : (
+                <div className="text-2xl font-bold text-green-600">{formatAUD(billingData?.totalRevenue || 0)}</div>
               )}
-              <p className="text-xs text-muted-foreground">
-                AUD - {selectedPeriod === "current" ? "This period" : selectedPeriod === "last" ? "Last period" : "90 days"}
-              </p>
+              <p className="text-xs text-muted-foreground">Organization fees</p>
             </CardContent>
           </Card>
 
-          {/* API Costs (Super Admin only) */}
-          {currentRole === "super_admin" && (
-            <Card className="bg-gradient-to-br from-red-500/10 to-orange-500/10 border-red-500/20">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">API Costs</CardTitle>
-                <TrendingDown className="h-4 w-4 text-red-500" />
-              </CardHeader>
-              <CardContent>
-                {isLoading ? (
-                  <Skeleton className="h-8 w-24" />
-                ) : (
-                  <div className="text-2xl font-bold text-red-600">
-                    ${(billingData?.totalApiCosts || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </div>
-                )}
-                <p className="text-xs text-muted-foreground">
-                  AUD - All services combined
-                </p>
-              </CardContent>
-            </Card>
-          )}
+          {/* Total Costs */}
+          <Card className="bg-gradient-to-br from-red-500/10 to-orange-500/10 border-red-500/20">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Total Costs</CardTitle>
+              <TrendingDown className="h-4 w-4 text-red-500" />
+            </CardHeader>
+            <CardContent>
+              {isLoading ? <Skeleton className="h-8 w-24" /> : (
+                <div className="text-2xl font-bold text-red-600">{formatAUD(billingData?.totalCostAUD || 0)}</div>
+              )}
+              <p className="text-xs text-muted-foreground">Variable + Fixed</p>
+            </CardContent>
+          </Card>
 
-          {/* Gross Profit / Usage */}
-          {currentRole === "super_admin" ? (
-            <Card className="bg-gradient-to-br from-blue-500/10 to-cyan-500/10 border-blue-500/20">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Gross Profit</CardTitle>
-                <TrendingUp className="h-4 w-4 text-blue-500" />
-              </CardHeader>
-              <CardContent>
-                {isLoading ? (
-                  <Skeleton className="h-8 w-24" />
-                ) : (
-                  <div className={`text-2xl font-bold ${(billingData?.grossProfit || 0) >= 0 ? 'text-blue-600' : 'text-red-600'}`}>
-                    ${(billingData?.grossProfit || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </div>
-                )}
-                <p className="text-xs text-muted-foreground">
-                  {(billingData?.grossMargin || 0).toFixed(1)}% margin
-                </p>
-              </CardContent>
-            </Card>
-          ) : (
-            <Card className="bg-gradient-to-br from-blue-500/10 to-cyan-500/10 border-blue-500/20">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Total Interactions</CardTitle>
-                <Activity className="h-4 w-4 text-blue-500" />
-              </CardHeader>
-              <CardContent>
-                {isLoading ? (
-                  <Skeleton className="h-8 w-20" />
-                ) : (
-                  <div className="text-2xl font-bold text-blue-600">
-                    {(billingData?.totalInteractions || 0).toLocaleString()}
-                  </div>
-                )}
-                <p className="text-xs text-muted-foreground">
-                  Calls and chat sessions
-                </p>
-              </CardContent>
-            </Card>
-          )}
+          {/* Gross Profit */}
+          <Card className="bg-gradient-to-br from-blue-500/10 to-cyan-500/10 border-blue-500/20">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Gross Profit</CardTitle>
+              <TrendingUp className="h-4 w-4 text-blue-500" />
+            </CardHeader>
+            <CardContent>
+              {isLoading ? <Skeleton className="h-8 w-24" /> : (
+                <div className={`text-2xl font-bold ${(billingData?.grossProfit || 0) >= 0 ? 'text-blue-600' : 'text-red-600'}`}>
+                  {formatAUD(billingData?.grossProfit || 0)}
+                </div>
+              )}
+              <p className="text-xs text-muted-foreground">{(billingData?.grossMargin || 0).toFixed(1)}% margin</p>
+            </CardContent>
+          </Card>
 
-          {/* Organizations / Usage */}
-          {currentRole === "super_admin" ? (
-            <Card className="bg-gradient-to-br from-purple-500/10 to-pink-500/10 border-purple-500/20">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Organizations</CardTitle>
-                <Building2 className="h-4 w-4 text-purple-500" />
-              </CardHeader>
-              <CardContent>
-                {isLoading ? (
-                  <Skeleton className="h-8 w-12" />
-                ) : (
-                  <div className="text-2xl font-bold text-purple-600">
-                    {billingData?.organizationCount || 0}
-                  </div>
-                )}
-                <p className="text-xs text-muted-foreground">
-                  Avg: ${(billingData?.avgBillPerOrg || 0).toFixed(2)}/org
-                </p>
-              </CardContent>
-            </Card>
-          ) : (
-            <Card className="bg-gradient-to-br from-purple-500/10 to-pink-500/10 border-purple-500/20">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Plan Status</CardTitle>
-                <CreditCard className="h-4 w-4 text-purple-500" />
-              </CardHeader>
-              <CardContent>
-                <Badge className="bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300">
-                  Active
-                </Badge>
-                <p className="text-xs text-muted-foreground mt-2">
-                  Enterprise Plan
-                </p>
-              </CardContent>
-            </Card>
-          )}
+          {/* Fully Loaded Cost */}
+          <Card className="bg-gradient-to-br from-purple-500/10 to-pink-500/10 border-purple-500/20">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Cost/AI Minute</CardTitle>
+              <Activity className="h-4 w-4 text-purple-500" />
+            </CardHeader>
+            <CardContent>
+              {isLoading ? <Skeleton className="h-8 w-24" /> : (
+                <div className="text-2xl font-bold text-purple-600">
+                  ${(billingData?.fullyLoadedCostPerMinuteAUD || 0).toFixed(3)}
+                </div>
+              )}
+              <p className="text-xs text-muted-foreground">Fully loaded (AUD)</p>
+            </CardContent>
+          </Card>
         </div>
 
         {/* Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
           <TabsList className="grid w-full grid-cols-4 lg:w-[500px]">
             <TabsTrigger value="overview">Overview</TabsTrigger>
-            <TabsTrigger value="interactions">Interactions</TabsTrigger>
-            <TabsTrigger value="services">Service Costs</TabsTrigger>
+            <TabsTrigger value="breakdown">Cost Breakdown</TabsTrigger>
+            <TabsTrigger value="rates">Unit Rates</TabsTrigger>
             <TabsTrigger value="organizations">Organizations</TabsTrigger>
           </TabsList>
 
@@ -860,34 +487,27 @@ export default function Billing() {
                 <CardHeader>
                   <CardTitle className="text-lg flex items-center gap-2">
                     <Activity className="h-5 w-5" />
-                    Usage Summary
+                    Usage This Period
                   </CardTitle>
-                  <CardDescription>
-                    Platform-wide usage metrics
-                  </CardDescription>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="space-y-4">
                   {isLoading ? (
-                    <div className="space-y-4">
-                      {Array.from({ length: 4 }).map((_, i) => (
-                        <Skeleton key={i} className="h-12 w-full" />
-                      ))}
-                    </div>
+                    <div className="space-y-4">{[1,2,3].map(i => <Skeleton key={i} className="h-16 w-full" />)}</div>
                   ) : (
-                    <div className="space-y-4">
+                    <>
                       <div className="flex items-center justify-between p-4 rounded-lg border bg-card">
                         <div className="flex items-center gap-3">
-                          <div className="h-10 w-10 rounded-full bg-green-500/10 flex items-center justify-center">
-                            <Phone className="h-5 w-5 text-green-500" />
+                          <div className="h-10 w-10 rounded-full bg-purple-500/10 flex items-center justify-center">
+                            <Phone className="h-5 w-5 text-purple-500" />
                           </div>
                           <div>
-                            <p className="font-medium">Voice Minutes</p>
-                            <p className="text-sm text-muted-foreground">Total call duration</p>
+                            <p className="font-medium">Voice AI Minutes</p>
+                            <p className="text-sm text-muted-foreground">${VOICE_AI_COSTS_PER_MINUTE.total}/min USD</p>
                           </div>
                         </div>
                         <div className="text-right">
-                          <p className="text-2xl font-bold">{(billingData?.totalVoiceMinutes || 0).toFixed(1)}</p>
-                          <p className="text-xs text-muted-foreground">minutes</p>
+                          <p className="text-2xl font-bold">{(billingData?.voiceMinutes || 0).toFixed(1)}</p>
+                          <p className="text-sm text-muted-foreground">{formatAUD(usdToAud(billingData?.voiceCostUSD || 0))}</p>
                         </div>
                       </div>
 
@@ -897,64 +517,43 @@ export default function Billing() {
                             <MessageSquare className="h-5 w-5 text-blue-500" />
                           </div>
                           <div>
-                            <p className="font-medium">Chat Sessions</p>
-                            <p className="text-sm text-muted-foreground">Text conversations</p>
+                            <p className="font-medium">Chat Interactions</p>
+                            <p className="text-sm text-muted-foreground">${CHAT_COSTS_PER_INTERACTION.total}/chat USD</p>
                           </div>
                         </div>
                         <div className="text-right">
-                          <p className="text-2xl font-bold">{billingData?.totalChatSessions || 0}</p>
-                          <p className="text-xs text-muted-foreground">sessions</p>
+                          <p className="text-2xl font-bold">{billingData?.chatInteractions || 0}</p>
+                          <p className="text-sm text-muted-foreground">{formatAUD(usdToAud(billingData?.chatCostUSD || 0))}</p>
                         </div>
                       </div>
 
                       <div className="flex items-center justify-between p-4 rounded-lg border bg-card">
                         <div className="flex items-center gap-3">
-                          <div className="h-10 w-10 rounded-full bg-purple-500/10 flex items-center justify-center">
-                            <Brain className="h-5 w-5 text-purple-500" />
+                          <div className="h-10 w-10 rounded-full bg-green-500/10 flex items-center justify-center">
+                            <MessageCircle className="h-5 w-5 text-green-500" />
                           </div>
                           <div>
-                            <p className="font-medium">LLM Tokens</p>
-                            <p className="text-sm text-muted-foreground">Input + Output</p>
+                            <p className="font-medium">SMS Messages</p>
+                            <p className="text-sm text-muted-foreground">${SMS_COSTS_PER_MESSAGE.total}/SMS USD</p>
                           </div>
                         </div>
                         <div className="text-right">
-                          <p className="text-2xl font-bold">
-                            {(((billingData?.organizations || []).reduce((sum, o) => sum + o.inputTokens + o.outputTokens, 0)) / 1000).toFixed(1)}k
-                          </p>
-                          <p className="text-xs text-muted-foreground">tokens</p>
+                          <p className="text-2xl font-bold">{billingData?.smsMessages || 0}</p>
+                          <p className="text-sm text-muted-foreground">{formatAUD(usdToAud(billingData?.smsCostUSD || 0))}</p>
                         </div>
                       </div>
-
-                      <div className="flex items-center justify-between p-4 rounded-lg border bg-card">
-                        <div className="flex items-center gap-3">
-                          <div className="h-10 w-10 rounded-full bg-amber-500/10 flex items-center justify-center">
-                            <Building2 className="h-5 w-5 text-amber-500" />
-                          </div>
-                          <div>
-                            <p className="font-medium">Active Organizations</p>
-                            <p className="text-sm text-muted-foreground">With interactions</p>
-                          </div>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-2xl font-bold">{billingData?.organizationCount || 0}</p>
-                          <p className="text-xs text-muted-foreground">orgs</p>
-                        </div>
-                      </div>
-                    </div>
+                    </>
                   )}
                 </CardContent>
               </Card>
 
-              {/* Cost Distribution Pie Chart */}
+              {/* Cost Distribution */}
               <Card>
                 <CardHeader>
                   <CardTitle className="text-lg flex items-center gap-2">
                     <Receipt className="h-5 w-5" />
-                    Cost Distribution
+                    Cost Distribution (AUD)
                   </CardTitle>
-                  <CardDescription>
-                    API costs by service (AUD)
-                  </CardDescription>
                 </CardHeader>
                 <CardContent>
                   {isLoading ? (
@@ -980,9 +579,7 @@ export default function Billing() {
                               <Cell key={`cell-${index}`} fill={entry.color} />
                             ))}
                           </Pie>
-                          <Tooltip
-                            formatter={(value: number) => [`$${value.toFixed(2)} AUD`, 'Cost']}
-                          />
+                          <Tooltip formatter={(value: number) => [formatAUD(value), 'Cost']} />
                           <Legend />
                         </PieChart>
                       </ResponsiveContainer>
@@ -998,324 +595,359 @@ export default function Billing() {
                 </CardContent>
               </Card>
             </div>
+
+            {/* ElevenLabs Usage Tracking */}
+            {currentRole === "super_admin" && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <Volume2 className="h-5 w-5" />
+                    ElevenLabs TTS Usage (Creator Plan - ${ELEVENLABS_PRICING.monthlyFeeUSD}/mo)
+                  </CardTitle>
+                  <CardDescription>
+                    {ELEVENLABS_PRICING.ttsMinutesIncluded} minutes included | Overage: ${ELEVENLABS_PRICING.ttsOveragePerMinuteUSD}/min
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium">TTS Minutes Used</span>
+                      <span className={`text-sm font-bold ${
+                        (billingData?.ttsUsagePercent || 0) >= 100 ? 'text-red-500' :
+                        (billingData?.ttsUsagePercent || 0) >= 80 ? 'text-orange-500' : 'text-green-500'
+                      }`}>
+                        {(billingData?.ttsMinutesUsed || 0).toFixed(1)} / {billingData?.ttsMinutesIncluded || 100}
+                      </span>
+                    </div>
+                    <Progress
+                      value={Math.min(billingData?.ttsUsagePercent || 0, 100)}
+                      className={`h-3 ${
+                        (billingData?.ttsUsagePercent || 0) >= 100 ? '[&>div]:bg-red-500' :
+                        (billingData?.ttsUsagePercent || 0) >= 80 ? '[&>div]:bg-orange-500' : ''
+                      }`}
+                    />
+                    <div className="flex justify-between text-xs text-muted-foreground">
+                      <span>{(billingData?.ttsUsagePercent || 0).toFixed(0)}% used</span>
+                      {(billingData?.elevenLabsOverageUSD || 0) > 0 && (
+                        <span className="text-red-500">
+                          Overage: {formatAUD(usdToAud(billingData?.elevenLabsOverageUSD || 0))}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
           </TabsContent>
 
-          {/* Interactions Tab */}
-          <TabsContent value="interactions" className="space-y-6">
-            {/* Platform Interaction Summary */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg flex items-center gap-2">
-                  <Activity className="h-5 w-5" />
-                  Interaction Breakdown
-                </CardTitle>
-                <CardDescription>
-                  All interactions by type (standard limit: {billingData?.standardIncludedInteractions?.toLocaleString() || '5,000'} per organization)
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                {isLoading ? (
-                  <div className="space-y-4">
-                    {Array.from({ length: 5 }).map((_, i) => (
-                      <Skeleton key={i} className="h-16 w-full" />
-                    ))}
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {/* Interaction type cards */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-                      <div className="p-4 rounded-lg border bg-card" style={{ borderLeftWidth: '4px', borderLeftColor: INTERACTION_COLORS.call_inbound }}>
-                        <div className="flex items-center gap-2 mb-2">
-                          <PhoneIncoming className="h-4 w-4 text-green-500" />
-                          <span className="text-sm font-medium">Inbound Calls</span>
-                        </div>
-                        <p className="text-2xl font-bold">{billingData?.platformInteractions?.callInbound?.toLocaleString() || 0}</p>
-                      </div>
+          {/* Cost Breakdown Tab */}
+          <TabsContent value="breakdown" className="space-y-6">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Variable Costs */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <Activity className="h-5 w-5" />
+                    Variable Costs (Per Usage)
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Type</TableHead>
+                        <TableHead className="text-right">Usage</TableHead>
+                        <TableHead className="text-right">Cost (AUD)</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      <TableRow>
+                        <TableCell className="font-medium">
+                          <div className="flex items-center gap-2">
+                            <Phone className="h-4 w-4 text-purple-500" />
+                            Voice AI
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-right">{(billingData?.voiceMinutes || 0).toFixed(1)} min</TableCell>
+                        <TableCell className="text-right">{formatAUD(usdToAud(billingData?.voiceCostUSD || 0))}</TableCell>
+                      </TableRow>
+                      <TableRow>
+                        <TableCell className="font-medium">
+                          <div className="flex items-center gap-2">
+                            <MessageSquare className="h-4 w-4 text-blue-500" />
+                            Chat
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-right">{billingData?.chatInteractions || 0} chats</TableCell>
+                        <TableCell className="text-right">{formatAUD(usdToAud(billingData?.chatCostUSD || 0))}</TableCell>
+                      </TableRow>
+                      <TableRow>
+                        <TableCell className="font-medium">
+                          <div className="flex items-center gap-2">
+                            <MessageCircle className="h-4 w-4 text-green-500" />
+                            SMS
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-right">{billingData?.smsMessages || 0} msgs</TableCell>
+                        <TableCell className="text-right">{formatAUD(usdToAud(billingData?.smsCostUSD || 0))}</TableCell>
+                      </TableRow>
+                      <TableRow className="font-bold bg-muted/50">
+                        <TableCell>Total Variable</TableCell>
+                        <TableCell></TableCell>
+                        <TableCell className="text-right">{formatAUD(usdToAud(billingData?.totalVariableCostUSD || 0))}</TableCell>
+                      </TableRow>
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
 
-                      <div className="p-4 rounded-lg border bg-card" style={{ borderLeftWidth: '4px', borderLeftColor: INTERACTION_COLORS.call_outbound }}>
-                        <div className="flex items-center gap-2 mb-2">
-                          <PhoneOutgoing className="h-4 w-4 text-blue-500" />
-                          <span className="text-sm font-medium">Outbound Calls</span>
-                        </div>
-                        <p className="text-2xl font-bold">{billingData?.platformInteractions?.callOutbound?.toLocaleString() || 0}</p>
-                      </div>
-
-                      <div className="p-4 rounded-lg border bg-card" style={{ borderLeftWidth: '4px', borderLeftColor: INTERACTION_COLORS.sms_inbound }}>
-                        <div className="flex items-center gap-2 mb-2">
-                          <MessageCircle className="h-4 w-4 text-purple-500" />
-                          <span className="text-sm font-medium">SMS Inbound</span>
-                        </div>
-                        <p className="text-2xl font-bold">{billingData?.platformInteractions?.smsInbound?.toLocaleString() || 0}</p>
-                      </div>
-
-                      <div className="p-4 rounded-lg border bg-card" style={{ borderLeftWidth: '4px', borderLeftColor: INTERACTION_COLORS.sms_outbound }}>
-                        <div className="flex items-center gap-2 mb-2">
-                          <MessageSquare className="h-4 w-4 text-amber-500" />
-                          <span className="text-sm font-medium">SMS Outbound</span>
-                        </div>
-                        <p className="text-2xl font-bold">{billingData?.platformInteractions?.smsOutbound?.toLocaleString() || 0}</p>
-                      </div>
-
-                      <div className="p-4 rounded-lg border bg-card" style={{ borderLeftWidth: '4px', borderLeftColor: INTERACTION_COLORS.chat_session }}>
-                        <div className="flex items-center gap-2 mb-2">
-                          <MessageSquare className="h-4 w-4 text-cyan-500" />
-                          <span className="text-sm font-medium">Chat Sessions</span>
-                        </div>
-                        <p className="text-2xl font-bold">{billingData?.platformInteractions?.chatSessions?.toLocaleString() || 0}</p>
-                        <p className="text-xs text-muted-foreground">30 min timeout per session</p>
-                      </div>
-                    </div>
-
-                    {/* Total */}
-                    <div className="p-4 rounded-lg bg-muted/50 border-2">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <h3 className="font-semibold text-lg">Total Interactions</h3>
-                          <p className="text-sm text-muted-foreground">All types combined (platform-wide)</p>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-3xl font-bold">{billingData?.platformInteractions?.total?.toLocaleString() || billingData?.totalInteractions?.toLocaleString() || 0}</p>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* Organization Interaction Drill-down */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg flex items-center gap-2">
-                  <Building2 className="h-5 w-5" />
-                  Interactions by Organization
-                </CardTitle>
-                <CardDescription>
-                  Drill-down to see which organizations are approaching or exceeding their limits
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                {isLoading ? (
-                  <div className="space-y-2">
-                    {Array.from({ length: 5 }).map((_, i) => (
-                      <Skeleton key={i} className="h-12 w-full" />
-                    ))}
-                  </div>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Organization</TableHead>
-                          <TableHead className="text-right">Inbound</TableHead>
-                          <TableHead className="text-right">Outbound</TableHead>
-                          <TableHead className="text-right">SMS In</TableHead>
-                          <TableHead className="text-right">SMS Out</TableHead>
-                          <TableHead className="text-right">Chat</TableHead>
-                          <TableHead className="text-right">Total</TableHead>
-                          <TableHead className="text-right">Limit</TableHead>
-                          <TableHead className="text-center">Status</TableHead>
+              {/* Fixed Costs */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <Server className="h-5 w-5" />
+                    Fixed Monthly Costs
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Service</TableHead>
+                        <TableHead className="text-right">Details</TableHead>
+                        <TableHead className="text-right">Cost (AUD)</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      <TableRow>
+                        <TableCell className="font-medium">
+                          <div className="flex items-center gap-2">
+                            <Phone className="h-4 w-4 text-rose-500" />
+                            Phone Numbers
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-right">{billingData?.phoneNumbers || 0} numbers</TableCell>
+                        <TableCell className="text-right">{formatAUD(usdToAud(billingData?.phoneNumberCostUSD || 0))}</TableCell>
+                      </TableRow>
+                      <TableRow>
+                        <TableCell className="font-medium">
+                          <div className="flex items-center gap-2">
+                            <Server className="h-4 w-4 text-indigo-500" />
+                            Fly.io VM
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-right">Sydney shared-cpu-1x</TableCell>
+                        <TableCell className="text-right">{formatAUD(usdToAud(billingData?.flyioCostUSD || 0))}</TableCell>
+                      </TableRow>
+                      <TableRow>
+                        <TableCell className="font-medium">
+                          <div className="flex items-center gap-2">
+                            <Volume2 className="h-4 w-4 text-purple-500" />
+                            ElevenLabs
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-right">Creator Plan</TableCell>
+                        <TableCell className="text-right">{formatAUD(usdToAud(billingData?.elevenLabsFeeUSD || 0))}</TableCell>
+                      </TableRow>
+                      {(billingData?.elevenLabsOverageUSD || 0) > 0 && (
+                        <TableRow className="text-red-500">
+                          <TableCell className="font-medium pl-8">
+                            <Minus className="h-4 w-4 inline mr-2" />
+                            TTS Overage
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {Math.max(0, (billingData?.ttsMinutesUsed || 0) - ELEVENLABS_PRICING.ttsMinutesIncluded).toFixed(1)} min
+                          </TableCell>
+                          <TableCell className="text-right">{formatAUD(usdToAud(billingData?.elevenLabsOverageUSD || 0))}</TableCell>
                         </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {billingData?.organizations.map((org) => (
-                          <TableRow key={org.id} className={org.isOverLimit ? 'bg-red-500/5' : ''}>
-                            <TableCell className="font-medium">{org.name}</TableCell>
-                            <TableCell className="text-right">{org.interactions.callInbound}</TableCell>
-                            <TableCell className="text-right">{org.interactions.callOutbound}</TableCell>
-                            <TableCell className="text-right">{org.interactions.smsInbound}</TableCell>
-                            <TableCell className="text-right">{org.interactions.smsOutbound}</TableCell>
-                            <TableCell className="text-right">{org.interactions.chatSessions}</TableCell>
-                            <TableCell className="text-right font-bold">
-                              {org.currentPeriodInteractions.toLocaleString()}
-                            </TableCell>
-                            <TableCell className="text-right text-muted-foreground">
-                              {org.includedInteractions.toLocaleString()}
-                            </TableCell>
-                            <TableCell className="text-center">
-                              {org.isOverLimit ? (
-                                <Badge className="bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300">
-                                  Over Limit
-                                </Badge>
-                              ) : org.usagePercentage >= 80 ? (
-                                <Badge className="bg-orange-100 text-orange-700 dark:bg-orange-950 dark:text-orange-300">
-                                  {org.usagePercentage.toFixed(0)}% Used
-                                </Badge>
-                              ) : (
-                                <Badge className="bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300">
-                                  {org.usagePercentage.toFixed(0)}% Used
-                                </Badge>
-                              )}
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                        {(!billingData?.organizations || billingData.organizations.length === 0) && (
-                          <TableRow>
-                            <TableCell colSpan={9} className="text-center text-muted-foreground py-8">
-                              No organizations found
-                            </TableCell>
-                          </TableRow>
-                        )}
-                      </TableBody>
-                    </Table>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+                      )}
+                      <TableRow className="font-bold bg-muted/50">
+                        <TableCell>Total Fixed</TableCell>
+                        <TableCell></TableCell>
+                        <TableCell className="text-right">{formatAUD(usdToAud(billingData?.totalFixedCostUSD || 0))}</TableCell>
+                      </TableRow>
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+            </div>
 
-            {/* Interaction counting info */}
-            <Card className="bg-muted/30">
-              <CardContent className="pt-6">
-                <div className="flex items-start gap-3">
-                  <Info className="h-5 w-5 text-muted-foreground mt-0.5" />
-                  <div>
-                    <h4 className="font-medium text-sm">Interaction Counting Rules</h4>
-                    <ul className="text-sm text-muted-foreground mt-2 space-y-1">
-                      <li>Each inbound or outbound call counts as 1 interaction</li>
-                      <li>Each SMS message (sent or received) counts as 1 interaction</li>
-                      <li>Chat sessions are counted with a 30-minute timeout - sessions longer than 30 minutes are counted as multiple interactions</li>
-                      <li>Standard limit: 5,000 interactions per organization per billing period</li>
-                      <li>Overage charges apply when exceeding the included interaction limit</li>
-                    </ul>
+            {/* P&L Summary */}
+            <Card className="bg-gradient-to-br from-slate-500/5 to-slate-500/10">
+              <CardHeader>
+                <CardTitle className="text-lg">Profit & Loss Summary</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center p-3 bg-green-500/10 rounded-lg">
+                    <span className="font-medium text-green-700">Revenue</span>
+                    <span className="text-xl font-bold text-green-700">{formatAUD(billingData?.totalRevenue || 0)}</span>
+                  </div>
+                  <div className="flex justify-between items-center p-3 bg-red-500/10 rounded-lg">
+                    <span className="font-medium text-red-700">Less: Variable Costs</span>
+                    <span className="text-xl font-bold text-red-700">-{formatAUD(usdToAud(billingData?.totalVariableCostUSD || 0))}</span>
+                  </div>
+                  <div className="flex justify-between items-center p-3 bg-orange-500/10 rounded-lg">
+                    <span className="font-medium text-orange-700">Less: Fixed Costs</span>
+                    <span className="text-xl font-bold text-orange-700">-{formatAUD(usdToAud(billingData?.totalFixedCostUSD || 0))}</span>
+                  </div>
+                  <div className="border-t-2 pt-3">
+                    <div className={`flex justify-between items-center p-3 rounded-lg ${
+                      (billingData?.grossProfit || 0) >= 0 ? 'bg-blue-500/10' : 'bg-red-500/20'
+                    }`}>
+                      <span className="font-bold text-lg">Gross Profit</span>
+                      <span className={`text-2xl font-bold ${
+                        (billingData?.grossProfit || 0) >= 0 ? 'text-blue-700' : 'text-red-700'
+                      }`}>
+                        {formatAUD(billingData?.grossProfit || 0)}
+                      </span>
+                    </div>
                   </div>
                 </div>
               </CardContent>
             </Card>
           </TabsContent>
 
-          {/* Services Tab */}
-          <TabsContent value="services" className="space-y-6">
+          {/* Unit Rates Tab */}
+          <TabsContent value="rates" className="space-y-6">
             <Card>
               <CardHeader>
                 <CardTitle className="text-lg flex items-center gap-2">
-                  <Server className="h-5 w-5" />
-                  Service Cost Breakdown
+                  <Info className="h-5 w-5" />
+                  Unit Cost Reference (Itemized)
                 </CardTitle>
                 <CardDescription>
-                  Detailed costs for each external service
+                  These are the variable costs per unit - fixed costs are shown separately
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                {isLoading ? (
-                  <div className="space-y-4">
-                    {Array.from({ length: 5 }).map((_, i) => (
-                      <Skeleton key={i} className="h-24 w-full" />
-                    ))}
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {billingData?.serviceCosts.map((service, index) => (
-                      <div
-                        key={index}
-                        className="p-4 rounded-lg border"
-                        style={{ borderLeftWidth: '4px', borderLeftColor: service.color }}
-                      >
-                        <div className="flex items-start justify-between">
-                          <div className="flex items-start gap-4">
-                            <div
-                              className="h-12 w-12 rounded-lg flex items-center justify-center"
-                              style={{ backgroundColor: `${service.color}20` }}
-                            >
-                              {getServiceIcon(service.icon)}
-                            </div>
-                            <div>
-                              <div className="flex items-center gap-2">
-                                <h3 className="font-semibold text-lg">{service.service}</h3>
-                                <Badge variant="outline" className="text-xs">
-                                  {service.isNativeCurrency}
-                                </Badge>
-                              </div>
-                              <p className="text-sm text-muted-foreground">{service.description}</p>
-                              <p className="text-xs text-muted-foreground mt-1">{service.usage}</p>
-                            </div>
-                          </div>
-                          <div className="text-right">
-                            <p className="text-2xl font-bold">${service.costAUD.toFixed(2)}</p>
-                            <p className="text-xs text-muted-foreground">AUD</p>
-                            {service.isNativeCurrency === 'USD' && (
-                              <p className="text-xs text-muted-foreground">
-                                (${service.costUSD.toFixed(2)} USD)
-                              </p>
-                            )}
-                          </div>
-                        </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {/* Voice AI Breakdown */}
+                  <div className="p-4 rounded-lg border bg-purple-500/5 border-purple-500/20">
+                    <div className="flex items-center gap-2 mb-3">
+                      <Phone className="h-5 w-5 text-purple-500" />
+                      <h3 className="font-semibold">Voice AI Minute</h3>
+                    </div>
+                    <div className="space-y-1 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Twilio (voice)</span>
+                        <span>${VOICE_AI_COSTS_PER_MINUTE.twilio.toFixed(4)}</span>
                       </div>
-                    ))}
-
-                    {/* Total */}
-                    <div className="p-4 rounded-lg bg-muted/50 border-2">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <h3 className="font-semibold text-lg">Total API Costs</h3>
-                          <p className="text-sm text-muted-foreground">All services combined</p>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-3xl font-bold">${(billingData?.totalApiCosts || 0).toFixed(2)}</p>
-                          <p className="text-sm text-muted-foreground">AUD</p>
-                        </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Deepgram (STT)</span>
+                        <span>${VOICE_AI_COSTS_PER_MINUTE.deepgram.toFixed(4)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">ElevenLabs (TTS)</span>
+                        <span>${VOICE_AI_COSTS_PER_MINUTE.elevenlabs.toFixed(4)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">OpenAI (GPT-mini)</span>
+                        <span>${VOICE_AI_COSTS_PER_MINUTE.openai.toFixed(4)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Fly.io (compute)</span>
+                        <span>${VOICE_AI_COSTS_PER_MINUTE.flyio.toFixed(4)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Supabase (DB)</span>
+                        <span>${VOICE_AI_COSTS_PER_MINUTE.supabase.toFixed(4)}</span>
+                      </div>
+                      <div className="flex justify-between pt-2 border-t font-bold text-purple-600">
+                        <span>Total USD</span>
+                        <span>${VOICE_AI_COSTS_PER_MINUTE.total.toFixed(4)}</span>
+                      </div>
+                      <div className="flex justify-between font-bold text-purple-600">
+                        <span>Total AUD</span>
+                        <span>${usdToAud(VOICE_AI_COSTS_PER_MINUTE.total).toFixed(4)}</span>
                       </div>
                     </div>
                   </div>
-                )}
-              </CardContent>
-            </Card>
 
-            {/* Pricing Reference */}
-            <Card className="bg-muted/30">
-              <CardHeader>
-                <CardTitle className="text-lg flex items-center gap-2">
-                  <Info className="h-5 w-5" />
-                  Current Pricing Rates
-                </CardTitle>
-                <CardDescription>
-                  Reference rates used for cost calculations
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
-                  <div className="p-3 rounded-lg bg-background">
-                    <h4 className="font-medium text-purple-600 mb-2">ElevenLabs</h4>
-                    <ul className="space-y-1 text-muted-foreground">
-                      <li>{ELEVENLABS_PRICING.ttsMinutesIncluded} mins included</li>
-                      <li>${ELEVENLABS_PRICING.ttsOveragePerMinuteUSD}/min overage</li>
-                      <li>(${(ELEVENLABS_PRICING.ttsOveragePerMinuteUSD * USD_TO_AUD_RATE).toFixed(2)} AUD)</li>
-                    </ul>
+                  {/* Chat Breakdown */}
+                  <div className="p-4 rounded-lg border bg-blue-500/5 border-blue-500/20">
+                    <div className="flex items-center gap-2 mb-3">
+                      <MessageSquare className="h-5 w-5 text-blue-500" />
+                      <h3 className="font-semibold">Chat Interaction</h3>
+                    </div>
+                    <div className="space-y-1 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">OpenAI (GPT-mini)</span>
+                        <span>${CHAT_COSTS_PER_INTERACTION.openai.toFixed(4)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Fly.io (compute)</span>
+                        <span>${CHAT_COSTS_PER_INTERACTION.flyio.toFixed(4)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Supabase (DB)</span>
+                        <span>${CHAT_COSTS_PER_INTERACTION.supabase.toFixed(4)}</span>
+                      </div>
+                      <div className="flex justify-between pt-2 border-t font-bold text-blue-600">
+                        <span>Total USD</span>
+                        <span>${CHAT_COSTS_PER_INTERACTION.total.toFixed(4)}</span>
+                      </div>
+                      <div className="flex justify-between font-bold text-blue-600">
+                        <span>Total AUD</span>
+                        <span>${usdToAud(CHAT_COSTS_PER_INTERACTION.total).toFixed(4)}</span>
+                      </div>
+                    </div>
                   </div>
-                  <div className="p-3 rounded-lg bg-background">
-                    <h4 className="font-medium text-rose-600 mb-2">Twilio</h4>
-                    <ul className="space-y-1 text-muted-foreground">
-                      <li>Local receive: ${TWILIO_PRICING.localCallsReceiveUSD}/min</li>
-                      <li>Local make: ${TWILIO_PRICING.localCallsMakeUSD}/min</li>
-                      <li>Number: ${TWILIO_PRICING.localNumberMonthlyUSD}/mo</li>
-                    </ul>
+
+                  {/* SMS Breakdown */}
+                  <div className="p-4 rounded-lg border bg-green-500/5 border-green-500/20">
+                    <div className="flex items-center gap-2 mb-3">
+                      <MessageCircle className="h-5 w-5 text-green-500" />
+                      <h3 className="font-semibold">SMS Message</h3>
+                    </div>
+                    <div className="space-y-1 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Twilio (SMS AU)</span>
+                        <span>${SMS_COSTS_PER_MESSAGE.twilio.toFixed(4)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">OpenAI (GPT-mini)</span>
+                        <span>${SMS_COSTS_PER_MESSAGE.openai.toFixed(4)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Fly.io (compute)</span>
+                        <span>${SMS_COSTS_PER_MESSAGE.flyio.toFixed(4)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Supabase (DB)</span>
+                        <span>${SMS_COSTS_PER_MESSAGE.supabase.toFixed(4)}</span>
+                      </div>
+                      <div className="flex justify-between pt-2 border-t font-bold text-green-600">
+                        <span>Total USD</span>
+                        <span>${SMS_COSTS_PER_MESSAGE.total.toFixed(4)}</span>
+                      </div>
+                      <div className="flex justify-between font-bold text-green-600">
+                        <span>Total AUD</span>
+                        <span>${usdToAud(SMS_COSTS_PER_MESSAGE.total).toFixed(4)}</span>
+                      </div>
+                    </div>
                   </div>
-                  <div className="p-3 rounded-lg bg-background">
-                    <h4 className="font-medium text-green-600 mb-2">Deepgram</h4>
-                    <ul className="space-y-1 text-muted-foreground">
-                      <li>Nova-2: ${DEEPGRAM_PRICING.nova2PerMinuteUSD.toFixed(4)}/min</li>
-                      <li>(${(DEEPGRAM_PRICING.nova2PerMinuteUSD * USD_TO_AUD_RATE).toFixed(4)} AUD)</li>
-                    </ul>
+                </div>
+
+                {/* Fixed Costs Summary */}
+                <div className="mt-6 p-4 rounded-lg border bg-amber-500/5 border-amber-500/20">
+                  <div className="flex items-center gap-2 mb-3">
+                    <Calendar className="h-5 w-5 text-amber-500" />
+                    <h3 className="font-semibold">Fixed Monthly Costs</h3>
                   </div>
-                  <div className="p-3 rounded-lg bg-background">
-                    <h4 className="font-medium text-blue-600 mb-2">OpenAI</h4>
-                    <ul className="space-y-1 text-muted-foreground">
-                      <li>GPT-4o-mini: ${OPENAI_PRICING.gpt4oMiniInputPer1kTokensUSD}/1k in</li>
-                      <li>GPT-4o-mini: ${OPENAI_PRICING.gpt4oMiniOutputPer1kTokensUSD}/1k out</li>
-                      <li>Whisper: ${OPENAI_PRICING.whisperPerMinuteUSD}/min</li>
-                    </ul>
-                  </div>
-                  <div className="p-3 rounded-lg bg-background">
-                    <h4 className="font-medium text-indigo-600 mb-2">Fly.io (AUD)</h4>
-                    <ul className="space-y-1 text-muted-foreground">
-                      <li>1x CPU, 1GB: ${FLYIO_PRICING.sharedCpu1x1gb}/mo</li>
-                      <li>Sydney region</li>
-                    </ul>
-                  </div>
-                  <div className="p-3 rounded-lg bg-background">
-                    <h4 className="font-medium text-amber-600 mb-2">Exchange Rate</h4>
-                    <ul className="space-y-1 text-muted-foreground">
-                      <li>1 USD = {USD_TO_AUD_RATE.toFixed(2)} AUD</li>
-                    </ul>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Phone Number</span>
+                      <span className="font-medium">${FIXED_MONTHLY_COSTS.twilioPhoneNumber} USD (${usdToAud(FIXED_MONTHLY_COSTS.twilioPhoneNumber).toFixed(2)} AUD)</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Fly.io VM</span>
+                      <span className="font-medium">${FIXED_MONTHLY_COSTS.flyioVmSydney} USD (${usdToAud(FIXED_MONTHLY_COSTS.flyioVmSydney).toFixed(2)} AUD)</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">ElevenLabs</span>
+                      <span className="font-medium">${ELEVENLABS_PRICING.monthlyFeeUSD} USD (${usdToAud(ELEVENLABS_PRICING.monthlyFeeUSD).toFixed(2)} AUD)</span>
+                    </div>
                   </div>
                 </div>
               </CardContent>
@@ -1328,142 +960,74 @@ export default function Billing() {
               <CardHeader>
                 <CardTitle className="text-lg flex items-center gap-2">
                   <Building2 className="h-5 w-5" />
-                  Organization Billing
+                  Organization Usage & Costs
                 </CardTitle>
-                <CardDescription>
-                  Billing details for each organization
-                </CardDescription>
               </CardHeader>
               <CardContent>
                 {isLoading ? (
-                  <div className="space-y-2">
-                    {Array.from({ length: 5 }).map((_, i) => (
-                      <Skeleton key={i} className="h-12 w-full" />
-                    ))}
-                  </div>
+                  <div className="space-y-2">{[1,2,3].map(i => <Skeleton key={i} className="h-12 w-full" />)}</div>
                 ) : (
-                  <div className="overflow-x-auto">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Organization</TableHead>
-                          <TableHead className="text-right">Plan Fee</TableHead>
-                          <TableHead className="text-right">Voice Mins</TableHead>
-                          <TableHead className="text-right">API Cost</TableHead>
-                          <TableHead className="text-center">Usage</TableHead>
-                          <TableHead className="text-right">Total Bill</TableHead>
-                          <TableHead className="text-center">Status</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {billingData?.organizations.map((org) => (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Organization</TableHead>
+                        <TableHead className="text-right">Voice Min</TableHead>
+                        <TableHead className="text-right">Chats</TableHead>
+                        <TableHead className="text-right">Usage Cost</TableHead>
+                        <TableHead className="text-right">Monthly Fee</TableHead>
+                        <TableHead className="text-right">Margin</TableHead>
+                        <TableHead className="text-center">Status</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {billingData?.organizations.map((org) => {
+                        const margin = org.monthlyFee - org.totalCostAUD;
+                        return (
                           <TableRow key={org.id}>
                             <TableCell className="font-medium">{org.name}</TableCell>
-                            <TableCell className="text-right">
-                              ${org.monthlyServiceFee.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                            </TableCell>
-                            <TableCell className="text-right">
-                              {org.voiceMinutes.toFixed(1)}
-                            </TableCell>
-                            <TableCell className="text-right">
-                              <span className="text-muted-foreground">
-                                ${org.totalApiCost.toFixed(2)}
-                              </span>
-                            </TableCell>
-                            <TableCell>
-                              <div className="flex items-center gap-2">
-                                <Progress
-                                  value={org.usagePercentage}
-                                  className="w-16 h-2"
-                                />
-                                <span className={`text-xs ${
-                                  org.usagePercentage >= 100 ? 'text-red-500' :
-                                  org.usagePercentage >= 80 ? 'text-orange-500' :
-                                  'text-green-500'
-                                }`}>
-                                  {org.usagePercentage.toFixed(0)}%
-                                </span>
-                              </div>
-                            </TableCell>
-                            <TableCell className="text-right font-bold">
-                              ${org.totalBill.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                            <TableCell className="text-right">{org.voiceMinutes.toFixed(1)}</TableCell>
+                            <TableCell className="text-right">{org.chatInteractions}</TableCell>
+                            <TableCell className="text-right text-red-600">{formatAUD(org.totalCostAUD)}</TableCell>
+                            <TableCell className="text-right text-green-600">{formatAUD(org.monthlyFee)}</TableCell>
+                            <TableCell className={`text-right font-bold ${margin >= 0 ? 'text-blue-600' : 'text-red-600'}`}>
+                              {formatAUD(margin)}
                             </TableCell>
                             <TableCell className="text-center">
-                              {org.status === 'active' ? (
-                                <Badge className="bg-green-100 text-green-700">Active</Badge>
-                              ) : (
-                                <Badge variant="secondary">{org.status}</Badge>
-                              )}
+                              <Badge className={org.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'}>
+                                {org.status}
+                              </Badge>
                             </TableCell>
                           </TableRow>
-                        ))}
-                        {(!billingData?.organizations || billingData.organizations.length === 0) && (
-                          <TableRow>
-                            <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
-                              No organizations found
-                            </TableCell>
-                          </TableRow>
-                        )}
-                      </TableBody>
-                    </Table>
-                  </div>
+                        );
+                      })}
+                      {(!billingData?.organizations || billingData.organizations.length === 0) && (
+                        <TableRow>
+                          <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
+                            No organizations found
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
                 )}
               </CardContent>
             </Card>
-
-            {/* Profit Summary (Super Admin) */}
-            {currentRole === "super_admin" && billingData && (
-              <Card className="bg-gradient-to-br from-green-500/5 to-emerald-500/5 border-green-500/20">
-                <CardContent className="pt-6">
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                    <div className="text-center p-4">
-                      <p className="text-sm text-muted-foreground">Total Revenue</p>
-                      <p className="text-2xl font-bold text-green-600">
-                        ${billingData.totalRevenue.toFixed(2)}
-                      </p>
-                    </div>
-                    <div className="text-center p-4">
-                      <p className="text-sm text-muted-foreground">Total API Costs</p>
-                      <p className="text-2xl font-bold text-red-600">
-                        ${billingData.totalApiCosts.toFixed(2)}
-                      </p>
-                    </div>
-                    <div className="text-center p-4">
-                      <p className="text-sm text-muted-foreground">Gross Profit</p>
-                      <p className={`text-2xl font-bold ${billingData.grossProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                        ${billingData.grossProfit.toFixed(2)}
-                      </p>
-                    </div>
-                    <div className="text-center p-4">
-                      <p className="text-sm text-muted-foreground">Gross Margin</p>
-                      <p className={`text-2xl font-bold ${billingData.grossMargin >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                        {billingData.grossMargin.toFixed(1)}%
-                      </p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
           </TabsContent>
         </Tabs>
 
-        {/* Billing Period Info */}
+        {/* Footer */}
         <Card className="bg-muted/50">
           <CardContent className="pt-6">
             <div className="flex items-start gap-3">
-              <Calendar className="h-5 w-5 text-muted-foreground mt-0.5" />
+              <Info className="h-5 w-5 text-muted-foreground mt-0.5" />
               <div>
-                <h4 className="font-medium text-sm">Billing Information</h4>
-                <p className="text-sm text-muted-foreground mt-1">
-                  {selectedPeriod === "current"
-                    ? "Current billing period. Bills are generated monthly on the 1st."
-                    : selectedPeriod === "last"
-                    ? "Last billing period. This period has been closed."
-                    : "Aggregated data for the last 90 days."}
-                </p>
-                <p className="text-xs text-muted-foreground mt-2">
-                  All costs are displayed in AUD. Service costs are calculated from actual usage data using current pricing rates.
-                </p>
+                <h4 className="font-medium text-sm">Billing Notes</h4>
+                <ul className="text-sm text-muted-foreground mt-1 space-y-1">
+                  <li>Variable costs scale with usage (voice minutes, chat sessions, SMS)</li>
+                  <li>Fixed costs (phone numbers, hosting, ElevenLabs subscription) are deducted from revenue</li>
+                  <li>ElevenLabs Creator plan includes {ELEVENLABS_PRICING.ttsMinutesIncluded} TTS minutes; overage charged at ${ELEVENLABS_PRICING.ttsOveragePerMinuteUSD}/min</li>
+                  <li>Fully-loaded cost = Variable cost + (Fixed costs / Total AI minutes)</li>
+                </ul>
               </div>
             </div>
           </CardContent>

@@ -1,622 +1,413 @@
 /**
  * Pricing Configuration for All Services
- * All prices are stored in their native currency and converted to AUD for display
+ *
+ * ITEMISED COSTING – USD (as specified by business requirements)
+ * Last updated: January 2026
  *
  * Services:
  * - ElevenLabs (USD) - Text-to-Speech
- * - Twilio (USD) - Voice calls and phone numbers
+ * - Twilio (USD) - Voice calls, SMS, and phone numbers
  * - Deepgram (USD) - Speech-to-Text
- * - Fly.io (AUD) - Server hosting
  * - OpenAI (USD) - GPT models
+ * - Fly.io (USD) - Server hosting
+ * - Supabase (USD) - Database
  */
 
 // Exchange rate: USD to AUD
-// This should be updated periodically or fetched from an API
-export const USD_TO_AUD_RATE = 1.58; // As of late 2024/early 2025
+export const USD_TO_AUD_RATE = 1.58;
+
+// ============================================================================
+// VARIABLE COSTS PER UNIT (USD)
+// ============================================================================
 
 /**
- * ElevenLabs Pricing (Creator Plan - USD)
- * https://elevenlabs.io/pricing
+ * Voice AI Minute - Total: $0.071 USD
+ * These costs apply per AI-handled voice minute
  */
+export const VOICE_AI_COSTS_PER_MINUTE = {
+  twilio: 0.0100,      // Twilio AU voice (inbound/outbound)
+  deepgram: 0.0100,    // Deepgram STT per transcription minute
+  elevenlabs: 0.0360,  // ElevenLabs TTS per generated audio minute
+  openai: 0.0100,      // OpenAI GPT-mini modelled per-minute equivalent
+  flyio: 0.0040,       // Fly.io incremental compute (flat estimate)
+  supabase: 0.0010,    // Supabase reads/writes (negligible)
+  total: 0.0710,       // Total variable cost per AI voice minute
+};
+
+/**
+ * Post-Transfer Minute - Total: $0.010 USD
+ * After AI transfers to human, only Twilio costs apply
+ */
+export const POST_TRANSFER_COSTS_PER_MINUTE = {
+  twilio: 0.0100,
+  total: 0.0100,
+};
+
+/**
+ * Chat Interaction - Total: $0.047 USD
+ * Per chat session (not per minute)
+ */
+export const CHAT_COSTS_PER_INTERACTION = {
+  openai: 0.0400,      // OpenAI GPT-mini avg tokens per chat
+  flyio: 0.0050,       // Fly.io request handling
+  supabase: 0.0020,    // Supabase reads/writes
+  total: 0.0470,       // Total per chat interaction
+};
+
+/**
+ * SMS Interaction - Total: $0.019 USD
+ * Per SMS sent by AI
+ */
+export const SMS_COSTS_PER_MESSAGE = {
+  twilio: 0.0150,      // Twilio SMS send (AU)
+  openai: 0.0030,      // OpenAI GPT-mini message generation
+  flyio: 0.0005,       // Fly.io compute (negligible)
+  supabase: 0.0005,    // Supabase (negligible)
+  total: 0.0190,       // Total per SMS
+};
+
+// ============================================================================
+// FIXED MONTHLY COSTS (USD)
+// ============================================================================
+
+export const FIXED_MONTHLY_COSTS = {
+  twilioPhoneNumber: 6.50,    // Per phone number rental
+  flyioVmSydney: 7.23,        // Fly.io VM shared-cpu-1x, 1GB Sydney
+};
+
+// ============================================================================
+// ELEVENLABS PLAN DETAILS (Creator Plan - $11/month)
+// ============================================================================
+
 export interface ElevenLabsPricing {
   plan: string;
   monthlyFeeUSD: number;
-  // Text to Speech (Multilingual V2/V3)
   ttsMinutesIncluded: number;
   ttsOveragePerMinuteUSD: number;
-  // Flash (faster, cheaper model)
   flashMinutesIncluded: number;
   flashOveragePerMinuteUSD: number;
-  // Audio quality
   audioQuality: string;
 }
 
 export const ELEVENLABS_PRICING: ElevenLabsPricing = {
   plan: 'Creator',
-  monthlyFeeUSD: 22, // Creator plan ~$22/month
-  // Multilingual V2/V3 TTS
-  ttsMinutesIncluded: 100,
-  ttsOveragePerMinuteUSD: 0.30,
-  // Flash model
-  flashMinutesIncluded: 200,
-  flashOveragePerMinuteUSD: 0.15,
+  monthlyFeeUSD: 11,                    // Creator plan $11/month
+  ttsMinutesIncluded: 100,              // ~100 mins Multilingual V2/V3 included
+  ttsOveragePerMinuteUSD: 0.30,         // ~$0.30/min overage
+  flashMinutesIncluded: 200,            // ~200 mins Flash included
+  flashOveragePerMinuteUSD: 0.15,       // ~$0.15/min Flash overage
   audioQuality: '128 & 192 kbps (via Studio & API), 44.1kHz',
 };
 
-/**
- * Twilio Pricing (Pay-as-you-go - USD)
- * https://www.twilio.com/en-us/pricing
- */
+// ============================================================================
+// DETAILED SERVICE PRICING (for reference/breakdown)
+// ============================================================================
+
 export interface TwilioPricing {
-  // Voice call rates (per minute)
-  localCallsMakeUSD: number;
   localCallsReceiveUSD: number;
-  mobileCallsMakeUSD: number;
-  mobileCallsReceiveUSD: number;
-  tollFreeCallsMakeUSD: number;
-  tollFreeCallsReceiveUSD: number;
-  browserAppCallingMakeUSD: number;
-  browserAppCallingReceiveUSD: number;
-  // Phone number monthly fees
+  localCallsMakeUSD: number;
+  smsOutboundUSD: number;
+  smsInboundUSD: number;
   localNumberMonthlyUSD: number;
-  tollFreeNumberMonthlyUSD: number;
   mobileNumberMonthlyUSD: number;
+  tollFreeNumberMonthlyUSD: number;
 }
 
 export const TWILIO_PRICING: TwilioPricing = {
-  // Voice calls (per minute)
-  localCallsMakeUSD: 0.0252,
   localCallsReceiveUSD: 0.0100,
-  mobileCallsMakeUSD: 0.0750,
-  mobileCallsReceiveUSD: 0.0100,
-  tollFreeCallsMakeUSD: 0.0240,
-  tollFreeCallsReceiveUSD: 0.0500,
-  browserAppCallingMakeUSD: 0.0040,
-  browserAppCallingReceiveUSD: 0.0040,
-  // Phone numbers (per month)
-  localNumberMonthlyUSD: 3.00,
-  tollFreeNumberMonthlyUSD: 16.00,
+  localCallsMakeUSD: 0.0100,           // Simplified to single rate for AU
+  smsOutboundUSD: 0.0150,
+  smsInboundUSD: 0.0075,
+  localNumberMonthlyUSD: 6.50,
   mobileNumberMonthlyUSD: 6.50,
+  tollFreeNumberMonthlyUSD: 16.00,
 };
 
-/**
- * Deepgram Pricing (Pay-as-you-go - USD)
- * https://deepgram.com/pricing
- */
 export interface DeepgramPricing {
-  freeCreditsUSD: number;
-  // Nova-2 model (recommended for general use)
   nova2PerMinuteUSD: number;
-  // Whisper model (OpenAI compatible)
-  whisperPerMinuteUSD: number;
-  // Base model (budget option)
-  basePerMinuteUSD: number;
 }
 
 export const DEEPGRAM_PRICING: DeepgramPricing = {
-  freeCreditsUSD: 200,
-  nova2PerMinuteUSD: 0.0043, // ~$0.26/hr
-  whisperPerMinuteUSD: 0.0048, // ~$0.29/hr
-  basePerMinuteUSD: 0.0020, // ~$0.12/hr
+  nova2PerMinuteUSD: 0.0100,           // Simplified to match actual cost
 };
 
-/**
- * Fly.io Pricing (AUD - already in AUD)
- * https://fly.io/docs/about/pricing/
- */
-export interface FlyioPricing {
-  // Shared CPU VMs (per month) - Sydney region
-  sharedCpu1x256mb: number;
-  sharedCpu1x512mb: number;
-  sharedCpu1x1gb: number;
-  sharedCpu1x2gb: number;
-  sharedCpu2x512mb: number;
-  sharedCpu2x1gb: number;
-  sharedCpu2x2gb: number;
-  sharedCpu2x4gb: number;
-  sharedCpu4x1gb: number;
-  // Additional RAM per GB per month
-  additionalRamPerGb: number;
-  // Storage (per GB per month)
-  storagePerGb: number;
-  // Outbound data (per GB)
-  outboundDataPerGb: number;
-}
-
-export const FLYIO_PRICING: FlyioPricing = {
-  // Already in AUD
-  sharedCpu1x256mb: 2.47,
-  sharedCpu1x512mb: 4.05,
-  sharedCpu1x1gb: 7.23,
-  sharedCpu1x2gb: 13.58,
-  sharedCpu2x512mb: 4.93,
-  sharedCpu2x1gb: 8.11,
-  sharedCpu2x2gb: 14.46,
-  sharedCpu2x4gb: 27.16,
-  sharedCpu4x1gb: 9.87,
-  additionalRamPerGb: 6.35,
-  storagePerGb: 0.15,
-  outboundDataPerGb: 0.02,
-};
-
-/**
- * OpenAI Pricing (USD)
- * https://openai.com/pricing
- */
 export interface OpenAIPricing {
-  // GPT-4o-mini (default model)
   gpt4oMiniInputPer1kTokensUSD: number;
   gpt4oMiniOutputPer1kTokensUSD: number;
-  // GPT-4o
-  gpt4oInputPer1kTokensUSD: number;
-  gpt4oOutputPer1kTokensUSD: number;
-  // Whisper (Speech-to-Text)
   whisperPerMinuteUSD: number;
-  // Embeddings
-  embeddingsAda002Per1kTokensUSD: number;
-  embeddings3SmallPer1kTokensUSD: number;
 }
 
 export const OPENAI_PRICING: OpenAIPricing = {
-  // GPT-4o-mini
   gpt4oMiniInputPer1kTokensUSD: 0.00015,
   gpt4oMiniOutputPer1kTokensUSD: 0.0006,
-  // GPT-4o
-  gpt4oInputPer1kTokensUSD: 0.0025,
-  gpt4oOutputPer1kTokensUSD: 0.01,
-  // Whisper
   whisperPerMinuteUSD: 0.006,
-  // Embeddings
-  embeddingsAda002Per1kTokensUSD: 0.0001,
-  embeddings3SmallPer1kTokensUSD: 0.00002,
+};
+
+export interface FlyioPricing {
+  sharedCpu1x1gb: number;
+  perMinuteEstimate: number;
+}
+
+export const FLYIO_PRICING: FlyioPricing = {
+  sharedCpu1x1gb: 7.23,                // Monthly fixed cost
+  perMinuteEstimate: 0.0040,           // Per-minute variable estimate
 };
 
 // ============================================================================
-// Conversion Utilities
+// CONVERSION UTILITIES
 // ============================================================================
 
-/**
- * Convert USD to AUD
- */
 export function usdToAud(usd: number): number {
   return usd * USD_TO_AUD_RATE;
 }
 
-/**
- * Convert AUD to USD
- */
 export function audToUsd(aud: number): number {
   return aud / USD_TO_AUD_RATE;
 }
 
-/**
- * Format currency for display
- */
 export function formatCurrency(amount: number, currency: 'AUD' | 'USD' = 'AUD'): string {
   return new Intl.NumberFormat('en-AU', {
     style: 'currency',
     currency: currency,
     minimumFractionDigits: 2,
-    maximumFractionDigits: 4,
+    maximumFractionDigits: 2,
   }).format(amount);
 }
 
-/**
- * Format small amounts (useful for per-minute rates)
- */
 export function formatSmallCurrency(amount: number, currency: 'AUD' | 'USD' = 'AUD'): string {
   return new Intl.NumberFormat('en-AU', {
     style: 'currency',
     currency: currency,
     minimumFractionDigits: 4,
-    maximumFractionDigits: 6,
+    maximumFractionDigits: 4,
   }).format(amount);
 }
 
 // ============================================================================
-// Cost Calculation Functions
+// COST CALCULATION FUNCTIONS
 // ============================================================================
 
 /**
- * Calculate ElevenLabs cost for a given usage
+ * Calculate cost for AI-handled voice minutes
  */
-export function calculateElevenLabsCost(
-  ttsMinutes: number,
-  flashMinutes: number = 0,
-  includeMonthlyFee: boolean = false
-): { usd: number; aud: number; breakdown: { tts: number; flash: number; fee: number } } {
-  const ttsOverage = Math.max(0, ttsMinutes - ELEVENLABS_PRICING.ttsMinutesIncluded);
-  const ttsCost = ttsOverage * ELEVENLABS_PRICING.ttsOveragePerMinuteUSD;
+export function calculateVoiceAICost(minutes: number): { usd: number; aud: number } {
+  const costUSD = minutes * VOICE_AI_COSTS_PER_MINUTE.total;
+  return { usd: costUSD, aud: usdToAud(costUSD) };
+}
 
-  const flashOverage = Math.max(0, flashMinutes - ELEVENLABS_PRICING.flashMinutesIncluded);
+/**
+ * Calculate cost for post-transfer minutes (human handoff)
+ */
+export function calculatePostTransferCost(minutes: number): { usd: number; aud: number } {
+  const costUSD = minutes * POST_TRANSFER_COSTS_PER_MINUTE.total;
+  return { usd: costUSD, aud: usdToAud(costUSD) };
+}
+
+/**
+ * Calculate cost for chat interactions
+ */
+export function calculateChatCost(interactions: number): { usd: number; aud: number } {
+  const costUSD = interactions * CHAT_COSTS_PER_INTERACTION.total;
+  return { usd: costUSD, aud: usdToAud(costUSD) };
+}
+
+/**
+ * Calculate cost for SMS messages
+ */
+export function calculateSMSCost(messages: number): { usd: number; aud: number } {
+  const costUSD = messages * SMS_COSTS_PER_MESSAGE.total;
+  return { usd: costUSD, aud: usdToAud(costUSD) };
+}
+
+/**
+ * Calculate fixed monthly costs
+ */
+export function calculateFixedMonthlyCosts(phoneNumbers: number): { usd: number; aud: number } {
+  const costUSD = (phoneNumbers * FIXED_MONTHLY_COSTS.twilioPhoneNumber) + FIXED_MONTHLY_COSTS.flyioVmSydney;
+  return { usd: costUSD, aud: usdToAud(costUSD) };
+}
+
+/**
+ * Calculate ElevenLabs overage costs
+ * Returns overage cost if over included minutes, 0 otherwise
+ */
+export function calculateElevenLabsOverage(
+  ttsMinutesUsed: number,
+  flashMinutesUsed: number = 0
+): {
+  usd: number;
+  aud: number;
+  ttsOverageMinutes: number;
+  flashOverageMinutes: number;
+  ttsUsagePercent: number;
+  flashUsagePercent: number;
+  needsUpgrade: boolean;
+} {
+  const ttsOverage = Math.max(0, ttsMinutesUsed - ELEVENLABS_PRICING.ttsMinutesIncluded);
+  const flashOverage = Math.max(0, flashMinutesUsed - ELEVENLABS_PRICING.flashMinutesIncluded);
+
+  const ttsCost = ttsOverage * ELEVENLABS_PRICING.ttsOveragePerMinuteUSD;
   const flashCost = flashOverage * ELEVENLABS_PRICING.flashOveragePerMinuteUSD;
 
-  const fee = includeMonthlyFee ? ELEVENLABS_PRICING.monthlyFeeUSD : 0;
+  const totalUSD = ttsCost + flashCost;
 
-  const totalUSD = ttsCost + flashCost + fee;
+  const ttsUsagePercent = (ttsMinutesUsed / ELEVENLABS_PRICING.ttsMinutesIncluded) * 100;
+  const flashUsagePercent = (flashMinutesUsed / ELEVENLABS_PRICING.flashMinutesIncluded) * 100;
+
+  // Flag if approaching 80% of included minutes
+  const needsUpgrade = ttsUsagePercent >= 80 || flashUsagePercent >= 80;
 
   return {
     usd: totalUSD,
     aud: usdToAud(totalUSD),
+    ttsOverageMinutes: ttsOverage,
+    flashOverageMinutes: flashOverage,
+    ttsUsagePercent,
+    flashUsagePercent,
+    needsUpgrade,
+  };
+}
+
+/**
+ * Calculate fully-loaded cost per AI voice minute
+ * This includes variable costs + prorated fixed costs
+ */
+export function calculateFullyLoadedVoiceCost(
+  totalAiMinutesThisMonth: number,
+  phoneNumbers: number = 1
+): { usd: number; aud: number; breakdown: { variable: number; fixed: number } } {
+  const variableCost = VOICE_AI_COSTS_PER_MINUTE.total;
+
+  // Prorate fixed costs across AI minutes
+  const fixedMonthly = (phoneNumbers * FIXED_MONTHLY_COSTS.twilioPhoneNumber) + FIXED_MONTHLY_COSTS.flyioVmSydney;
+  const fixedPerMinute = totalAiMinutesThisMonth > 0 ? fixedMonthly / totalAiMinutesThisMonth : 0;
+
+  const totalPerMinute = variableCost + fixedPerMinute;
+
+  return {
+    usd: totalPerMinute,
+    aud: usdToAud(totalPerMinute),
     breakdown: {
-      tts: ttsCost,
-      flash: flashCost,
-      fee: fee,
+      variable: variableCost,
+      fixed: fixedPerMinute,
     },
   };
 }
 
-/**
- * Calculate Twilio call cost
- */
-export function calculateTwilioCallCost(
-  callType: 'local' | 'mobile' | 'toll_free' | 'browser',
-  direction: 'inbound' | 'outbound',
-  durationMinutes: number
-): { usd: number; aud: number } {
-  let ratePerMinute: number;
-
-  switch (callType) {
-    case 'local':
-      ratePerMinute = direction === 'outbound'
-        ? TWILIO_PRICING.localCallsMakeUSD
-        : TWILIO_PRICING.localCallsReceiveUSD;
-      break;
-    case 'mobile':
-      ratePerMinute = direction === 'outbound'
-        ? TWILIO_PRICING.mobileCallsMakeUSD
-        : TWILIO_PRICING.mobileCallsReceiveUSD;
-      break;
-    case 'toll_free':
-      ratePerMinute = direction === 'outbound'
-        ? TWILIO_PRICING.tollFreeCallsMakeUSD
-        : TWILIO_PRICING.tollFreeCallsReceiveUSD;
-      break;
-    case 'browser':
-      ratePerMinute = direction === 'outbound'
-        ? TWILIO_PRICING.browserAppCallingMakeUSD
-        : TWILIO_PRICING.browserAppCallingReceiveUSD;
-      break;
-    default:
-      ratePerMinute = TWILIO_PRICING.localCallsReceiveUSD;
-  }
-
-  const costUSD = durationMinutes * ratePerMinute;
-  return {
-    usd: costUSD,
-    aud: usdToAud(costUSD),
-  };
-}
-
-/**
- * Calculate Twilio phone number monthly cost
- */
-export function calculateTwilioNumberCost(
-  numberType: 'local' | 'toll_free' | 'mobile',
-  count: number = 1
-): { usd: number; aud: number } {
-  let monthlyFee: number;
-
-  switch (numberType) {
-    case 'local':
-      monthlyFee = TWILIO_PRICING.localNumberMonthlyUSD;
-      break;
-    case 'toll_free':
-      monthlyFee = TWILIO_PRICING.tollFreeNumberMonthlyUSD;
-      break;
-    case 'mobile':
-      monthlyFee = TWILIO_PRICING.mobileNumberMonthlyUSD;
-      break;
-    default:
-      monthlyFee = TWILIO_PRICING.localNumberMonthlyUSD;
-  }
-
-  const totalUSD = monthlyFee * count;
-  return {
-    usd: totalUSD,
-    aud: usdToAud(totalUSD),
-  };
-}
-
-/**
- * Calculate Deepgram transcription cost
- */
-export function calculateDeepgramCost(
-  minutes: number,
-  model: 'nova2' | 'whisper' | 'base' = 'nova2'
-): { usd: number; aud: number } {
-  let ratePerMinute: number;
-
-  switch (model) {
-    case 'nova2':
-      ratePerMinute = DEEPGRAM_PRICING.nova2PerMinuteUSD;
-      break;
-    case 'whisper':
-      ratePerMinute = DEEPGRAM_PRICING.whisperPerMinuteUSD;
-      break;
-    case 'base':
-      ratePerMinute = DEEPGRAM_PRICING.basePerMinuteUSD;
-      break;
-    default:
-      ratePerMinute = DEEPGRAM_PRICING.nova2PerMinuteUSD;
-  }
-
-  const costUSD = minutes * ratePerMinute;
-  return {
-    usd: costUSD,
-    aud: usdToAud(costUSD),
-  };
-}
-
-/**
- * Calculate OpenAI LLM cost
- */
-export function calculateOpenAICost(
-  inputTokens: number,
-  outputTokens: number,
-  model: 'gpt-4o-mini' | 'gpt-4o' = 'gpt-4o-mini'
-): { usd: number; aud: number } {
-  let inputRate: number;
-  let outputRate: number;
-
-  if (model === 'gpt-4o') {
-    inputRate = OPENAI_PRICING.gpt4oInputPer1kTokensUSD;
-    outputRate = OPENAI_PRICING.gpt4oOutputPer1kTokensUSD;
-  } else {
-    inputRate = OPENAI_PRICING.gpt4oMiniInputPer1kTokensUSD;
-    outputRate = OPENAI_PRICING.gpt4oMiniOutputPer1kTokensUSD;
-  }
-
-  const costUSD = (inputTokens / 1000) * inputRate + (outputTokens / 1000) * outputRate;
-  return {
-    usd: costUSD,
-    aud: usdToAud(costUSD),
-  };
-}
-
-/**
- * Calculate Fly.io hosting cost
- */
-export function calculateFlyioCost(
-  vmType: keyof Omit<FlyioPricing, 'additionalRamPerGb' | 'storagePerGb' | 'outboundDataPerGb'>,
-  additionalStorageGb: number = 0,
-  outboundDataGb: number = 0
-): { aud: number } {
-  const vmCost = FLYIO_PRICING[vmType] as number;
-  const storageCost = additionalStorageGb * FLYIO_PRICING.storagePerGb;
-  const dataCost = outboundDataGb * FLYIO_PRICING.outboundDataPerGb;
-
-  return {
-    aud: vmCost + storageCost + dataCost,
-  };
-}
-
 // ============================================================================
-// Platform Cost Summary
+// COMPREHENSIVE COST SUMMARY
 // ============================================================================
 
-export interface ServiceCostBreakdown {
-  service: string;
-  costUSD: number;
-  costAUD: number;
-  details: string;
-  isNativeCurrency: 'USD' | 'AUD';
-}
+export interface CostSummary {
+  // Variable costs
+  voiceAiMinutes: number;
+  voiceAiCostUSD: number;
+  postTransferMinutes: number;
+  postTransferCostUSD: number;
+  chatInteractions: number;
+  chatCostUSD: number;
+  smsMessages: number;
+  smsCostUSD: number;
+  totalVariableCostUSD: number;
 
-export interface MonthlyPlatformCosts {
-  totalAUD: number;
-  totalUSD: number;
-  breakdown: ServiceCostBreakdown[];
-  exchangeRate: number;
-}
-
-/**
- * Calculate total monthly platform costs
- */
-export function calculateMonthlyPlatformCosts(usage: {
-  // ElevenLabs
-  elevenLabsTtsMinutes?: number;
-  elevenLabsFlashMinutes?: number;
-  includeElevenLabsFee?: boolean;
-  // Twilio calls (all in minutes)
-  twilioLocalInboundMinutes?: number;
-  twilioLocalOutboundMinutes?: number;
-  twilioMobileInboundMinutes?: number;
-  twilioMobileOutboundMinutes?: number;
-  // Twilio phone numbers
-  twilioLocalNumbers?: number;
-  twilioTollFreeNumbers?: number;
-  twilioMobileNumbers?: number;
-  // Deepgram
-  deepgramMinutes?: number;
-  deepgramModel?: 'nova2' | 'whisper' | 'base';
-  // OpenAI
-  openAIInputTokens?: number;
-  openAIOutputTokens?: number;
-  openAIModel?: 'gpt-4o-mini' | 'gpt-4o';
-  openAIWhisperMinutes?: number;
-  // Fly.io
-  flyioVmType?: keyof Omit<FlyioPricing, 'additionalRamPerGb' | 'storagePerGb' | 'outboundDataPerGb'>;
-  flyioStorageGb?: number;
-  flyioOutboundGb?: number;
-}): MonthlyPlatformCosts {
-  const breakdown: ServiceCostBreakdown[] = [];
-  let totalUSD = 0;
+  // Fixed costs
+  phoneNumbers: number;
+  phoneNumberCostUSD: number;
+  flyioCostUSD: number;
+  totalFixedCostUSD: number;
 
   // ElevenLabs
-  if (usage.elevenLabsTtsMinutes || usage.elevenLabsFlashMinutes || usage.includeElevenLabsFee) {
-    const elCost = calculateElevenLabsCost(
-      usage.elevenLabsTtsMinutes || 0,
-      usage.elevenLabsFlashMinutes || 0,
-      usage.includeElevenLabsFee
-    );
-    breakdown.push({
-      service: 'ElevenLabs (TTS)',
-      costUSD: elCost.usd,
-      costAUD: elCost.aud,
-      details: `${usage.elevenLabsTtsMinutes || 0} TTS mins, ${usage.elevenLabsFlashMinutes || 0} Flash mins`,
-      isNativeCurrency: 'USD',
-    });
-    totalUSD += elCost.usd;
-  }
+  elevenLabsMonthlyFeeUSD: number;
+  elevenLabsOverageCostUSD: number;
+  elevenLabsTotalUSD: number;
+  ttsMinutesUsed: number;
+  ttsMinutesIncluded: number;
+  ttsUsagePercent: number;
 
-  // Twilio Calls
-  let twilioCalls = 0;
-  const twilioDetails: string[] = [];
+  // Totals
+  totalCostUSD: number;
+  totalCostAUD: number;
 
-  if (usage.twilioLocalInboundMinutes) {
-    const cost = calculateTwilioCallCost('local', 'inbound', usage.twilioLocalInboundMinutes);
-    twilioCalls += cost.usd;
-    twilioDetails.push(`${usage.twilioLocalInboundMinutes} local inbound mins`);
-  }
-  if (usage.twilioLocalOutboundMinutes) {
-    const cost = calculateTwilioCallCost('local', 'outbound', usage.twilioLocalOutboundMinutes);
-    twilioCalls += cost.usd;
-    twilioDetails.push(`${usage.twilioLocalOutboundMinutes} local outbound mins`);
-  }
-  if (usage.twilioMobileInboundMinutes) {
-    const cost = calculateTwilioCallCost('mobile', 'inbound', usage.twilioMobileInboundMinutes);
-    twilioCalls += cost.usd;
-    twilioDetails.push(`${usage.twilioMobileInboundMinutes} mobile inbound mins`);
-  }
-  if (usage.twilioMobileOutboundMinutes) {
-    const cost = calculateTwilioCallCost('mobile', 'outbound', usage.twilioMobileOutboundMinutes);
-    twilioCalls += cost.usd;
-    twilioDetails.push(`${usage.twilioMobileOutboundMinutes} mobile outbound mins`);
-  }
+  // Alerts
+  elevenLabsNeedsUpgrade: boolean;
+}
 
-  if (twilioCalls > 0) {
-    breakdown.push({
-      service: 'Twilio (Calls)',
-      costUSD: twilioCalls,
-      costAUD: usdToAud(twilioCalls),
-      details: twilioDetails.join(', '),
-      isNativeCurrency: 'USD',
-    });
-    totalUSD += twilioCalls;
-  }
+export function calculateCompleteCostSummary(usage: {
+  voiceAiMinutes: number;
+  postTransferMinutes?: number;
+  chatInteractions: number;
+  smsMessages?: number;
+  phoneNumbers: number;
+  ttsMinutesUsed?: number;
+  flashMinutesUsed?: number;
+}): CostSummary {
+  // Variable costs
+  const voiceAiCost = usage.voiceAiMinutes * VOICE_AI_COSTS_PER_MINUTE.total;
+  const postTransferCost = (usage.postTransferMinutes || 0) * POST_TRANSFER_COSTS_PER_MINUTE.total;
+  const chatCost = usage.chatInteractions * CHAT_COSTS_PER_INTERACTION.total;
+  const smsCost = (usage.smsMessages || 0) * SMS_COSTS_PER_MESSAGE.total;
+  const totalVariableCost = voiceAiCost + postTransferCost + chatCost + smsCost;
 
-  // Twilio Phone Numbers
-  let twilioNumbers = 0;
-  const numberDetails: string[] = [];
+  // Fixed costs
+  const phoneNumberCost = usage.phoneNumbers * FIXED_MONTHLY_COSTS.twilioPhoneNumber;
+  const flyioCost = FIXED_MONTHLY_COSTS.flyioVmSydney;
+  const totalFixedCost = phoneNumberCost + flyioCost;
 
-  if (usage.twilioLocalNumbers) {
-    const cost = calculateTwilioNumberCost('local', usage.twilioLocalNumbers);
-    twilioNumbers += cost.usd;
-    numberDetails.push(`${usage.twilioLocalNumbers} local`);
-  }
-  if (usage.twilioTollFreeNumbers) {
-    const cost = calculateTwilioNumberCost('toll_free', usage.twilioTollFreeNumbers);
-    twilioNumbers += cost.usd;
-    numberDetails.push(`${usage.twilioTollFreeNumbers} toll-free`);
-  }
-  if (usage.twilioMobileNumbers) {
-    const cost = calculateTwilioNumberCost('mobile', usage.twilioMobileNumbers);
-    twilioNumbers += cost.usd;
-    numberDetails.push(`${usage.twilioMobileNumbers} mobile`);
-  }
+  // ElevenLabs
+  const elevenLabsOverage = calculateElevenLabsOverage(
+    usage.ttsMinutesUsed || usage.voiceAiMinutes,
+    usage.flashMinutesUsed || 0
+  );
+  const elevenLabsTotal = ELEVENLABS_PRICING.monthlyFeeUSD + elevenLabsOverage.usd;
 
-  if (twilioNumbers > 0) {
-    breakdown.push({
-      service: 'Twilio (Phone Numbers)',
-      costUSD: twilioNumbers,
-      costAUD: usdToAud(twilioNumbers),
-      details: numberDetails.join(', '),
-      isNativeCurrency: 'USD',
-    });
-    totalUSD += twilioNumbers;
-  }
-
-  // Deepgram
-  if (usage.deepgramMinutes) {
-    const dgCost = calculateDeepgramCost(usage.deepgramMinutes, usage.deepgramModel || 'nova2');
-    breakdown.push({
-      service: 'Deepgram (STT)',
-      costUSD: dgCost.usd,
-      costAUD: dgCost.aud,
-      details: `${usage.deepgramMinutes} mins (${usage.deepgramModel || 'nova2'})`,
-      isNativeCurrency: 'USD',
-    });
-    totalUSD += dgCost.usd;
-  }
-
-  // OpenAI
-  let openAICost = 0;
-  const openAIDetails: string[] = [];
-
-  if (usage.openAIInputTokens || usage.openAIOutputTokens) {
-    const llmCost = calculateOpenAICost(
-      usage.openAIInputTokens || 0,
-      usage.openAIOutputTokens || 0,
-      usage.openAIModel || 'gpt-4o-mini'
-    );
-    openAICost += llmCost.usd;
-    openAIDetails.push(`${((usage.openAIInputTokens || 0) / 1000).toFixed(1)}k in / ${((usage.openAIOutputTokens || 0) / 1000).toFixed(1)}k out tokens`);
-  }
-
-  if (usage.openAIWhisperMinutes) {
-    const whisperCost = usage.openAIWhisperMinutes * OPENAI_PRICING.whisperPerMinuteUSD;
-    openAICost += whisperCost;
-    openAIDetails.push(`${usage.openAIWhisperMinutes} Whisper mins`);
-  }
-
-  if (openAICost > 0) {
-    breakdown.push({
-      service: 'OpenAI (LLM + Whisper)',
-      costUSD: openAICost,
-      costAUD: usdToAud(openAICost),
-      details: openAIDetails.join(', '),
-      isNativeCurrency: 'USD',
-    });
-    totalUSD += openAICost;
-  }
-
-  // Fly.io (already in AUD)
-  if (usage.flyioVmType) {
-    const flyioCost = calculateFlyioCost(
-      usage.flyioVmType,
-      usage.flyioStorageGb || 0,
-      usage.flyioOutboundGb || 0
-    );
-    breakdown.push({
-      service: 'Fly.io (Hosting)',
-      costUSD: audToUsd(flyioCost.aud),
-      costAUD: flyioCost.aud,
-      details: `${usage.flyioVmType}${usage.flyioStorageGb ? `, ${usage.flyioStorageGb}GB storage` : ''}`,
-      isNativeCurrency: 'AUD',
-    });
-    // Fly.io is in AUD, so convert to USD for the total
-    totalUSD += audToUsd(flyioCost.aud);
-  }
+  // Total
+  const totalCostUSD = totalVariableCost + totalFixedCost + elevenLabsTotal;
 
   return {
-    totalAUD: usdToAud(totalUSD),
-    totalUSD: totalUSD,
-    breakdown,
-    exchangeRate: USD_TO_AUD_RATE,
+    // Variable
+    voiceAiMinutes: usage.voiceAiMinutes,
+    voiceAiCostUSD: voiceAiCost,
+    postTransferMinutes: usage.postTransferMinutes || 0,
+    postTransferCostUSD: postTransferCost,
+    chatInteractions: usage.chatInteractions,
+    chatCostUSD: chatCost,
+    smsMessages: usage.smsMessages || 0,
+    smsCostUSD: smsCost,
+    totalVariableCostUSD: totalVariableCost,
+
+    // Fixed
+    phoneNumbers: usage.phoneNumbers,
+    phoneNumberCostUSD: phoneNumberCost,
+    flyioCostUSD: flyioCost,
+    totalFixedCostUSD: totalFixedCost,
+
+    // ElevenLabs
+    elevenLabsMonthlyFeeUSD: ELEVENLABS_PRICING.monthlyFeeUSD,
+    elevenLabsOverageCostUSD: elevenLabsOverage.usd,
+    elevenLabsTotalUSD: elevenLabsTotal,
+    ttsMinutesUsed: usage.ttsMinutesUsed || usage.voiceAiMinutes,
+    ttsMinutesIncluded: ELEVENLABS_PRICING.ttsMinutesIncluded,
+    ttsUsagePercent: elevenLabsOverage.ttsUsagePercent,
+
+    // Totals
+    totalCostUSD: totalCostUSD,
+    totalCostAUD: usdToAud(totalCostUSD),
+
+    // Alerts
+    elevenLabsNeedsUpgrade: elevenLabsOverage.needsUpgrade,
   };
 }
 
 // ============================================================================
-// Default Configurable Settings (can be overridden by super admin)
+// UNIT COST QUICK REFERENCE (for display)
 // ============================================================================
 
-export interface PlatformPricingSettings {
-  usdToAudRate: number;
-  elevenLabs: ElevenLabsPricing;
-  twilio: TwilioPricing;
-  deepgram: DeepgramPricing;
-  openai: OpenAIPricing;
-  flyio: FlyioPricing;
-  lastUpdated: string;
-}
-
-export const DEFAULT_PRICING_SETTINGS: PlatformPricingSettings = {
-  usdToAudRate: USD_TO_AUD_RATE,
-  elevenLabs: ELEVENLABS_PRICING,
-  twilio: TWILIO_PRICING,
-  deepgram: DEEPGRAM_PRICING,
-  openai: OPENAI_PRICING,
-  flyio: FLYIO_PRICING,
-  lastUpdated: new Date().toISOString(),
+export const UNIT_COSTS_QUICK_REF = {
+  voiceAiPerMinute: { usd: 0.071, description: 'AI voice minute (variable)' },
+  postTransferPerMinute: { usd: 0.010, description: 'Post-transfer minute' },
+  chatPerInteraction: { usd: 0.047, description: 'Chat interaction' },
+  smsPerMessage: { usd: 0.019, description: 'SMS message' },
+  phoneNumberMonthly: { usd: 6.50, description: 'Phone number (monthly)' },
+  flyioMonthly: { usd: 7.23, description: 'Fly.io VM (monthly)' },
+  elevenLabsMonthly: { usd: 11.00, description: 'ElevenLabs Creator (monthly)' },
 };
