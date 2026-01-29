@@ -491,7 +491,7 @@ export default function Billing() {
             </CardContent>
           </Card>
 
-          {/* Total Costs */}
+          {/* Total Costs - includes ElevenLabs overage when applicable */}
           <Card className="bg-gradient-to-br from-red-500/10 to-orange-500/10 border-red-500/20">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Total Costs</CardTitle>
@@ -499,13 +499,29 @@ export default function Billing() {
             </CardHeader>
             <CardContent>
               {isLoading ? <Skeleton className="h-8 w-24" /> : (
-                <div className="text-2xl font-bold text-red-600">{formatAUD(billingData?.totalCostAUD || 0)}</div>
+                (() => {
+                  // Calculate ElevenLabs overage cost when over included minutes
+                  const elevenLabsOverageMinutes = elevenLabsUsage?.isOverLimit
+                    ? Math.max(0, (elevenLabsUsage?.minutesUsed || 0) - (elevenLabsUsage?.minutesIncluded || 200))
+                    : 0;
+                  const elevenLabsOverageCostAUD = usdToAud(elevenLabsOverageMinutes * ELEVENLABS_PRICING.flashOveragePerMinuteUSD);
+                  const totalWithOverage = (billingData?.totalCostAUD || 0) + elevenLabsOverageCostAUD;
+
+                  return (
+                    <div className="text-2xl font-bold text-red-600">
+                      {formatAUD(totalWithOverage)}
+                      {elevenLabsOverageMinutes > 0 && (
+                        <span className="text-xs font-normal ml-1">(+overage)</span>
+                      )}
+                    </div>
+                  );
+                })()
               )}
-              <p className="text-xs text-muted-foreground">Variable + Fixed</p>
+              <p className="text-xs text-muted-foreground">Variable + Fixed{elevenLabsUsage?.isOverLimit ? ' + TTS Overage' : ''}</p>
             </CardContent>
           </Card>
 
-          {/* Gross Profit */}
+          {/* Gross Profit - accounts for ElevenLabs overage */}
           <Card className="bg-gradient-to-br from-blue-500/10 to-cyan-500/10 border-blue-500/20">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Gross Profit</CardTitle>
@@ -513,11 +529,26 @@ export default function Billing() {
             </CardHeader>
             <CardContent>
               {isLoading ? <Skeleton className="h-8 w-24" /> : (
-                <div className={`text-2xl font-bold ${(billingData?.grossProfit || 0) >= 0 ? 'text-blue-600' : 'text-red-600'}`}>
-                  {formatAUD(billingData?.grossProfit || 0)}
-                </div>
+                (() => {
+                  // Calculate ElevenLabs overage cost when over included minutes
+                  const elevenLabsOverageMinutes = elevenLabsUsage?.isOverLimit
+                    ? Math.max(0, (elevenLabsUsage?.minutesUsed || 0) - (elevenLabsUsage?.minutesIncluded || 200))
+                    : 0;
+                  const elevenLabsOverageCostAUD = usdToAud(elevenLabsOverageMinutes * ELEVENLABS_PRICING.flashOveragePerMinuteUSD);
+                  const adjustedProfit = (billingData?.grossProfit || 0) - elevenLabsOverageCostAUD;
+                  const revenue = billingData?.totalRevenue || 0;
+                  const adjustedMargin = revenue > 0 ? (adjustedProfit / revenue) * 100 : 0;
+
+                  return (
+                    <>
+                      <div className={`text-2xl font-bold ${adjustedProfit >= 0 ? 'text-blue-600' : 'text-red-600'}`}>
+                        {formatAUD(adjustedProfit)}
+                      </div>
+                      <p className="text-xs text-muted-foreground">{adjustedMargin.toFixed(1)}% margin</p>
+                    </>
+                  );
+                })()
               )}
-              <p className="text-xs text-muted-foreground">{(billingData?.grossMargin || 0).toFixed(1)}% margin</p>
             </CardContent>
           </Card>
 
