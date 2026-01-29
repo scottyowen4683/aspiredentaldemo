@@ -204,24 +204,27 @@ export default function Billing() {
         }))
       });
 
-      // Fetch chat conversations
+      // Fetch chat conversations from conversations table (channel='chat')
+      // Chat sessions are stored in conversations table with channel='chat', not in chat_conversations
       let chatQuery = supabase
-        .from("chat_conversations")
-        .select("assistant_id")
+        .from("conversations")
+        .select("org_id")
+        .eq("channel", "chat")
         .gte("created_at", startDate.toISOString())
         .lte("created_at", endDate.toISOString());
 
+      if (currentRole === "org_admin" && user?.org_id) {
+        chatQuery = chatQuery.eq("org_id", user.org_id);
+      } else if (selectedOrg !== "all") {
+        chatQuery = chatQuery.eq("org_id", selectedOrg);
+      }
+
       const { data: chatData } = await chatQuery;
 
-      // Fetch assistants to map chat to orgs
+      // Fetch assistants to count phone numbers
       const { data: assistants } = await supabase
         .from("assistants")
         .select("id, org_id, phone_number");
-
-      const assistantToOrg: Record<string, string> = {};
-      assistants?.forEach(a => {
-        assistantToOrg[a.id] = a.org_id;
-      });
 
       // Count phone numbers
       const phoneNumbers = assistants?.filter(a => a.phone_number).length || 0;
@@ -275,18 +278,22 @@ export default function Billing() {
         console.warn(`Billing: Skipped ${skippedBadData} conversations with bad duration data (null, 0, or > 60 min)`);
       }
 
-      // Calculate chat interactions by org
+      // Calculate chat interactions by org (org_id comes directly from conversations table now)
       const chatByOrg: Record<string, number> = {};
       let totalChatInteractions = 0;
+
       chatData?.forEach(conv => {
-        const orgId = assistantToOrg[conv.assistant_id];
-        if (orgId) {
-          // Filter by selected org if applicable
-          if (currentRole === "org_admin" && user?.org_id && orgId !== user.org_id) return;
-          if (selectedOrg !== "all" && orgId !== selectedOrg) return;
-          chatByOrg[orgId] = (chatByOrg[orgId] || 0) + 1;
+        if (conv.org_id) {
+          chatByOrg[conv.org_id] = (chatByOrg[conv.org_id] || 0) + 1;
           totalChatInteractions++;
         }
+      });
+
+      // Debug: log chat data
+      console.log('Billing: Chat data', {
+        chatRecords: chatData?.length || 0,
+        totalChatInteractions,
+        chatByOrgKeys: Object.keys(chatByOrg)
       });
 
       // SMS - assume 0 for now (would need separate table)
