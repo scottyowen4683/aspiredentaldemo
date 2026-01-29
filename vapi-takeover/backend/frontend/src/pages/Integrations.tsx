@@ -563,7 +563,7 @@ export default function Integrations() {
 
   if (loading) {
     return (
-      <DashboardLayout>
+      <DashboardLayout userRole={user?.role as "super_admin" | "org_admin"}>
         <div className="flex items-center justify-center min-h-screen">
           <Loader2 className="w-8 h-8 animate-spin text-primary" />
         </div>
@@ -572,7 +572,7 @@ export default function Integrations() {
   }
 
   return (
-    <DashboardLayout>
+    <DashboardLayout userRole={user?.role as "super_admin" | "org_admin"}>
       <div className="space-y-6 p-6">
         {/* Header */}
         <div className="flex items-center justify-between">
