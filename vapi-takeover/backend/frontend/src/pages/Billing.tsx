@@ -278,6 +278,15 @@ export default function Billing() {
       // Calculate chat interactions by org
       const chatByOrg: Record<string, number> = {};
       let totalChatInteractions = 0;
+
+      // Debug: log chat mapping info
+      console.log('Billing: Chat debug', {
+        chatRecords: chatData?.length || 0,
+        assistantIds: chatData?.slice(0, 5).map(c => c.assistant_id),
+        assistantToOrgKeys: Object.keys(assistantToOrg).slice(0, 5),
+        assistantToOrgSample: Object.entries(assistantToOrg).slice(0, 3)
+      });
+
       chatData?.forEach(conv => {
         const orgId = assistantToOrg[conv.assistant_id];
         if (orgId) {
