@@ -102,6 +102,16 @@ export function useConversations(filters: ConversationsFilters = {}) {
       if (filters.score_max !== undefined) {
         countQuery = countQuery.lte('overall_score', filters.score_max);
       }
+      if (filters.sentiment) {
+        countQuery = countQuery.eq('sentiment', filters.sentiment);
+      }
+      if (filters.escalation_status) {
+        if (filters.escalation_status === 'human_handoff') {
+          countQuery = countQuery.eq('escalation', true);
+        } else if (filters.escalation_status === 'ai_handled') {
+          countQuery = countQuery.or('escalation.is.null,escalation.eq.false');
+        }
+      }
 
       // Get total count
       const { count, error: countError } = await countQuery;
@@ -171,7 +181,17 @@ export function useConversations(filters: ConversationsFilters = {}) {
         query = query.lte('overall_score', filters.score_max);
       }
 
-      // Escalation status would require additional database fields
+      if (filters.sentiment) {
+        query = query.eq('sentiment', filters.sentiment);
+      }
+
+      if (filters.escalation_status) {
+        if (filters.escalation_status === 'human_handoff') {
+          query = query.eq('escalation', true);
+        } else if (filters.escalation_status === 'ai_handled') {
+          query = query.or('escalation.is.null,escalation.eq.false');
+        }
+      }
 
       const { data, error } = await query;
 
