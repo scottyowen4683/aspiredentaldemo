@@ -391,8 +391,9 @@ export async function getSubscriptionInfo() {
 
     return response.data;
   } catch (error) {
-    logger.error('Failed to fetch ElevenLabs subscription:', error);
-    throw error;
+    // Don't log the full error object - it has circular refs from axios
+    logger.error('Failed to fetch ElevenLabs subscription:', error.message);
+    throw new Error(error.message || 'Failed to fetch ElevenLabs subscription');
   }
 }
 
