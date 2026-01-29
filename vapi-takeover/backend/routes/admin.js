@@ -206,7 +206,9 @@ router.get('/usage/:org_id', async (req, res) => {
 // GET /api/admin/elevenlabs/usage - Get ElevenLabs subscription and usage (super_admin only)
 router.get('/elevenlabs/usage', async (req, res) => {
   try {
+    logger.info('Fetching ElevenLabs subscription info...');
     const subscription = await getSubscriptionInfo();
+    logger.info('ElevenLabs raw response:', JSON.stringify(subscription, null, 2));
 
     // ElevenLabs credits to minutes conversion
     // From pricing page: 200,000 flash credits = ~200 minutes
@@ -237,14 +239,18 @@ router.get('/elevenlabs/usage', async (req, res) => {
 
         // Status flags
         needsUpgrade: usagePercent >= 80,
-        isOverLimit: characterCount >= characterLimit
+        isOverLimit: characterCount >= characterLimit,
+
+        // Include full raw data for debugging
+        _raw: subscription
       }
     });
   } catch (error) {
-    logger.error('ElevenLabs usage fetch error:', error);
+    logger.error('ElevenLabs usage fetch error:', error.message);
     res.status(500).json({
       success: false,
-      error: 'Failed to fetch ElevenLabs usage data'
+      error: 'Failed to fetch ElevenLabs usage data',
+      details: error.message
     });
   }
 });
