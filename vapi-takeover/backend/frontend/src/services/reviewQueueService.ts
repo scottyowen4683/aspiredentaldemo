@@ -49,8 +49,8 @@ function isFlagged(conversation: any): boolean {
  */
 export async function getFlaggedConversations(orgId: string, reviewed: boolean = false) {
   try {
-    // Build voice query - handle NULL as "not reviewed"
-    let voiceQuery = supabase
+    // Build voice query - fetch all scored, filter reviewed status in JS
+    const { data: voiceData, error: voiceError } = await supabase
       .from('conversations')
       .select(`
         id,
@@ -75,22 +75,12 @@ export async function getFlaggedConversations(orgId: string, reviewed: boolean =
       .eq('scored', true)
       .order('started_at', { ascending: false });
 
-    // For pending (not reviewed), include NULL and false
-    // For reviewed, only include true
-    if (reviewed) {
-      voiceQuery = voiceQuery.eq('reviewed', true);
-    } else {
-      voiceQuery = voiceQuery.or('reviewed.is.null,reviewed.eq.false');
-    }
-
-    const { data: voiceData, error: voiceError } = await voiceQuery;
-
     if (voiceError) {
       console.error('Error fetching voice conversations:', voiceError);
     }
 
-    // Build chat query - chat_conversations doesn't have org_id directly, filter later by assistant
-    let chatQuery = supabase
+    // Build chat query - chat_conversations doesn't have org_id directly
+    const { data: chatData, error: chatError } = await supabase
       .from('chat_conversations')
       .select(`
         id,
@@ -112,15 +102,6 @@ export async function getFlaggedConversations(orgId: string, reviewed: boolean =
       `)
       .eq('scored', true)
       .order('started_at', { ascending: false });
-
-    // For pending (not reviewed), include NULL and false
-    if (reviewed) {
-      chatQuery = chatQuery.eq('reviewed', true);
-    } else {
-      chatQuery = chatQuery.or('reviewed.is.null,reviewed.eq.false');
-    }
-
-    const { data: chatData, error: chatError } = await chatQuery;
 
     if (chatError) {
       console.error('Error fetching chat conversations:', chatError);
@@ -144,9 +125,15 @@ export async function getFlaggedConversations(orgId: string, reviewed: boolean =
     // Filter to only flagged conversations
     const flaggedConversations = allConversations.filter(isFlagged);
 
+    // Filter by reviewed status in JavaScript (more reliable than DB query for null handling)
+    const filteredByReviewed = flaggedConversations.filter(c => {
+      const isReviewed = c.reviewed === true;
+      return reviewed ? isReviewed : !isReviewed;
+    });
+
     // Get assistant and organization names
-    const assistantIds = [...new Set(flaggedConversations.map(c => c.assistant_id).filter(Boolean))];
-    const orgIds = [...new Set(flaggedConversations.map(c => c.org_id).filter(Boolean))];
+    const assistantIds = [...new Set(filteredByReviewed.map(c => c.assistant_id).filter(Boolean))];
+    const orgIds = [...new Set(filteredByReviewed.map(c => c.org_id).filter(Boolean))];
 
     // Fetch assistants
     const { data: assistants } = await supabase
@@ -164,7 +151,7 @@ export async function getFlaggedConversations(orgId: string, reviewed: boolean =
     const assistantMap = new Map((assistants || []).map(a => [a.id, a]));
     const orgMap = new Map((organizations || []).map(o => [o.id, o]));
 
-    const enrichedConversations: FlaggedConversation[] = flaggedConversations.map(c => ({
+    const enrichedConversations: FlaggedConversation[] = filteredByReviewed.map(c => ({
       ...c,
       assistant: assistantMap.get(c.assistant_id) || null,
       organization: orgMap.get(c.org_id) || null
