@@ -265,10 +265,10 @@ export async function getTopQuestions(
       if (assistantIds.length > 0) {
         const { data: chatData, error: chatError } = await supabase
           .from("chat_conversations")
-          .select("transcript, started_at")
+          .select("transcript, created_at")
           .not("transcript", "is", null)
           .in("assistant_id", assistantIds)
-          .gte("started_at", dateFrom.toISOString());
+          .gte("created_at", dateFrom.toISOString());
 
         if (chatError) {
           console.error("Error fetching chat conversations for questions:", chatError);
@@ -279,9 +279,9 @@ export async function getTopQuestions(
       // Get all chat conversations
       const { data: chatData, error: chatError } = await supabase
         .from("chat_conversations")
-        .select("transcript, started_at")
+        .select("transcript, created_at")
         .not("transcript", "is", null)
-        .gte("started_at", dateFrom.toISOString());
+        .gte("created_at", dateFrom.toISOString());
 
       if (chatError) {
         console.error("Error fetching chat conversations for questions:", chatError);
@@ -948,7 +948,7 @@ export async function getTopDeferralReasons(
           .from("chat_conversations")
           .select("success_evaluation, overall_score")
           .in("assistant_id", assistantIds)
-          .gte("started_at", dateFrom.toISOString());
+          .gte("created_at", dateFrom.toISOString());
 
         if (chatError) {
           console.error("Error fetching chat conversations:", chatError);
@@ -964,7 +964,7 @@ export async function getTopDeferralReasons(
       const { data: chatData, error: chatError } = await supabase
         .from("chat_conversations")
         .select("success_evaluation, overall_score")
-        .gte("started_at", dateFrom.toISOString());
+        .gte("created_at", dateFrom.toISOString());
 
       if (chatError) {
         console.error("Error fetching chat conversations:", chatError);
