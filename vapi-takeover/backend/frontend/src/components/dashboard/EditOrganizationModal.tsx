@@ -230,13 +230,13 @@ export function EditOrganizationModal({ open, onOpenChange, organization, onSave
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor="flatRateFee">Flat Rate Fee ($)</Label>
+                    <Label htmlFor="flatRateFee">Monthly Service Fee ($ AUD)</Label>
                     <Input
                       id="flatRateFee"
                       type="number"
                       step="0.01"
                       min="0"
-                      placeholder="0.00"
+                      placeholder="500.00"
                       value={flatRateFee || ""}
                       onChange={(e) => setFlatRateFee(parseFloat(e.target.value) || 0)}
                       className="w-full"
@@ -249,7 +249,7 @@ export function EditOrganizationModal({ open, onOpenChange, organization, onSave
                       id="includedInteractions"
                       type="number"
                       min="0"
-                      placeholder="0"
+                      placeholder="5000"
                       value={includedInteractions || ""}
                       onChange={(e) => setIncludedInteractions(parseInt(e.target.value) || 0)}
                       className="w-full"
@@ -286,13 +286,13 @@ export function EditOrganizationModal({ open, onOpenChange, organization, onSave
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="overageRate">Overage Rate (per 1000)</Label>
+                    <Label htmlFor="overageRate">Overage Rate per 1000 ($ AUD)</Label>
                     <Input
                       id="overageRate"
                       type="number"
                       step="0.01"
                       min="0"
-                      placeholder="0.00"
+                      placeholder="50.00"
                       value={overageRate || ""}
                       onChange={(e) => setOverageRate(parseFloat(e.target.value) || 0)}
                       className="w-full"

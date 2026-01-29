@@ -7,6 +7,7 @@ import { validateTwilioNumber } from '../services/twilio-validator.js';
 import logger from '../services/logger.js';
 import emailService from '../services/email-service.js';
 import { scoreConversation } from '../ai/rubric-scorer.js';
+import { getSubscriptionInfo } from '../ai/elevenlabs.js';
 
 const router = express.Router();
 
@@ -198,6 +199,52 @@ router.get('/usage/:org_id', async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to fetch usage data'
+    });
+  }
+});
+
+// GET /api/admin/elevenlabs/usage - Get ElevenLabs subscription and usage (super_admin only)
+router.get('/elevenlabs/usage', async (req, res) => {
+  try {
+    const subscription = await getSubscriptionInfo();
+
+    // ElevenLabs credits to minutes conversion
+    // From pricing page: 200,000 flash credits = ~200 minutes
+    // So 1000 credits = 1 minute (for Flash/Turbo model)
+    const CREDITS_PER_MINUTE = 1000;
+
+    const characterCount = subscription.character_count || 0;
+    const characterLimit = subscription.character_limit || 0;
+
+    // Credits and characters are 1:1 in ElevenLabs
+    const minutesUsed = characterCount / CREDITS_PER_MINUTE;
+    const minutesIncluded = characterLimit / CREDITS_PER_MINUTE;
+    const usagePercent = characterLimit > 0 ? (characterCount / characterLimit) * 100 : 0;
+
+    res.json({
+      success: true,
+      data: {
+        // Raw data from ElevenLabs
+        tier: subscription.tier,
+        characterCount,
+        characterLimit,
+        nextCharacterCountResetUnix: subscription.next_character_count_reset_unix,
+
+        // Calculated minutes (1000 credits = 1 flash minute)
+        minutesUsed: Math.round(minutesUsed * 10) / 10,
+        minutesIncluded: Math.round(minutesIncluded),
+        usagePercent: Math.round(usagePercent * 10) / 10,
+
+        // Status flags
+        needsUpgrade: usagePercent >= 80,
+        isOverLimit: characterCount >= characterLimit
+      }
+    });
+  } catch (error) {
+    logger.error('ElevenLabs usage fetch error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch ElevenLabs usage data'
     });
   }
 });
