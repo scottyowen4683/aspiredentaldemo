@@ -21,17 +21,21 @@ export const USD_TO_AUD_RATE = 1.58;
 // ============================================================================
 
 /**
- * Voice AI Minute - Total: $0.071 USD
+ * Voice AI Minute - Total: $0.035 USD (excluding ElevenLabs)
  * These costs apply per AI-handled voice minute
+ *
+ * NOTE: ElevenLabs is NOT included here because:
+ * - The monthly fee ($22) covers 200 flash TTS minutes
+ * - Only overage (above 200 mins) incurs additional cost
+ * - ElevenLabs overage is calculated separately from actual API usage
  */
 export const VOICE_AI_COSTS_PER_MINUTE = {
   twilio: 0.0100,      // Twilio AU voice (inbound/outbound)
   deepgram: 0.0100,    // Deepgram STT per transcription minute
-  elevenlabs: 0.0360,  // ElevenLabs TTS per generated audio minute
   openai: 0.0100,      // OpenAI GPT-mini modelled per-minute equivalent
   flyio: 0.0040,       // Fly.io incremental compute (flat estimate)
   supabase: 0.0010,    // Supabase reads/writes (negligible)
-  total: 0.0710,       // Total variable cost per AI voice minute
+  total: 0.0350,       // Total variable cost per AI voice minute (excl. ElevenLabs)
 };
 
 /**
@@ -525,11 +529,11 @@ export function calculateCompleteCostSummary(usage: {
 // ============================================================================
 
 export const UNIT_COSTS_QUICK_REF = {
-  voiceAiPerMinute: { usd: 0.071, description: 'AI voice minute (variable)' },
+  voiceAiPerMinute: { usd: 0.035, description: 'AI voice minute (excl. ElevenLabs)' },
   postTransferPerMinute: { usd: 0.010, description: 'Post-transfer minute' },
   chatPerInteraction: { usd: 0.047, description: 'Chat interaction' },
   smsPerMessage: { usd: 0.019, description: 'SMS message' },
   phoneNumberMonthly: { usd: 6.50, description: 'Phone number (monthly)' },
   flyioMonthly: { usd: 7.23, description: 'Fly.io VM (monthly)' },
-  elevenLabsMonthly: { usd: 11.00, description: 'ElevenLabs Creator (monthly)' },
+  elevenLabsMonthly: { usd: 22.00, description: 'ElevenLabs Creator (200 flash mins included)' },
 };

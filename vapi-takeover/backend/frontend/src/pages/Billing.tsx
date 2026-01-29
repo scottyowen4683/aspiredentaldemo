@@ -972,10 +972,6 @@ export default function Billing() {
                         <span>${VOICE_AI_COSTS_PER_MINUTE.deepgram.toFixed(4)}</span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-muted-foreground">ElevenLabs (TTS)</span>
-                        <span>${VOICE_AI_COSTS_PER_MINUTE.elevenlabs.toFixed(4)}</span>
-                      </div>
-                      <div className="flex justify-between">
                         <span className="text-muted-foreground">OpenAI (GPT-mini)</span>
                         <span>${VOICE_AI_COSTS_PER_MINUTE.openai.toFixed(4)}</span>
                       </div>
@@ -995,6 +991,9 @@ export default function Billing() {
                         <span>Total AUD</span>
                         <span>${usdToAud(VOICE_AI_COSTS_PER_MINUTE.total).toFixed(4)}</span>
                       </div>
+                      <p className="text-xs text-muted-foreground pt-2 border-t">
+                        ElevenLabs TTS is a fixed monthly cost (200 mins included)
+                      </p>
                     </div>
                   </div>
 
@@ -1079,7 +1078,7 @@ export default function Billing() {
                       <span className="font-medium">${FIXED_MONTHLY_COSTS.flyioVmSydney} USD (${usdToAud(FIXED_MONTHLY_COSTS.flyioVmSydney).toFixed(2)} AUD)</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-muted-foreground">ElevenLabs</span>
+                      <span className="text-muted-foreground">ElevenLabs ({ELEVENLABS_PRICING.flashMinutesIncluded} flash mins)</span>
                       <span className="font-medium">${ELEVENLABS_PRICING.monthlyFeeUSD} USD (${usdToAud(ELEVENLABS_PRICING.monthlyFeeUSD).toFixed(2)} AUD)</span>
                     </div>
                   </div>
@@ -1157,9 +1156,9 @@ export default function Billing() {
               <div>
                 <h4 className="font-medium text-sm">Billing Notes</h4>
                 <ul className="text-sm text-muted-foreground mt-1 space-y-1">
-                  <li>Variable costs scale with usage (voice minutes, chat sessions, SMS)</li>
-                  <li>Fixed costs (phone numbers, hosting, ElevenLabs subscription) are deducted from revenue</li>
-                  <li>ElevenLabs Creator plan includes {ELEVENLABS_PRICING.ttsMinutesIncluded} TTS minutes; overage charged at ${ELEVENLABS_PRICING.ttsOveragePerMinuteUSD}/min</li>
+                  <li>Variable costs scale with usage (voice minutes, chat sessions, SMS) - excludes ElevenLabs TTS</li>
+                  <li>Fixed costs include phone numbers, hosting, and ElevenLabs subscription ($22/mo)</li>
+                  <li>ElevenLabs Creator plan includes {ELEVENLABS_PRICING.flashMinutesIncluded} flash TTS minutes; overage charged at ${ELEVENLABS_PRICING.flashOveragePerMinuteUSD}/min</li>
                   <li>Fully-loaded cost = Variable cost + (Fixed costs / Total AI minutes)</li>
                 </ul>
               </div>
