@@ -1356,10 +1356,10 @@ router.post('/chat-conversations/rescore', async (req, res) => {
       limit
     });
 
-    // Get chat conversations to score
+    // Get chat conversations to score (note: org_id comes from assistant, not directly on chat_conversations)
     let query = supabaseService.client
       .from('chat_conversations')
-      .select('id, session_id, assistant_id, org_id')
+      .select('id, session_id, assistant_id')
       .order('created_at', { ascending: false });
 
     if (conversation_ids && conversation_ids.length > 0) {
@@ -1410,10 +1410,11 @@ router.post('/chat-conversations/rescore', async (req, res) => {
           .eq('id', conv.assistant_id)
           .single();
 
+        // Get organization from assistant's org_id
         const { data: organization } = await supabaseService.client
           .from('organizations')
           .select('name, settings')
-          .eq('id', conv.org_id)
+          .eq('id', assistant?.org_id)
           .single();
 
         // Format transcript
