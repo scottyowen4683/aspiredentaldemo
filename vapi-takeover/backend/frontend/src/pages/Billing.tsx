@@ -175,10 +175,11 @@ export default function Billing() {
       const { data: orgsData } = await orgsQuery;
 
       // Fetch voice conversations ONLY (exclude chat sessions stored in conversations table)
+      // Include channel='voice' OR channel IS NULL (backward compatibility for older records)
       let voiceQuery = supabase
         .from("conversations")
         .select("org_id, duration_seconds, ai_duration_seconds, post_transfer_seconds, escalation, channel")
-        .eq("channel", "voice")  // Only count voice calls, not chat sessions
+        .or("channel.eq.voice,channel.is.null")  // Only count voice calls (or null for backward compat), not chat sessions
         .gte("created_at", startDate.toISOString())
         .lte("created_at", endDate.toISOString());
 
@@ -224,6 +225,11 @@ export default function Billing() {
       let skippedBadData = 0;
 
       voiceData?.forEach(conv => {
+        // Skip conversations without org_id
+        if (!conv.org_id) {
+          return;
+        }
+
         // Skip conversations with obviously bad data (null, 0, or > 1 hour)
         const rawDuration = conv.duration_seconds || 0;
         if (rawDuration <= 0 || rawDuration > MAX_CALL_SECONDS) {
@@ -253,6 +259,15 @@ export default function Billing() {
         if (conv.escalation) {
           totalTransferredCalls++;
         }
+      });
+
+      // Debug: log voice data summary
+      console.log('Billing: Voice data summary', {
+        totalRecords: voiceData?.length || 0,
+        skippedBadData,
+        totalVoiceMinutes: totalVoiceMinutes.toFixed(2),
+        totalAiMinutes: totalAiMinutes.toFixed(2),
+        orgsWithVoice: Object.keys(voiceByOrg).length
       });
 
       // Log if we skipped bad data (for debugging)
@@ -310,6 +325,15 @@ export default function Billing() {
 
       // Fully loaded cost per minute
       const fullyLoaded = calculateFullyLoadedVoiceCost(totalVoiceMinutes, phoneNumbers);
+
+      // Debug: log org and chat data
+      console.log('Billing: Data summary', {
+        organizations: orgsData?.length || 0,
+        chatRecords: chatData?.length || 0,
+        totalChatInteractions,
+        voiceByOrgKeys: Object.keys(voiceByOrg),
+        chatByOrgKeys: Object.keys(chatByOrg)
+      });
 
       // Build org breakdown
       const organizations: OrgBilling[] = (orgsData || []).map(org => {
@@ -601,7 +625,7 @@ export default function Billing() {
                           </div>
                           <div>
                             <p className="font-medium">Voice AI Minutes</p>
-                            <p className="text-sm text-muted-foreground">${VOICE_AI_COSTS_PER_MINUTE.total}/min USD</p>
+                            <p className="text-sm text-muted-foreground">${usdToAud(VOICE_AI_COSTS_PER_MINUTE.total).toFixed(3)}/min AUD</p>
                           </div>
                         </div>
                         <div className="text-right">
@@ -620,7 +644,7 @@ export default function Billing() {
                             <div>
                               <p className="font-medium">Human Transfer Minutes</p>
                               <p className="text-sm text-muted-foreground">
-                                ${POST_TRANSFER_COSTS_PER_MINUTE.total}/min USD • {billingData?.transferredCalls || 0} transfers
+                                ${usdToAud(POST_TRANSFER_COSTS_PER_MINUTE.total).toFixed(3)}/min AUD • {billingData?.transferredCalls || 0} transfers
                               </p>
                             </div>
                           </div>
@@ -638,7 +662,7 @@ export default function Billing() {
                           </div>
                           <div>
                             <p className="font-medium">Chat Interactions</p>
-                            <p className="text-sm text-muted-foreground">${CHAT_COSTS_PER_INTERACTION.total}/chat USD</p>
+                            <p className="text-sm text-muted-foreground">${usdToAud(CHAT_COSTS_PER_INTERACTION.total).toFixed(3)}/chat AUD</p>
                           </div>
                         </div>
                         <div className="text-right">
@@ -654,7 +678,7 @@ export default function Billing() {
                           </div>
                           <div>
                             <p className="font-medium">SMS Messages</p>
-                            <p className="text-sm text-muted-foreground">${SMS_COSTS_PER_MESSAGE.total}/SMS USD</p>
+                            <p className="text-sm text-muted-foreground">${usdToAud(SMS_COSTS_PER_MESSAGE.total).toFixed(3)}/SMS AUD</p>
                           </div>
                         </div>
                         <div className="text-right">
