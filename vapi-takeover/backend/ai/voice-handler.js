@@ -378,6 +378,10 @@ class VoiceHandler {
 
     // Prevent duplicate endCall processing
     this.isEnded = false;
+
+    // KB usage tracking for scoring
+    this.kbUsed = false;
+    this.kbResultsCount = 0;
   }
 
   /**
@@ -1059,6 +1063,10 @@ class VoiceHandler {
           if (kbResults && kbResults.length > 0) {
             kbContext = formatKBContext(kbResults);
 
+            // Track KB usage for scoring
+            this.kbUsed = true;
+            this.kbResultsCount = Math.max(this.kbResultsCount, kbResults.length);
+
             logger.info('Knowledge base context added', {
               matchCount: kbResults.length,
               contextLength: kbContext.length,
@@ -1406,6 +1414,10 @@ DO NOT make up or guess information like names, contact details, or specific fac
           );
           if (kbResults && kbResults.length > 0) {
             kbContext = formatKBContext(kbResults);
+
+            // Track KB usage for scoring
+            this.kbUsed = true;
+            this.kbResultsCount = Math.max(this.kbResultsCount, kbResults.length);
           } else {
             // No KB results - tell GPT explicitly
             kbContext = `
@@ -2023,15 +2035,21 @@ DO NOT make up or guess information like names, contact details, or specific fac
       this.costs.scoring = scoringResult.metadata.cost.total;
       this.costs.total += scoringResult.metadata.cost.total;
 
-      // Update conversation with score (using correct schema field names)
-      // Schema has: overall_score (integer), scored (boolean), score_details (jsonb)
+      // Extract key fields from scoring result
       const overallScore = Math.round(scoringResult.weighted_total_score || scoringResult.confidence_score || 0);
+      const successEvaluation = scoringResult.success_evaluation?.overall_success === true;
+      const sentiment = scoringResult.sentiments?.overall_sentiment || 'neutral';
 
+      // Update conversation with comprehensive scoring data
       await supabaseService.client
         .from('conversations')
         .update({
           overall_score: overallScore,
           scored: true,
+          success_evaluation: successEvaluation,
+          sentiment: sentiment,
+          kb_used: this.kbUsed,
+          kb_results_count: this.kbResultsCount,
           score_details: {
             scores: scoringResult.scores,
             grade: scoringResult.grade,
@@ -2042,6 +2060,7 @@ DO NOT make up or guess information like names, contact details, or specific fac
             summary: scoringResult.summary,
             strengths: scoringResult.strengths,
             improvements: scoringResult.improvements,
+            confidence_score: scoringResult.confidence_score,
             model_used: 'gpt-4o-mini',
             scoring_type: 'voice',
             cost: scoringResult.metadata?.cost?.total || 0
@@ -2051,7 +2070,10 @@ DO NOT make up or guess information like names, contact details, or specific fac
 
       logger.info('Voice conversation scored:', {
         conversationId: this.conversation.id,
-        score: overallScore,
+        overallScore,
+        successEvaluation,
+        sentiment,
+        kbUsed: this.kbUsed,
         grade: scoringResult.grade,
         scoringCost: scoringResult.metadata?.cost?.total || 0
       });

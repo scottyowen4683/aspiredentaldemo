@@ -138,8 +138,13 @@ export default function Conversations() {
   };
 
   const isFlagged = (conversation: any) => {
+    // Only flag if scored AND has actual issues
+    if (!conversation.scored) return false;
     const score = getScore(conversation);
-    return (score && score < 70) || !conversation.success_evaluation;
+    // Flag if: low score OR explicitly failed success evaluation OR negative sentiment
+    return (score !== null && score < 70) ||
+           conversation.success_evaluation === false ||
+           conversation.sentiment === 'negative';
   };
 
   const getConversationStatus = (conversation: any) => {
@@ -344,11 +349,30 @@ export default function Conversations() {
               <Card className="shadow-card">
                 <CardContent className="p-4">
                   <div className="flex items-center space-x-2">
-                    <div className="text-2xl font-bold text-foreground">
-                      {Math.round((conversations.filter(c => c.success_evaluation).length / conversations.length) * 100)}%
+                    <div className="text-2xl font-bold text-green-600">
+                      {(() => {
+                        const scored = conversations.filter(c => c.scored);
+                        const successful = scored.filter(c => c.success_evaluation === true);
+                        return scored.length > 0 ? Math.round((successful.length / scored.length) * 100) : 0;
+                      })()}%
                     </div>
                     <div className="text-sm text-muted-foreground">
                       AI Success Rate
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card className="shadow-card">
+                <CardContent className="p-4">
+                  <div className="flex items-center space-x-2">
+                    <div className="text-2xl font-bold text-blue-600">
+                      {(() => {
+                        const withKb = conversations.filter(c => c.kb_used === true);
+                        return conversations.length > 0 ? Math.round((withKb.length / conversations.length) * 100) : 0;
+                      })()}%
+                    </div>
+                    <div className="text-sm text-muted-foreground">
+                      KB Hit Rate
                     </div>
                   </div>
                 </CardContent>
@@ -423,42 +447,56 @@ export default function Conversations() {
               </Card>
             </div>
 
-            {/* Top 10 Flagged Issues */}
+            {/* Needs Attention - Compact section for flagged conversations */}
             {conversations.filter(c => isFlagged(c)).length > 0 && (
-              <Card className="shadow-card">
-                <CardHeader>
-                  <CardTitle className="text-lg flex items-center">
-                    <AlertCircle className="mr-2 h-5 w-5 text-destructive" />
-                    Top 10 Flagged Issues
-                  </CardTitle>
-                </CardHeader>
+              <Card className="shadow-card border-l-4 border-l-amber-500">
                 <CardContent className="p-4">
-                  <div className="grid gap-2 grid-cols-1 lg:grid-cols-2">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <AlertCircle className="h-4 w-4 text-amber-500" />
+                      <span className="font-medium text-sm">Needs Attention</span>
+                      <Badge variant="secondary" className="text-xs">
+                        {conversations.filter(c => isFlagged(c)).length}
+                      </Badge>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
                     {conversations
                       .filter(c => isFlagged(c))
-                      .slice(0, 10)
-                      .map((conv, index) => (
-                        <div key={conv.id} className="flex items-center justify-between p-2 bg-gradient-card rounded-lg">
-                          <div className="flex items-center space-x-2 min-w-0 flex-1">
-                            <Badge variant="outline" className="text-xs flex-shrink-0">{index + 1}</Badge>
-                            <span className="text-sm truncate">
-                              {conv.assistants?.friendly_name || "Unknown Assistant"}
-                            </span>
-                          </div>
-                          <div className="flex items-center space-x-2 flex-shrink-0">
-                            <Badge variant="destructive" className="text-xs">
-                              {getScore(conv) ? `${getScore(conv)}%` : "N/A"}
+                      .slice(0, 8)
+                      .map((conv) => (
+                        <Button
+                          key={conv.id}
+                          variant="outline"
+                          size="sm"
+                          className="h-7 text-xs gap-1 hover:bg-amber-50 dark:hover:bg-amber-950"
+                          onClick={() => navigate(`/conversations/${conv.id}`)}
+                        >
+                          <span className="truncate max-w-[120px]">
+                            {conv.assistants?.friendly_name || "Unknown"}
+                          </span>
+                          {getScore(conv) && (
+                            <Badge variant="destructive" className="text-[10px] px-1 py-0 h-4">
+                              {getScore(conv)}%
                             </Badge>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => navigate(`/conversations/${conv.id}`)}
-                            >
-                              <Eye className="h-3 w-3" />
-                            </Button>
-                          </div>
-                        </div>
+                          )}
+                          {conv.sentiment === 'negative' && (
+                            <Badge variant="destructive" className="text-[10px] px-1 py-0 h-4">
+                              -
+                            </Badge>
+                          )}
+                        </Button>
                       ))}
+                    {conversations.filter(c => isFlagged(c)).length > 8 && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 text-xs"
+                        onClick={() => setFilters(prev => ({ ...prev, status: 'flagged', page: 1 }))}
+                      >
+                        +{conversations.filter(c => isFlagged(c)).length - 8} more
+                      </Button>
+                    )}
                   </div>
                 </CardContent>
               </Card>

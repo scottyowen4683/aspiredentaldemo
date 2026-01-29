@@ -6,6 +6,7 @@ import { processKnowledgeBase } from '../services/kb-processor.js';
 import { validateTwilioNumber } from '../services/twilio-validator.js';
 import logger from '../services/logger.js';
 import emailService from '../services/email-service.js';
+import { scoreConversation } from '../ai/rubric-scorer.js';
 
 const router = express.Router();
 
@@ -1187,6 +1188,313 @@ router.post('/service-request', async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to submit service request'
+    });
+  }
+});
+
+// =============================================================================
+// BULK RE-SCORE CONVERSATIONS
+// =============================================================================
+
+// POST /api/admin/conversations/rescore - Bulk re-score conversations
+router.post('/conversations/rescore', async (req, res) => {
+  try {
+    const { conversation_ids, rescore_all, limit = 50 } = req.body;
+
+    logger.info('Bulk re-score request', {
+      rescoreAll: rescore_all,
+      idsProvided: conversation_ids?.length,
+      limit
+    });
+
+    // Get conversations to score
+    let query = supabaseService.client
+      .from('conversations')
+      .select('id, session_id, assistant_id, org_id, transcript')
+      .order('created_at', { ascending: false });
+
+    if (conversation_ids && conversation_ids.length > 0) {
+      query = query.in('id', conversation_ids);
+    } else if (!rescore_all) {
+      // Only unscored conversations by default
+      query = query.or('scored.is.null,scored.eq.false');
+    }
+
+    query = query.limit(Math.min(limit, 100)); // Max 100 at a time
+
+    const { data: conversations, error: fetchError } = await query;
+
+    if (fetchError) {
+      throw fetchError;
+    }
+
+    if (!conversations || conversations.length === 0) {
+      return res.json({
+        success: true,
+        message: 'No conversations to re-score',
+        scored: 0,
+        failed: 0
+      });
+    }
+
+    logger.info(`Starting bulk re-score of ${conversations.length} conversations`);
+
+    let scored = 0;
+    let failed = 0;
+    const results = [];
+
+    for (const conv of conversations) {
+      try {
+        // Skip if no transcript
+        if (!conv.transcript || (Array.isArray(conv.transcript) && conv.transcript.length === 0)) {
+          results.push({ id: conv.id, status: 'skipped', reason: 'no_transcript' });
+          continue;
+        }
+
+        // Get assistant and organization info
+        const { data: assistant } = await supabaseService.client
+          .from('assistants')
+          .select('friendly_name, org_id, rubric')
+          .eq('id', conv.assistant_id)
+          .single();
+
+        const { data: organization } = await supabaseService.client
+          .from('organizations')
+          .select('name, settings')
+          .eq('id', conv.org_id)
+          .single();
+
+        // Format transcript
+        const transcript = Array.isArray(conv.transcript)
+          ? conv.transcript.map(msg => `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content || msg.text || ''}`).join('\n')
+          : JSON.stringify(conv.transcript);
+
+        // Score the conversation
+        const scoringResult = await scoreConversation({
+          transcript,
+          rubric: assistant?.rubric || organization?.settings?.default_rubric || null,
+          conversationType: 'voice',
+          organizationName: organization?.name || 'Unknown',
+          assistantName: assistant?.friendly_name || 'Unknown'
+        });
+
+        // Extract key fields
+        const overallScore = Math.round(scoringResult.weighted_total_score || 0);
+        const successEvaluation = scoringResult.success_evaluation?.overall_success === true;
+        const sentiment = scoringResult.sentiments?.overall_sentiment || 'neutral';
+
+        // Update conversation with new scoring data
+        await supabaseService.client
+          .from('conversations')
+          .update({
+            overall_score: overallScore,
+            scored: true,
+            success_evaluation: successEvaluation,
+            sentiment: sentiment,
+            score_details: {
+              scores: scoringResult.scores,
+              grade: scoringResult.grade,
+              sentiments: scoringResult.sentiments,
+              flags: scoringResult.flags,
+              resident_intents: scoringResult.resident_intents,
+              success_evaluation: scoringResult.success_evaluation,
+              summary: scoringResult.summary,
+              strengths: scoringResult.strengths,
+              improvements: scoringResult.improvements,
+              confidence_score: scoringResult.confidence_score,
+              rescored_at: new Date().toISOString()
+            }
+          })
+          .eq('id', conv.id);
+
+        scored++;
+        results.push({
+          id: conv.id,
+          status: 'scored',
+          score: overallScore,
+          success: successEvaluation,
+          sentiment
+        });
+
+        logger.info(`Re-scored conversation ${conv.id}`, { score: overallScore, successEvaluation });
+
+      } catch (scoreError) {
+        failed++;
+        results.push({ id: conv.id, status: 'failed', error: scoreError.message });
+        logger.error(`Failed to re-score conversation ${conv.id}:`, scoreError);
+      }
+    }
+
+    logger.info('Bulk re-score complete', { scored, failed, total: conversations.length });
+
+    res.json({
+      success: true,
+      message: `Re-scored ${scored} conversations`,
+      scored,
+      failed,
+      total: conversations.length,
+      results
+    });
+
+  } catch (error) {
+    logger.error('Bulk re-score error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to re-score conversations'
+    });
+  }
+});
+
+// Also add endpoint for chat conversations
+router.post('/chat-conversations/rescore', async (req, res) => {
+  try {
+    const { conversation_ids, rescore_all, limit = 50 } = req.body;
+
+    logger.info('Bulk re-score chat request', {
+      rescoreAll: rescore_all,
+      idsProvided: conversation_ids?.length,
+      limit
+    });
+
+    // Get chat conversations to score
+    let query = supabaseService.client
+      .from('chat_conversations')
+      .select('id, session_id, assistant_id, org_id')
+      .order('created_at', { ascending: false });
+
+    if (conversation_ids && conversation_ids.length > 0) {
+      query = query.in('id', conversation_ids);
+    } else if (!rescore_all) {
+      query = query.or('scored.is.null,scored.eq.false');
+    }
+
+    query = query.limit(Math.min(limit, 100));
+
+    const { data: conversations, error: fetchError } = await query;
+
+    if (fetchError) throw fetchError;
+
+    if (!conversations || conversations.length === 0) {
+      return res.json({
+        success: true,
+        message: 'No chat conversations to re-score',
+        scored: 0,
+        failed: 0
+      });
+    }
+
+    logger.info(`Starting bulk re-score of ${conversations.length} chat conversations`);
+
+    let scored = 0;
+    let failed = 0;
+    const results = [];
+
+    for (const conv of conversations) {
+      try {
+        // Get conversation history
+        const { data: messages } = await supabaseService.client
+          .from('conversation_messages')
+          .select('role, content')
+          .eq('conversation_id', conv.id)
+          .order('timestamp', { ascending: true });
+
+        if (!messages || messages.length === 0) {
+          results.push({ id: conv.id, status: 'skipped', reason: 'no_messages' });
+          continue;
+        }
+
+        // Get assistant and organization info
+        const { data: assistant } = await supabaseService.client
+          .from('assistants')
+          .select('friendly_name, org_id, rubric')
+          .eq('id', conv.assistant_id)
+          .single();
+
+        const { data: organization } = await supabaseService.client
+          .from('organizations')
+          .select('name, settings')
+          .eq('id', conv.org_id)
+          .single();
+
+        // Format transcript
+        const transcript = messages
+          .map(msg => `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content}`)
+          .join('\n');
+
+        // Score the conversation
+        const scoringResult = await scoreConversation({
+          transcript,
+          rubric: assistant?.rubric || organization?.settings?.default_rubric || null,
+          conversationType: 'chat',
+          organizationName: organization?.name || 'Unknown',
+          assistantName: assistant?.friendly_name || 'Unknown'
+        });
+
+        // Extract key fields
+        const overallScore = Math.round(scoringResult.weighted_total_score || 0);
+        const successEvaluation = scoringResult.success_evaluation?.overall_success === true;
+        const sentiment = scoringResult.sentiments?.overall_sentiment || 'neutral';
+
+        // Update chat conversation
+        await supabaseService.client
+          .from('chat_conversations')
+          .update({
+            score: overallScore,
+            overall_score: overallScore,
+            scored: true,
+            scored_at: new Date().toISOString(),
+            success_evaluation: successEvaluation,
+            sentiment: sentiment,
+            score_details: {
+              scores: scoringResult.scores,
+              grade: scoringResult.grade,
+              sentiments: scoringResult.sentiments,
+              flags: scoringResult.flags,
+              resident_intents: scoringResult.resident_intents,
+              success_evaluation: scoringResult.success_evaluation,
+              summary: scoringResult.summary,
+              strengths: scoringResult.strengths,
+              improvements: scoringResult.improvements,
+              confidence_score: scoringResult.confidence_score,
+              rescored_at: new Date().toISOString()
+            }
+          })
+          .eq('id', conv.id);
+
+        scored++;
+        results.push({
+          id: conv.id,
+          status: 'scored',
+          score: overallScore,
+          success: successEvaluation,
+          sentiment
+        });
+
+        logger.info(`Re-scored chat conversation ${conv.id}`, { score: overallScore, successEvaluation });
+
+      } catch (scoreError) {
+        failed++;
+        results.push({ id: conv.id, status: 'failed', error: scoreError.message });
+        logger.error(`Failed to re-score chat conversation ${conv.id}:`, scoreError);
+      }
+    }
+
+    logger.info('Bulk chat re-score complete', { scored, failed, total: conversations.length });
+
+    res.json({
+      success: true,
+      message: `Re-scored ${scored} chat conversations`,
+      scored,
+      failed,
+      total: conversations.length,
+      results
+    });
+
+  } catch (error) {
+    logger.error('Bulk chat re-score error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to re-score chat conversations'
     });
   }
 });
