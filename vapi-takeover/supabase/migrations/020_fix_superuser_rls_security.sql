@@ -278,6 +278,12 @@ CREATE POLICY "org_admin_manage_own"
   USING (org_id = current_user_org_id())
   WITH CHECK (org_id = current_user_org_id());
 
+-- Allow anonymous access to pilot-enabled assistants (for public demo pages)
+CREATE POLICY "anon_view_pilot_assistants"
+  ON assistants FOR SELECT
+  TO anon
+  USING (pilot_enabled = true AND active = true);
+
 -- Update conversations policies
 DROP POLICY IF EXISTS "super_admin_all" ON conversations;
 DROP POLICY IF EXISTS "org_admin_own_org" ON conversations;
