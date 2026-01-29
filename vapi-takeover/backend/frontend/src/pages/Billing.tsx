@@ -174,10 +174,12 @@ export default function Billing() {
 
       const { data: orgsData } = await orgsQuery;
 
-      // Fetch voice conversations with transfer tracking
+      // Fetch voice conversations ONLY (exclude chat sessions stored in conversations table)
+      // Include channel='voice' OR channel IS NULL (backward compatibility for older records)
       let voiceQuery = supabase
         .from("conversations")
-        .select("org_id, duration_seconds, ai_duration_seconds, post_transfer_seconds, escalation")
+        .select("org_id, duration_seconds, ai_duration_seconds, post_transfer_seconds, escalation, channel")
+        .or("channel.eq.voice,channel.is.null")  // Only count voice calls (or null for backward compat), not chat sessions
         .gte("created_at", startDate.toISOString())
         .lte("created_at", endDate.toISOString());
 
@@ -223,6 +225,11 @@ export default function Billing() {
       let skippedBadData = 0;
 
       voiceData?.forEach(conv => {
+        // Skip conversations without org_id
+        if (!conv.org_id) {
+          return;
+        }
+
         // Skip conversations with obviously bad data (null, 0, or > 1 hour)
         const rawDuration = conv.duration_seconds || 0;
         if (rawDuration <= 0 || rawDuration > MAX_CALL_SECONDS) {
@@ -252,6 +259,15 @@ export default function Billing() {
         if (conv.escalation) {
           totalTransferredCalls++;
         }
+      });
+
+      // Debug: log voice data summary
+      console.log('Billing: Voice data summary', {
+        totalRecords: voiceData?.length || 0,
+        skippedBadData,
+        totalVoiceMinutes: totalVoiceMinutes.toFixed(2),
+        totalAiMinutes: totalAiMinutes.toFixed(2),
+        orgsWithVoice: Object.keys(voiceByOrg).length
       });
 
       // Log if we skipped bad data (for debugging)
@@ -309,6 +325,15 @@ export default function Billing() {
 
       // Fully loaded cost per minute
       const fullyLoaded = calculateFullyLoadedVoiceCost(totalVoiceMinutes, phoneNumbers);
+
+      // Debug: log org and chat data
+      console.log('Billing: Data summary', {
+        organizations: orgsData?.length || 0,
+        chatRecords: chatData?.length || 0,
+        totalChatInteractions,
+        voiceByOrgKeys: Object.keys(voiceByOrg),
+        chatByOrgKeys: Object.keys(chatByOrg)
+      });
 
       // Build org breakdown
       const organizations: OrgBilling[] = (orgsData || []).map(org => {
@@ -490,7 +515,7 @@ export default function Billing() {
             </CardContent>
           </Card>
 
-          {/* Total Costs */}
+          {/* Total Costs - includes ElevenLabs overage when applicable */}
           <Card className="bg-gradient-to-br from-red-500/10 to-orange-500/10 border-red-500/20">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Total Costs</CardTitle>
@@ -498,13 +523,29 @@ export default function Billing() {
             </CardHeader>
             <CardContent>
               {isLoading ? <Skeleton className="h-8 w-24" /> : (
-                <div className="text-2xl font-bold text-red-600">{formatAUD(billingData?.totalCostAUD || 0)}</div>
+                (() => {
+                  // Calculate ElevenLabs overage cost when over included minutes
+                  const elevenLabsOverageMinutes = elevenLabsUsage?.isOverLimit
+                    ? Math.max(0, (elevenLabsUsage?.minutesUsed || 0) - (elevenLabsUsage?.minutesIncluded || 200))
+                    : 0;
+                  const elevenLabsOverageCostAUD = usdToAud(elevenLabsOverageMinutes * ELEVENLABS_PRICING.flashOveragePerMinuteUSD);
+                  const totalWithOverage = (billingData?.totalCostAUD || 0) + elevenLabsOverageCostAUD;
+
+                  return (
+                    <div className="text-2xl font-bold text-red-600">
+                      {formatAUD(totalWithOverage)}
+                      {elevenLabsOverageMinutes > 0 && (
+                        <span className="text-xs font-normal ml-1">(+overage)</span>
+                      )}
+                    </div>
+                  );
+                })()
               )}
-              <p className="text-xs text-muted-foreground">Variable + Fixed</p>
+              <p className="text-xs text-muted-foreground">Variable + Fixed{elevenLabsUsage?.isOverLimit ? ' + TTS Overage' : ''}</p>
             </CardContent>
           </Card>
 
-          {/* Gross Profit */}
+          {/* Gross Profit - accounts for ElevenLabs overage */}
           <Card className="bg-gradient-to-br from-blue-500/10 to-cyan-500/10 border-blue-500/20">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Gross Profit</CardTitle>
@@ -512,11 +553,26 @@ export default function Billing() {
             </CardHeader>
             <CardContent>
               {isLoading ? <Skeleton className="h-8 w-24" /> : (
-                <div className={`text-2xl font-bold ${(billingData?.grossProfit || 0) >= 0 ? 'text-blue-600' : 'text-red-600'}`}>
-                  {formatAUD(billingData?.grossProfit || 0)}
-                </div>
+                (() => {
+                  // Calculate ElevenLabs overage cost when over included minutes
+                  const elevenLabsOverageMinutes = elevenLabsUsage?.isOverLimit
+                    ? Math.max(0, (elevenLabsUsage?.minutesUsed || 0) - (elevenLabsUsage?.minutesIncluded || 200))
+                    : 0;
+                  const elevenLabsOverageCostAUD = usdToAud(elevenLabsOverageMinutes * ELEVENLABS_PRICING.flashOveragePerMinuteUSD);
+                  const adjustedProfit = (billingData?.grossProfit || 0) - elevenLabsOverageCostAUD;
+                  const revenue = billingData?.totalRevenue || 0;
+                  const adjustedMargin = revenue > 0 ? (adjustedProfit / revenue) * 100 : 0;
+
+                  return (
+                    <>
+                      <div className={`text-2xl font-bold ${adjustedProfit >= 0 ? 'text-blue-600' : 'text-red-600'}`}>
+                        {formatAUD(adjustedProfit)}
+                      </div>
+                      <p className="text-xs text-muted-foreground">{adjustedMargin.toFixed(1)}% margin</p>
+                    </>
+                  );
+                })()
               )}
-              <p className="text-xs text-muted-foreground">{(billingData?.grossMargin || 0).toFixed(1)}% margin</p>
             </CardContent>
           </Card>
 
@@ -569,7 +625,7 @@ export default function Billing() {
                           </div>
                           <div>
                             <p className="font-medium">Voice AI Minutes</p>
-                            <p className="text-sm text-muted-foreground">${VOICE_AI_COSTS_PER_MINUTE.total}/min USD</p>
+                            <p className="text-sm text-muted-foreground">${usdToAud(VOICE_AI_COSTS_PER_MINUTE.total).toFixed(3)}/min AUD</p>
                           </div>
                         </div>
                         <div className="text-right">
@@ -588,7 +644,7 @@ export default function Billing() {
                             <div>
                               <p className="font-medium">Human Transfer Minutes</p>
                               <p className="text-sm text-muted-foreground">
-                                ${POST_TRANSFER_COSTS_PER_MINUTE.total}/min USD • {billingData?.transferredCalls || 0} transfers
+                                ${usdToAud(POST_TRANSFER_COSTS_PER_MINUTE.total).toFixed(3)}/min AUD • {billingData?.transferredCalls || 0} transfers
                               </p>
                             </div>
                           </div>
@@ -606,7 +662,7 @@ export default function Billing() {
                           </div>
                           <div>
                             <p className="font-medium">Chat Interactions</p>
-                            <p className="text-sm text-muted-foreground">${CHAT_COSTS_PER_INTERACTION.total}/chat USD</p>
+                            <p className="text-sm text-muted-foreground">${usdToAud(CHAT_COSTS_PER_INTERACTION.total).toFixed(3)}/chat AUD</p>
                           </div>
                         </div>
                         <div className="text-right">
@@ -622,7 +678,7 @@ export default function Billing() {
                           </div>
                           <div>
                             <p className="font-medium">SMS Messages</p>
-                            <p className="text-sm text-muted-foreground">${SMS_COSTS_PER_MESSAGE.total}/SMS USD</p>
+                            <p className="text-sm text-muted-foreground">${usdToAud(SMS_COSTS_PER_MESSAGE.total).toFixed(3)}/SMS AUD</p>
                           </div>
                         </div>
                         <div className="text-right">
