@@ -174,10 +174,11 @@ export default function Billing() {
 
       const { data: orgsData } = await orgsQuery;
 
-      // Fetch voice conversations with transfer tracking
+      // Fetch voice conversations ONLY (exclude chat sessions stored in conversations table)
       let voiceQuery = supabase
         .from("conversations")
-        .select("org_id, duration_seconds, ai_duration_seconds, post_transfer_seconds, escalation")
+        .select("org_id, duration_seconds, ai_duration_seconds, post_transfer_seconds, escalation, channel")
+        .eq("channel", "voice")  // Only count voice calls, not chat sessions
         .gte("created_at", startDate.toISOString())
         .lte("created_at", endDate.toISOString());
 
