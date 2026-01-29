@@ -1365,10 +1365,9 @@ router.post('/chat-conversations/rescore', async (req, res) => {
     });
 
     // Get chat conversations to score (note: org_id comes from assistant, not directly on chat_conversations)
-    // Include transcript field as fallback if conversation_messages is empty
     let query = supabaseService.client
       .from('chat_conversations')
-      .select('id, session_id, assistant_id, transcript')
+      .select('id, assistant_id, transcript')
       .order('created_at', { ascending: false });
 
     if (conversation_ids && conversation_ids.length > 0) {
