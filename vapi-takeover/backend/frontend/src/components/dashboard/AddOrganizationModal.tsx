@@ -27,6 +27,8 @@ export function AddOrganizationModal({ open, onOpenChange, onSuccess }: AddOrgan
     userEmail: "",
     servicePlanName: "",
     monthlyServiceFee: 0,
+    includedInteractions: 0,
+    overageRatePer1000: 0,
     baselineHumanCostPerCall: 0,
     timeZone: "",
   });
@@ -45,6 +47,8 @@ export function AddOrganizationModal({ open, onOpenChange, onSuccess }: AddOrgan
     userEmail: "",
     servicePlanName: "",
     monthlyServiceFee: 0,
+    includedInteractions: 0,
+    overageRatePer1000: 0,
     baselineHumanCostPerCall: 0,
     timeZone: "",
   });
@@ -223,15 +227,47 @@ export function AddOrganizationModal({ open, onOpenChange, onSuccess }: AddOrgan
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="monthlyServiceFee">Monthly Service Fee ($)</Label>
+                <Label htmlFor="monthlyServiceFee">Monthly Service Fee ($ AUD)</Label>
                 <Input
                   id="monthlyServiceFee"
                   type="number"
                   step="0.01"
                   min="0"
-                  placeholder="0.00"
+                  placeholder="500.00"
                   value={formData.monthlyServiceFee || ""}
                   onChange={(e) => handleInputChange("monthlyServiceFee", parseFloat(e.target.value) || 0)}
+                  disabled={isLoading}
+                  className="w-full"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="includedInteractions">Included Interactions</Label>
+                <Input
+                  id="includedInteractions"
+                  type="number"
+                  step="1"
+                  min="0"
+                  placeholder="5000"
+                  value={formData.includedInteractions || ""}
+                  onChange={(e) => handleInputChange("includedInteractions", parseInt(e.target.value) || 0)}
+                  disabled={isLoading}
+                  className="w-full"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="overageRatePer1000">Overage Rate per 1000 ($ AUD)</Label>
+                <Input
+                  id="overageRatePer1000"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  placeholder="50.00"
+                  value={formData.overageRatePer1000 || ""}
+                  onChange={(e) => handleInputChange("overageRatePer1000", parseFloat(e.target.value) || 0)}
                   disabled={isLoading}
                   className="w-full"
                 />

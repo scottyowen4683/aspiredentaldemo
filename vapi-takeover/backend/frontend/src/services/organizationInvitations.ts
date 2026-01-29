@@ -6,6 +6,8 @@ export interface CreateOrganizationData {
   // Service Plan Information (optional)
   servicePlanName?: string;
   monthlyServiceFee?: number;
+  includedInteractions?: number;
+  overageRatePer1000?: number;
   baselineHumanCostPerCall?: number;
   timeZone?: string;
 }
@@ -47,6 +49,8 @@ export async function createOrganizationAndInvite(data: CreateOrganizationData):
     // Add optional fields if provided
     if (data.servicePlanName) orgInsert.service_plan_name = data.servicePlanName;
     if (data.monthlyServiceFee) orgInsert.flat_rate_fee = data.monthlyServiceFee;
+    if (data.includedInteractions) orgInsert.included_interactions = data.includedInteractions;
+    if (data.overageRatePer1000) orgInsert.overage_rate_per_1000 = data.overageRatePer1000;
     if (data.baselineHumanCostPerCall) orgInsert.price_per_interaction = data.baselineHumanCostPerCall;
     if (data.timeZone) orgInsert.time_zone = data.timeZone;
 
