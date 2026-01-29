@@ -36,6 +36,7 @@ import Settings from "./pages/Settings";
 import Billing from "./pages/Billing";
 import Pilot from "./pages/Pilot";
 import Index from "./pages/Index";
+import Integrations from "./pages/Integrations";
 
 // Marketing Pages (from premium-redesign)
 import MarketingLayout from "./pages/marketing/MarketingLayout";
@@ -295,6 +296,14 @@ const App = () => {
                 element={
                   <ProtectedRoute allowedRoles={["super_admin"]}>
                     <Billing />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/integrations"
+                element={
+                  <ProtectedRoute allowedRoles={["super_admin"]}>
+                    <Integrations />
                   </ProtectedRoute>
                 }
               />
