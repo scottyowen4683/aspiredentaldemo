@@ -189,7 +189,20 @@ export default function Billing() {
         voiceQuery = voiceQuery.eq("org_id", selectedOrg);
       }
 
-      const { data: voiceData } = await voiceQuery;
+      const { data: voiceData, error: voiceError } = await voiceQuery;
+
+      // Debug: log query details and raw results
+      console.log('Billing: Voice query debug', {
+        dateRange: { start: startDate.toISOString(), end: endDate.toISOString() },
+        recordsReturned: voiceData?.length || 0,
+        error: voiceError?.message || null,
+        firstFewRecords: voiceData?.slice(0, 5).map(v => ({
+          org_id: v.org_id,
+          channel: v.channel,
+          duration_seconds: v.duration_seconds,
+          ai_duration_seconds: v.ai_duration_seconds
+        }))
+      });
 
       // Fetch chat conversations
       let chatQuery = supabase
